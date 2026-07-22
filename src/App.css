@@ -14,16 +14,14 @@ body {
   background-image: url('/1784460904562.png');
   background-size: cover;
   background-position: center;
-  padding: 30px 16px 24px;
+  padding: 180px 16px 30px;
   text-align: center;
   border-bottom: 2px solid #C9A24B;
+
 }
 .banner .logo {
-  width: 110px;
-  height: 110px;
-  border-radius: 50%;
-  object-fit: cover;
-  box-shadow: 0 3px 10px rgba(0,0,0,0.15);
+  display: none;
+
 }
 .banner .tagline {
   font-family: 'Playfair Display', serif;
