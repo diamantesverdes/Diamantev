@@ -252,3 +252,12 @@ body {
   background: transparent; cursor: pointer; font-size: 0.8rem;
 }
 .admin-item-actions button.danger { border-color: #b03434; color: #b03434; }
+.file-label {
+  display: inline-block;
+  padding: 6px 14px;
+  background: #1F3D2B;
+  color: #fff;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
