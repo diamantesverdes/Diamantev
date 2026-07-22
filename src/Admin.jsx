@@ -157,7 +157,14 @@ async function updateCategoryName(catId, name) {
             <input placeholder="Precio" type="number" step="0.01" value={form.price} onChange={e => setForm({ ...form, price: e.target.value })} />
             <input placeholder="Cantidad en stock" type="number" value={form.stock} onChange={e => setForm({ ...form, stock: e.target.value })} />
             <input placeholder="Color" value={form.color} onChange={e => setForm({ ...form, color: e.target.value })} />
-            <input type="file" accept="image/*" onChange={e => setForm({ ...form, file: e.target.files[0] })} />
+            <label className="file-label" htmlFor={`cat-file-${c.id}`}>📷 Cambiar foto</label>
+                <input
+                  id={`cat-file-${c.id}`}
+                  type="file"
+                  accept="image/*"
+                  style={{ display: 'none' }}
+                  onChange={e => uploadCategoryImage(c.id, e.target.files[0])}
+                />
             <button type="submit" disabled={saving}>{saving ? 'Guardando...' : 'Agregar planta'}</button>
           </form>
 
@@ -199,7 +206,7 @@ async function updateCategoryName(catId, name) {
             <div key={c.id} className="admin-item">
               {c.image_url ? <img src={c.image_url} alt={c.name} /> : <div className="no-img-sm">{c.emoji}</div>}
              <div className="admin-item-info">
-                <input defaultValue={c.name} onBlur={e => updateCategoryName(c.id, e.target.value)} style={{ fontWeight: 'bold', fontSize: '1rem' }} />
+                <input defaultValue={c.name} onBlur={e => updateCategoryName(c.id, e.target.value)} style={{ fontWeight: 'bold', fontSize: '1rem', width: '100%', boxSizing: 'border-box' }} />
                 <label>Emoji: <input defaultValue={c.emoji} onBlur={e => updateCategoryEmoji(c.id, e.target.value)} style={{ width: 50 }} /></label>
                 <input type="file" accept="image/*" onChange={e => uploadCategoryImage(c.id, e.target.files[0])} />
               </div>
