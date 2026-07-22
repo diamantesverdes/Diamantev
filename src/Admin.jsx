@@ -118,23 +118,13 @@ async function updateCategoryName(catId, name) {
     return (
       <div className="admin-login">
         <h2>Panel de administrador</h2>
-        <div style={{ position: 'relative' }}>
-          <input
-            type={showPass ? 'text' : 'password'}
-            placeholder="Clave de acceso"
-            value={pass}
-            onChange={e => setPass(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && (pass === ADMIN_KEY ? setAuthed(true) : setFailed(true))}
-            style={{ paddingRight: 40 }}
-          />
-          <button
-            type="button"
-            onClick={() => setShowPass(!showPass)}
-            style={{ position: 'absolute', right: 8, top: 8, background: 'none', border: 'none', cursor: 'pointer' }}
-          >
-            {showPass ? '🙈' : '👁️'}
-          </button>
-        </div>
+        <input
+          type="text"
+          placeholder="Clave de acceso"
+          value={pass}
+          onChange={e => setPass(e.target.value)}
+          onKeyDown={e => e.key === 'Enter' && (pass === ADMIN_KEY ? setAuthed(true) : setFailed(true))}
+        />
         <button onClick={() => pass === ADMIN_KEY ? setAuthed(true) : setFailed(true)}>Entrar</button>
         {failed && (
           <p style={{ color: '#b03434', fontSize: '0.85rem', marginTop: 10 }}>
