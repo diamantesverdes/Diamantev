@@ -4,7 +4,7 @@ import { supabase } from './supabaseClient'
 const WHATSAPP_NUMBER = '593992734743'
 
 export default function App() {
-  const [view, setView] = useState('categories') // 'categories' | 'plants'
+  const [view, setView] = useState('categories')
   const [plants, setPlants] = useState([])
   const [categories, setCategories] = useState([])
   const [selectedCategory, setSelectedCategory] = useState(null)
@@ -15,9 +15,7 @@ export default function App() {
   const [customerPhone, setCustomerPhone] = useState('')
   const [sending, setSending] = useState(false)
 
-  useEffect(() => {
-    loadData()
-  }, [])
+  useEffect(() => { loadData() }, [])
 
   async function loadData() {
     setLoading(true)
@@ -68,32 +66,24 @@ export default function App() {
       return
     }
     if (cart.length === 0) return
-
     setSending(true)
     const { data: order, error } = await supabase
       .from('orders')
       .insert({ customer_name: customerName, customer_phone: customerPhone, total })
       .select()
       .single()
-
     if (error) {
       alert('Hubo un error al registrar el pedido. Intenta de nuevo.')
       setSending(false)
       return
     }
-
     const items = cart.map(i => ({
-      order_id: order.id,
-      plant_id: i.id,
-      quantity: i.quantity,
-      unit_price: i.price,
+      order_id: order.id, plant_id: i.id, quantity: i.quantity, unit_price: i.price,
     }))
     await supabase.from('order_items').insert(items)
-
     const lines = cart.map(i => `- ${i.name} x${i.quantity} ($${(i.price * i.quantity).toFixed(2)})`).join('%0A')
     const message = `Hola, quiero confirmar mi pedido en Jardín Diamantev:%0A%0A${lines}%0A%0ATotal: $${total.toFixed(2)}%0ANombre: ${customerName}%0ATeléfono: ${customerPhone}`
     window.open(`https://wa.me/${WHATSAPP_NUMBER}?text=${message}`, '_blank')
-
     setCart([])
     setCustomerName('')
     setCustomerPhone('')
@@ -105,9 +95,9 @@ export default function App() {
   return (
     <div className="app">
       <div className="banner">
-        <div className="banner-pattern">🌿 🌸 🌵 🌺 🌿 🌸 🌵 🌺 🌿 🌸 🌵 🌺</div>
-        <h1>Jardín Diamantev</h1>
-        <div className="banner-pattern">🌺 🌵 🌸 🌿 🌺 🌵 🌸 🌿 🌺 🌵 🌸 🌿</div>
+        <img src="/public/1784570963668.png" alt="Diamantev" className="logo" />
+        <p className="tagline">Joyas Vivas</p>
+        <p className="welcome">Bienvenidos a nuestro jardín, donde cada planta es una joya viva.</p>
       </div>
 
       <button className="cart-fab" onClick={() => setShowCart(true)}>
@@ -116,7 +106,10 @@ export default function App() {
 
       {view === 'categories' ? (
         <>
-          <div className="section-title"><span>Categorías</span></div>
+          <div className="section-title">
+            <span className="section-script">Nuestras categorías</span>
+            <p className="section-sub">Explora nuestra colección de joyas vivas</p>
+          </div>
           {loading ? (
             <p className="status-msg">Cargando...</p>
           ) : (
@@ -128,9 +121,7 @@ export default function App() {
               {categories.map(cat => (
                 <div key={cat.id} className="cat-row" onClick={() => openCategory(cat)}>
                   <div className="cat-thumb">
-                    {cat.image_url
-                      ? <img src={cat.image_url} alt={cat.name} />
-                      : <span>{cat.emoji || '🌿'}</span>}
+                    {cat.image_url ? <img src={cat.image_url} alt={cat.name} /> : <span>{cat.emoji || '🌿'}</span>}
                   </div>
                   <div className="cat-label"><span>{cat.emoji || '🌿'} {cat.name}</span></div>
                 </div>
@@ -142,7 +133,6 @@ export default function App() {
         <>
           <button className="back-btn" onClick={backToCategories}>← Volver a categorías</button>
           <h2 className="plants-title">{selectedCategory ? `${selectedCategory.emoji || ''} ${selectedCategory.name}` : 'Todas las plantas'}</h2>
-
           {filteredPlants.length === 0 ? (
             <p className="status-msg">Todavía no hay plantas en esta categoría.</p>
           ) : (
@@ -150,9 +140,8 @@ export default function App() {
               {filteredPlants.map(plant => (
                 <div key={plant.id} className="card">
                   <div className="card-img">
-                    {plant.image_url
-                      ? <img src={plant.image_url} alt={plant.name} />
-                      : <div className="no-img">Sin foto</div>}
+                    {plant.image_url ? <img src={plant.image_url} alt={plant.name} /> : <div className="no-img">Sin foto</div>}
+                    <img src="/public/1784460904562.png" alt="" className="watermark" />
                   </div>
                   <div className="card-body">
                     <h3>{plant.name}</h3>
@@ -160,11 +149,7 @@ export default function App() {
                     <p className={plant.stock > 0 ? 'stock' : 'stock out'}>
                       {plant.stock > 0 ? `${plant.stock} disponibles` : 'Agotado'}
                     </p>
-                    <button
-                      className="add-btn"
-                      disabled={plant.stock <= 0}
-                      onClick={() => addToCart(plant)}
-                    >
+                    <button className="add-btn" disabled={plant.stock <= 0} onClick={() => addToCart(plant)}>
                       Agregar al carrito
                     </button>
                   </div>
@@ -198,16 +183,8 @@ export default function App() {
                   </div>
                 ))}
                 <p className="cart-total">Total: ${total.toFixed(2)}</p>
-                <input
-                  placeholder="Tu nombre"
-                  value={customerName}
-                  onChange={e => setCustomerName(e.target.value)}
-                />
-                <input
-                  placeholder="Tu teléfono"
-                  value={customerPhone}
-                  onChange={e => setCustomerPhone(e.target.value)}
-                />
+                <input placeholder="Tu nombre" value={customerName} onChange={e => setCustomerName(e.target.value)} />
+                <input placeholder="Tu teléfono" value={customerPhone} onChange={e => setCustomerPhone(e.target.value)} />
                 <button className="checkout-btn" onClick={sendOrder} disabled={sending}>
                   {sending ? 'Enviando...' : 'Confirmar pedido por WhatsApp'}
                 </button>
