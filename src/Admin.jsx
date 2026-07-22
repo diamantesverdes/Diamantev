@@ -99,7 +99,17 @@ export default function Admin() {
     await supabase.from('categories').update({ emoji }).eq('id', catId)
     loadData()
   }
+const [newCatName, setNewCatName] = useState('')
+  const [newCatEmoji, setNewCatEmoji] = useState('🌿')
 
+  async function addCategory(e) {
+    e.preventDefault()
+    if (!newCatName.trim()) return
+    await supabase.from('categories').insert({ name: newCatName, emoji: newCatEmoji })
+    setNewCatName('')
+    setNewCatEmoji('🌿')
+    loadData()
+  }
   if (!authed) {
     return (
       <div className="admin-login">
@@ -168,6 +178,13 @@ export default function Admin() {
       )}
 
       {tab === 'categories' && (
+        <>
+        <form className="admin-form" onSubmit={addCategory}>
+          <h3>Agregar categoría nueva</h3>
+          <input placeholder="Nombre de la categoría" value={newCatName} onChange={e => setNewCatName(e.target.value)} />
+          <input placeholder="Emoji (ej: 🌷)" value={newCatEmoji} onChange={e => setNewCatEmoji(e.target.value)} />
+          <button type="submit">Agregar categoría</button>
+        </form>
         <div className="admin-list">
           {categories.map(c => (
             <div key={c.id} className="admin-item">
@@ -180,7 +197,9 @@ export default function Admin() {
             </div>
           ))}
         </div>
+        </>
       )}
+    
     </div>
   )
 }
