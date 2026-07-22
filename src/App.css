@@ -10,10 +10,13 @@ body {
 .app { max-width: 700px; margin: 0 auto; padding-bottom: 40px; position: relative; }
 
 .banner {
-  background: linear-gradient(180deg, #fdf6f0, #f3ecdd);
-  padding: 24px 16px 20px;
+  background-image: url('/1784458782001.png');
+  background-size: cover;
+  background-position: center;
+  padding: 30px 16px 24px;
   text-align: center;
   border-bottom: 2px solid #C9A24B;
+}
 }
 .banner .logo {
   width: 110px;
