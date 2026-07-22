@@ -27,10 +27,7 @@ export default function Admin() {
     setLoading(false)
   }
 
-  function checkPass() {
-    if (pass === ADMIN_KEY) setAuthed(true)
-    else alert('Clave incorrecta')
-  }
+  
 
   async function uploadImage(file) {
     const ext = file.name.split('.').pop()
@@ -114,18 +111,36 @@ async function updateCategoryName(catId, name) {
     setNewCatEmoji('🌿')
     loadData()
   }
+  const [showPass, setShowPass] = useState(false)
+  const [failed, setFailed] = useState(false)
+
   if (!authed) {
     return (
       <div className="admin-login">
         <h2>Panel de administrador</h2>
-        <input
-          type="password"
-          placeholder="Clave de acceso"
-          value={pass}
-          onChange={e => setPass(e.target.value)}
-          onKeyDown={e => e.key === 'Enter' && checkPass()}
-        />
-        <button onClick={checkPass}>Entrar</button>
+        <div style={{ position: 'relative' }}>
+          <input
+            type={showPass ? 'text' : 'password'}
+            placeholder="Clave de acceso"
+            value={pass}
+            onChange={e => setPass(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && (pass === ADMIN_KEY ? setAuthed(true) : setFailed(true))}
+            style={{ paddingRight: 40 }}
+          />
+          <button
+            type="button"
+            onClick={() => setShowPass(!showPass)}
+            style={{ position: 'absolute', right: 8, top: 8, background: 'none', border: 'none', cursor: 'pointer' }}
+          >
+            {showPass ? '🙈' : '👁️'}
+          </button>
+        </div>
+        <button onClick={() => pass === ADMIN_KEY ? setAuthed(true) : setFailed(true)}>Entrar</button>
+        {failed && (
+          <p style={{ color: '#b03434', fontSize: '0.85rem', marginTop: 10 }}>
+            Clave incorrecta. Si la olvidaste, revísala en Vercel → Settings → Environment Variables → VITE_ADMIN_KEY.
+          </p>
+        )}
       </div>
     )
   }
