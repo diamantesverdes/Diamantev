@@ -96,7 +96,7 @@ export default function App() {
     <div className="app">
       <div className="banner">
         <img src="/public/1784570963668.png" alt="Diamantev" className="logo" />
-        <p className="tagline">Joyas Vivas</p>
+        
         <p className="welcome">Bienvenidos a nuestro jardín, donde cada planta es una joya viva.</p>
       </div>
 
