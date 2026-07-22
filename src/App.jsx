@@ -108,7 +108,7 @@ export default function App() {
         <>
           <div className="section-title">
             <span className="section-script">Nuestras categorías</span>
-            <p className="section-sub">Explora nuestra colección de joyas vivas</p>
+            <p className="section-sub">Encuentra la planta perfecta para tu hogar</p>
           </div>
           {loading ? (
             <p className="status-msg">Cargando...</p>
