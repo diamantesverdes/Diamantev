@@ -99,7 +99,11 @@ export default function Admin() {
     await supabase.from('categories').update({ emoji }).eq('id', catId)
     loadData()
   }
-const [newCatName, setNewCatName] = useState('')
+async function updateCategoryName(catId, name) {
+    if (!name.trim()) return
+    await supabase.from('categories').update({ name }).eq('id', catId)
+    loadData()
+  }const [newCatName, setNewCatName] = useState('')
   const [newCatEmoji, setNewCatEmoji] = useState('🌿')
 
   async function addCategory(e) {
@@ -189,9 +193,9 @@ const [newCatName, setNewCatName] = useState('')
           {categories.map(c => (
             <div key={c.id} className="admin-item">
               {c.image_url ? <img src={c.image_url} alt={c.name} /> : <div className="no-img-sm">{c.emoji}</div>}
-              <div className="admin-item-info">
-                <strong>{c.name}</strong>
-                <label>Emoji: <input defaultValue={c.emoji} onBlur={e => updateCategoryEmoji(c.id, e.target.value)} style={{ width: 50 }} /></label>
+             <div className="admin-item-info">
+                <input defaultValue={c.name} onBlur={e => updateCategoryName(c.id, e.target.value)} style={{ fontWeight: 'bold', fontSize: '1rem' }} />
+                <label>Emoji: <input defaultValue={c.emoji} onBlur={e => updateCategoryEmoji(c.id, e.target.value)} style={{ width: 50 }} /></label> {c.emoji} onBlur={e => updateCategoryEmoji(c.id, e.target.value)} style={{ width: 50 }} /></label>
                 <input type="file" accept="image/*" onChange={e => uploadCategoryImage(c.id, e.target.files[0])} />
               </div>
             </div>
