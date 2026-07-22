@@ -157,14 +157,7 @@ async function updateCategoryName(catId, name) {
             <input placeholder="Precio" type="number" step="0.01" value={form.price} onChange={e => setForm({ ...form, price: e.target.value })} />
             <input placeholder="Cantidad en stock" type="number" value={form.stock} onChange={e => setForm({ ...form, stock: e.target.value })} />
             <input placeholder="Color" value={form.color} onChange={e => setForm({ ...form, color: e.target.value })} />
-            <label className="file-label" htmlFor={`cat-file-${c.id}`}>📷 Cambiar foto</label>
-                <input
-                  id={`cat-file-${c.id}`}
-                  type="file"
-                  accept="image/*"
-                  style={{ display: 'none' }}
-                  onChange={e => uploadCategoryImage(c.id, e.target.files[0])}
-                />
+            <input type="file" accept="image/*" onChange={e => setForm({ ...form, file: e.target.files[0] })} />
             <button type="submit" disabled={saving}>{saving ? 'Guardando...' : 'Agregar planta'}</button>
           </form>
 
