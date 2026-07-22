@@ -17,7 +17,6 @@ body {
   text-align: center;
   border-bottom: 2px solid #C9A24B;
 }
-}
 .banner .logo {
   width: 110px;
   height: 110px;
@@ -191,6 +190,7 @@ body {
   font-weight: bold; cursor: pointer; font-family: inherit;
 }
 .checkout-btn:disabled { background: #ccc; }
+
 .admin-login {
   max-width: 320px;
   margin: 80px auto;
