@@ -191,3 +191,64 @@ body {
   font-weight: bold; cursor: pointer; font-family: inherit;
 }
 .checkout-btn:disabled { background: #ccc; }
+.admin-login {
+  max-width: 320px;
+  margin: 80px auto;
+  text-align: center;
+  padding: 20px;
+}
+.admin-login input {
+  width: 100%; padding: 10px; margin: 12px 0;
+  border: 1px solid #C9A24B; border-radius: 6px;
+}
+.admin-login button {
+  width: 100%; padding: 10px;
+  background: #1F3D2B; color: #fff;
+  border: none; border-radius: 6px; cursor: pointer;
+}
+
+.admin { max-width: 700px; margin: 0 auto; padding: 16px; }
+.admin h1 { color: #1F3D2B; font-size: 1.3rem; }
+
+.admin-tabs { display: flex; gap: 10px; margin: 16px 0; }
+.admin-tabs button {
+  padding: 8px 16px; border-radius: 20px;
+  border: 1px solid #1F3D2B; background: transparent;
+  cursor: pointer; font-family: inherit;
+}
+.admin-tabs button.active { background: #1F3D2B; color: #fff; }
+
+.admin-form {
+  background: #fff; border: 1px solid #e2d8bf; border-radius: 10px;
+  padding: 16px; margin-bottom: 24px;
+  display: flex; flex-direction: column; gap: 10px;
+}
+.admin-form input, .admin-form select, .admin-form textarea {
+  padding: 8px; border: 1px solid #C9A24B; border-radius: 6px; font-family: inherit;
+}
+.admin-form button {
+  padding: 10px; background: #1F3D2B; color: #fff;
+  border: none; border-radius: 6px; cursor: pointer;
+}
+
+.admin-list { display: flex; flex-direction: column; gap: 10px; }
+.admin-item {
+  display: flex; gap: 12px;
+  background: #fff; border: 1px solid #e2d8bf; border-radius: 10px; padding: 10px;
+}
+.admin-item.inactive { opacity: 0.5; }
+.admin-item img, .no-img-sm {
+  width: 64px; height: 64px; border-radius: 8px; object-fit: cover;
+  background: #eee3c9; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 0.7rem; color: #a89d7d;
+}
+.admin-item-info { flex: 1; display: flex; flex-direction: column; gap: 4px; font-size: 0.85rem; }
+.admin-item-controls { display: flex; gap: 12px; }
+.admin-item-controls input { width: 60px; padding: 4px; }
+.admin-item-actions { display: flex; gap: 8px; margin-top: 4px; }
+.admin-item-actions button {
+  padding: 4px 10px; border-radius: 6px; border: 1px solid #1F3D2B;
+  background: transparent; cursor: pointer; font-size: 0.8rem;
+}
+.admin-item-actions button.danger { border-color: #b03434; color: #b03434; }
