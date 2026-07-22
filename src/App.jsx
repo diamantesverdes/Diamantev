@@ -4,9 +4,10 @@ import { supabase } from './supabaseClient'
 const WHATSAPP_NUMBER = '593992734743'
 
 export default function App() {
+  const [view, setView] = useState('categories') // 'categories' | 'plants'
   const [plants, setPlants] = useState([])
   const [categories, setCategories] = useState([])
-  const [selectedCategory, setSelectedCategory] = useState('todas')
+  const [selectedCategory, setSelectedCategory] = useState(null)
   const [cart, setCart] = useState([])
   const [showCart, setShowCart] = useState(false)
   const [loading, setLoading] = useState(true)
@@ -27,9 +28,19 @@ export default function App() {
     setLoading(false)
   }
 
-  const filteredPlants = selectedCategory === 'todas'
-    ? plants
-    : plants.filter(p => p.category_id === selectedCategory)
+  function openCategory(cat) {
+    setSelectedCategory(cat)
+    setView('plants')
+  }
+
+  function backToCategories() {
+    setView('categories')
+    setSelectedCategory(null)
+  }
+
+  const filteredPlants = selectedCategory
+    ? plants.filter(p => p.category_id === selectedCategory.id)
+    : plants
 
   function addToCart(plant) {
     setCart(prev => {
@@ -93,61 +104,75 @@ export default function App() {
 
   return (
     <div className="app">
-      <header className="header">
+      <div className="banner">
+        <div className="banner-pattern">🌿 🌸 🌵 🌺 🌿 🌸 🌵 🌺 🌿 🌸 🌵 🌺</div>
         <h1>Jardín Diamantev</h1>
-        <button className="cart-btn" onClick={() => setShowCart(true)}>
-          🛒 {cart.length > 0 && <span className="cart-badge">{cart.reduce((s, i) => s + i.quantity, 0)}</span>}
-        </button>
-      </header>
-
-      <div className="categories">
-        <button
-          className={selectedCategory === 'todas' ? 'cat-btn active' : 'cat-btn'}
-          onClick={() => setSelectedCategory('todas')}
-        >
-          Todas
-        </button>
-        {categories.map(c => (
-          <button
-            key={c.id}
-            className={selectedCategory === c.id ? 'cat-btn active' : 'cat-btn'}
-            onClick={() => setSelectedCategory(c.id)}
-          >
-            {c.name}
-          </button>
-        ))}
+        <div className="banner-pattern">🌺 🌵 🌸 🌿 🌺 🌵 🌸 🌿 🌺 🌵 🌸 🌿</div>
       </div>
 
-      {loading ? (
-        <p className="status-msg">Cargando plantas...</p>
-      ) : filteredPlants.length === 0 ? (
-        <p className="status-msg">Todavía no hay plantas en esta categoría.</p>
-      ) : (
-        <div className="grid">
-          {filteredPlants.map(plant => (
-            <div key={plant.id} className="card">
-              <div className="card-img">
-                {plant.image_url
-                  ? <img src={plant.image_url} alt={plant.name} />
-                  : <div className="no-img">Sin foto</div>}
+      <button className="cart-fab" onClick={() => setShowCart(true)}>
+        🛒 {cart.length > 0 && <span className="cart-badge">{cart.reduce((s, i) => s + i.quantity, 0)}</span>}
+      </button>
+
+      {view === 'categories' ? (
+        <>
+          <div className="section-title"><span>Categorías</span></div>
+          {loading ? (
+            <p className="status-msg">Cargando...</p>
+          ) : (
+            <div className="cat-list">
+              <div className="cat-row" onClick={() => { setSelectedCategory(null); setView('plants') }}>
+                <div className="cat-thumb cat-thumb-all">🪴</div>
+                <div className="cat-label"><span>Ver todas las plantas</span></div>
               </div>
-              <div className="card-body">
-                <h3>{plant.name}</h3>
-                <p className="price">${Number(plant.price).toFixed(2)}</p>
-                <p className={plant.stock > 0 ? 'stock' : 'stock out'}>
-                  {plant.stock > 0 ? `${plant.stock} disponibles` : 'Agotado'}
-                </p>
-                <button
-                  className="add-btn"
-                  disabled={plant.stock <= 0}
-                  onClick={() => addToCart(plant)}
-                >
-                  Agregar al carrito
-                </button>
-              </div>
+              {categories.map(cat => (
+                <div key={cat.id} className="cat-row" onClick={() => openCategory(cat)}>
+                  <div className="cat-thumb">
+                    {cat.image_url
+                      ? <img src={cat.image_url} alt={cat.name} />
+                      : <span>{cat.emoji || '🌿'}</span>}
+                  </div>
+                  <div className="cat-label"><span>{cat.emoji || '🌿'} {cat.name}</span></div>
+                </div>
+              ))}
             </div>
-          ))}
-        </div>
+          )}
+        </>
+      ) : (
+        <>
+          <button className="back-btn" onClick={backToCategories}>← Volver a categorías</button>
+          <h2 className="plants-title">{selectedCategory ? `${selectedCategory.emoji || ''} ${selectedCategory.name}` : 'Todas las plantas'}</h2>
+
+          {filteredPlants.length === 0 ? (
+            <p className="status-msg">Todavía no hay plantas en esta categoría.</p>
+          ) : (
+            <div className="grid">
+              {filteredPlants.map(plant => (
+                <div key={plant.id} className="card">
+                  <div className="card-img">
+                    {plant.image_url
+                      ? <img src={plant.image_url} alt={plant.name} />
+                      : <div className="no-img">Sin foto</div>}
+                  </div>
+                  <div className="card-body">
+                    <h3>{plant.name}</h3>
+                    <p className="price">${Number(plant.price).toFixed(2)}</p>
+                    <p className={plant.stock > 0 ? 'stock' : 'stock out'}>
+                      {plant.stock > 0 ? `${plant.stock} disponibles` : 'Agotado'}
+                    </p>
+                    <button
+                      className="add-btn"
+                      disabled={plant.stock <= 0}
+                      onClick={() => addToCart(plant)}
+                    >
+                      Agregar al carrito
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </>
       )}
 
       {showCart && (
