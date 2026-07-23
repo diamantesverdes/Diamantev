@@ -1,0 +1,15 @@
+{
+  "name": "Jardín Diamantev",
+  "short_name": "Diamantev",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#F3ECDD",
+  "theme_color": "#1F3D2B",
+  "icons": [
+    {
+      "src": "/1784458782001.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
