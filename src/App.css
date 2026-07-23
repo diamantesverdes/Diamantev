@@ -259,7 +259,8 @@ body {
   border-radius: 6px;
   cursor: pointer;
   font-size: 0.85rem;
-  .admin-link {
+}
+.admin-link {
   position: absolute;
   top: 12px;
   right: 12px;
@@ -273,7 +274,6 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-}
 }
 .admin-link {
   position: absolute;
