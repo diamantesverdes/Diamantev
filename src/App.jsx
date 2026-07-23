@@ -83,6 +83,12 @@ export default function App() {
       order_id: order.id, plant_id: i.id, quantity: i.quantity, unit_price: i.price,
     }))
     await supabase.from('order_items').insert(items)
+    for (const item of cart) {
+      await supabase
+        .from('plants')
+        .update({ stock: item.stock - item.quantity })
+        .eq('id', item.id)
+    }
     const lines = cart.map(i => `- ${i.name} x${i.quantity} ($${(i.price * i.quantity).toFixed(2)})`).join('%0A')
     const message = `Hola, quiero confirmar mi pedido en Jardín Diamantev:%0A%0A${lines}%0A%0ATotal: $${total.toFixed(2)}%0ANombre: ${customerName}%0ATeléfono: ${customerPhone}`
     window.open(`https://wa.me/${WHATSAPP_NUMBER}?text=${message}`, '_blank')
