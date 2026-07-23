@@ -153,8 +153,11 @@ async function updateCategoryName(catId, name) {
 
   return (
     <div className="admin">
-      <h1>Panel de administrador — Diamantev</h1>
-
+      
+<div className="admin-header">
+        <h1>Panel de administrador — Diamantev</h1>
+        <a href="/" className="back-to-store">🌿 Ver tienda</a>
+      </div>
       <div className="admin-tabs">
         <button className={tab === 'plants' ? 'active' : ''} onClick={() => setTab('plants')}>Plantas</button>
         <button className={tab === 'categories' ? 'active' : ''} onClick={() => setTab('categories')}>Categorías</button>
