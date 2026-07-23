@@ -358,3 +358,15 @@ body {
   font-weight: bold;
   white-space: nowrap;
 }
+.order-badge {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: 12px;
+  font-size: 0.75rem;
+  font-weight: bold;
+  text-transform: capitalize;
+  width: fit-content;
+}
+.order-pedido { background: #f0d9a0; color: #6b4f00; }
+.order-pagado { background: #a8d5a8; color: #1F3D2B; }
+.order-entregado { background: #cfd8dc; color: #37474f; }
