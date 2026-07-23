@@ -304,3 +304,29 @@ body {
   85% { opacity: 1; transform: translate(-50%, 0); }
   100% { opacity: 0; transform: translate(-50%, -10px); }
 }
+.gallery-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+  gap: 10px;
+}
+.gallery-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  background: #fff;
+  border: 1px solid #e2d8bf;
+  border-radius: 8px;
+  padding: 6px;
+}
+.gallery-item img, .gallery-item .no-img-sm {
+  width: 100%;
+  aspect-ratio: 1;
+  object-fit: cover;
+  border-radius: 6px;
+  margin-bottom: 4px;
+}
+.gallery-item span {
+  font-size: 0.75rem;
+  color: #1F3D2B;
+}
