@@ -14,7 +14,7 @@ export default function App() {
   const [customerName, setCustomerName] = useState('')
   const [customerPhone, setCustomerPhone] = useState('')
   const [sending, setSending] = useState(false)
-
+  const [toast, setToast] = useState('')
   useEffect(() => { loadData() }, [])
 
   async function loadData() {
@@ -49,6 +49,8 @@ export default function App() {
       }
       return [...prev, { ...plant, quantity: 1 }]
     })
+    setToast(`✅ ${plant.name} añadida al carrito`)
+    setTimeout(() => setToast(''), 1800)
   }
 
   function changeQty(id, delta) {
@@ -100,6 +102,7 @@ export default function App() {
         <a href="/admin" className="admin-link" aria-label="Administrador">⚙️</a>
         <p className="welcome">Bienvenidos a nuestro jardín, donde cada planta es una joya viva.</p>
       </div>
+      {toast && <div className="toast">{toast}</div>}
       <button className="cart-fab" onClick={() => setShowCart(true)}>
         🛒 {cart.length > 0 && <span className="cart-badge">{cart.reduce((s, i) => s + i.quantity, 0)}</span>}
       </button>
