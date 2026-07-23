@@ -259,21 +259,32 @@ async function updateCategoryName(catId, name) {
       )}
     {tab === 'orders' && (
         <div className="admin-list">
-          {orders.filter(o => o.status === 'pendiente').length === 0 && (
-            <p className="status-msg">No hay pedidos pendientes.</p>
+          {orders.filter(o => o.status !== 'entregado').length === 0 && (
+            <p className="status-msg">No hay ventas en curso.</p>
           )}
-          {orders.filter(o => o.status === 'pendiente').map(o => (
+          {orders.filter(o => o.status !== 'entregado').map(o => (
             <div key={o.id} className="admin-item">
               <div className="admin-item-info">
                 <strong>{o.customer_name}</strong>
                 <span>{o.customer_phone}</span>
+                <span className={`order-badge order-${o.status}`}>{o.status}</span>
+                <span>Pedido: {new Date(o.created_at).toLocaleDateString()}</span>
                 {o.order_items.map(it => {
                   const plant = plants.find(p => p.id === it.plant_id)
                   return <span key={it.id}>{plant ? plant.name : 'Planta'} x{it.quantity}</span>
                 })}
                 <span>Total: ${Number(o.total).toFixed(2)}</span>
                 <div className="admin-item-actions">
-                  <button onClick={() => approveOrder(o)}>Aprobar y descontar stock</button>
+                  {o.status === 'pedido' && (
+                    <button onClick={() => markAsPaid(o)} disabled={approvingIds.includes(o.id)}>
+                      {approvingIds.includes(o.id) ? 'Procesando...' : 'Marcar como pagado'}
+                    </button>
+                  )}
+                  {o.status === 'pagado' && (
+                    <button onClick={() => markAsDelivered(o)} disabled={approvingIds.includes(o.id)}>
+                      {approvingIds.includes(o.id) ? 'Procesando...' : 'Marcar como entregado'}
+                    </button>
+                  )}
                 </div>
               </div>
             </div>
