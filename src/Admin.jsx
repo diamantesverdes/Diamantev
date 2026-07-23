@@ -269,7 +269,7 @@ async function updateCategoryName(catId, name) {
                 <span>{o.customer_phone}</span>
                 <span className={`order-badge order-${o.status}`}>{o.status}</span>
                 <span>Pedido: {new Date(o.created_at).toLocaleDateString()}</span>
-                {o.order_items.map(it => {
+                {(o.order_items || []).map(it => {
                   const plant = plants.find(p => p.id === it.plant_id)
                   return <span key={it.id}>{plant ? plant.name : 'Planta'} x{it.quantity}</span>
                 })}
