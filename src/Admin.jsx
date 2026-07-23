@@ -212,14 +212,12 @@ async function updateCategoryName(catId, name) {
       )}
     {tab === 'gallery' && (
         <>
-          <div className="gallery-filters">
-            <button className={galleryFilter === 'all' ? 'active' : ''} onClick={() => setGalleryFilter('all')}>Todas</button>
+          <select className="gallery-select" value={galleryFilter} onChange={e => setGalleryFilter(e.target.value)}>
+            <option value="all">Todas las categorías</option>
             {categories.map(c => (
-              <button key={c.id} className={galleryFilter === c.id ? 'active' : ''} onClick={() => setGalleryFilter(c.id)}>
-                {c.emoji} {c.name}
-              </button>
+              <option key={c.id} value={c.id}>{c.emoji} {c.name}</option>
             ))}
-          </div>
+          </select>
           <div className="gallery-grid">
             {plants
               .filter(p => galleryFilter === 'all' || p.category_id === galleryFilter)
