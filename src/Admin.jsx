@@ -52,7 +52,8 @@ export default function Admin() {
     if (order.status !== 'pagado' || approvingIds.includes(order.id)) return
     setApprovingIds(prev => [...prev, order.id])
     await supabase.from('orders').update({ status: 'entregado', fecha_entrega: new Date().toISOString() }).eq('id', order.id)
-    loadData()
+    await loadData()
+    setApprovingIds(prev => prev.filter(id => id !== order.id))
   }
 
   
