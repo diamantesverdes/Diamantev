@@ -1,4 +1,4 @@
-oimport { useState, useEffect } from 'react'
+import { useState, useEffect } from 'react'
 import { supabase } from './supabaseClient'
 
 const ADMIN_KEY = import.meta.env.VITE_ADMIN_KEY
