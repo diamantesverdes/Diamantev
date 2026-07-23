@@ -44,7 +44,8 @@ export default function Admin() {
         await supabase.from('plants').update({ stock: plant.stock - item.quantity }).eq('id', item.plant_id)
       }
     }
-    loadData()
+    await loadData()
+    setApprovingIds(prev => prev.filter(id => id !== order.id))
   }
 
   async function markAsDelivered(order) {
