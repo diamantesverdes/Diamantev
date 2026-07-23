@@ -7,6 +7,7 @@ export default function Admin() {
   const [authed, setAuthed] = useState(false)
   const [pass, setPass] = useState('')
   const [tab, setTab] = useState('plants')
+  const [galleryFilter, setGalleryFilter] = useState('all')
   const [plants, setPlants] = useState([])
   const [categories, setCategories] = useState([])
   const [loading, setLoading] = useState(true)
@@ -210,14 +211,26 @@ async function updateCategoryName(catId, name) {
         </>
       )}
     {tab === 'gallery' && (
-        <div className="gallery-grid">
-          {plants.map(p => (
-            <div key={p.id} className="gallery-item">
-              {p.image_url ? <img src={p.image_url} alt={p.name} /> : <div className="no-img-sm">Sin foto</div>}
-              <span>{p.name}</span>
-            </div>
-          ))}
-        </div>
+        <>
+          <div className="gallery-filters">
+            <button className={galleryFilter === 'all' ? 'active' : ''} onClick={() => setGalleryFilter('all')}>Todas</button>
+            {categories.map(c => (
+              <button key={c.id} className={galleryFilter === c.id ? 'active' : ''} onClick={() => setGalleryFilter(c.id)}>
+                {c.emoji} {c.name}
+              </button>
+            ))}
+          </div>
+          <div className="gallery-grid">
+            {plants
+              .filter(p => galleryFilter === 'all' || p.category_id === galleryFilter)
+              .map(p => (
+                <div key={p.id} className="gallery-item">
+                  {p.image_url ? <img src={p.image_url} alt={p.name} /> : <div className="no-img-sm">Sin foto</div>}
+                  <span>{p.name}</span>
+                </div>
+              ))}
+          </div>
+        </>
       )}
     </div>
   )
