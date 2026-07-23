@@ -94,12 +94,12 @@ export default function App() {
 
   return (
     <div className="app">
-      <div className="banner">
+      
+<div className="banner">
         <img src="/public/1784570963668.png" alt="Diamantev" className="logo" />
-        
+        <a href="/admin" className="admin-link" aria-label="Administrador">⚙️</a>
         <p className="welcome">Bienvenidos a nuestro jardín, donde cada planta es una joya viva.</p>
       </div>
-
       <button className="cart-fab" onClick={() => setShowCart(true)}>
         🛒 {cart.length > 0 && <span className="cart-badge">{cart.reduce((s, i) => s + i.quantity, 0)}</span>}
       </button>
