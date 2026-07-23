@@ -330,3 +330,22 @@ body {
   font-size: 0.75rem;
   color: #1F3D2B;
 }
+.gallery-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+.gallery-filters button {
+  padding: 6px 12px;
+  border-radius: 16px;
+  border: 1px solid #1F3D2B;
+  background: transparent;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.8rem;
+}
+.gallery-filters button.active {
+  background: #1F3D2B;
+  color: #fff;
+}
