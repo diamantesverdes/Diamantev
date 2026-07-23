@@ -12,6 +12,11 @@ export default function Admin() {
   const [approvingIds, setApprovingIds] = useState([])
   const [orderSearch, setOrderSearch] = useState('')
   const [orderStatusFilter, setOrderStatusFilter] = useState('all')
+  const [compras, setCompras] = useState([])
+  const [compraSearch, setCompraSearch] = useState('')
+  const [compraStatusFilter, setCompraStatusFilter] = useState('all')
+  const [compraForm, setCompraForm] = useState({ plant_id: '', quantity: '', unit_cost: '', proveedor: '' })
+  const [savingCompra, setSavingCompra] = useState(false)
   const [plants, setPlants] = useState([])
   const [categories, setCategories] = useState([])
   const [loading, setLoading] = useState(true)
@@ -28,10 +33,56 @@ export default function Admin() {
     const { data: cats } = await supabase.from('categories').select('*').order('name')
     const { data: pls } = await supabase.from('plants').select('*').order('name')
     const { data: ords } = await supabase.from('orders').select('*, order_items(*)').order('id', { ascending: false })
+    const { data: comps } = await supabase.from('compras').select('*').order('created_at', { ascending: false })
     setCategories(cats || [])
     setPlants(pls || [])
     setOrders(ords || [])
+    setCompras(comps || [])
     setLoading(false)
+  }
+
+  async function addCompra(e) {
+    e.preventDefault()
+    if (!compraForm.plant_id || !compraForm.quantity || !compraForm.unit_cost) {
+      alert('Selecciona la planta, cantidad y costo')
+      return
+    }
+    setSavingCompra(true)
+    const plant = plants.find(p => p.id === compraForm.plant_id)
+    const quantity = Number(compraForm.quantity)
+    const unit_cost = Number(compraForm.unit_cost)
+    await supabase.from('compras').insert({
+      plant_id: compraForm.plant_id,
+      plant_name: plant ? plant.name : '',
+      quantity,
+      unit_cost,
+      total: quantity * unit_cost,
+      proveedor: compraForm.proveedor,
+      status: 'pedido',
+    })
+    setCompraForm({ plant_id: '', quantity: '', unit_cost: '', proveedor: '' })
+    setSavingCompra(false)
+    loadData()
+  }
+
+  async function markCompraPagada(compra) {
+    if (compra.status !== 'pedido' || approvingIds.includes(compra.id)) return
+    setApprovingIds(prev => [...prev, compra.id])
+    await supabase.from('compras').update({ status: 'pagado', fecha_pago: new Date().toISOString() }).eq('id', compra.id)
+    await loadData()
+    setApprovingIds(prev => prev.filter(id => id !== compra.id))
+  }
+
+  async function markCompraRecibida(compra) {
+    if (compra.status !== 'pagado' || approvingIds.includes(compra.id)) return
+    setApprovingIds(prev => [...prev, compra.id])
+    await supabase.from('compras').update({ status: 'recibido', fecha_recibido: new Date().toISOString() }).eq('id', compra.id)
+    const plant = plants.find(p => p.id === compra.plant_id)
+    if (plant) {
+      await supabase.from('plants').update({ stock: plant.stock + compra.quantity }).eq('id', plant.id)
+    }
+    await loadData()
+    setApprovingIds(prev => prev.filter(id => id !== compra.id))
   }
 
   async function markAsPaid(order) {
