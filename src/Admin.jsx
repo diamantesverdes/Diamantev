@@ -24,9 +24,22 @@ export default function Admin() {
     setLoading(true)
     const { data: cats } = await supabase.from('categories').select('*').order('name')
     const { data: pls } = await supabase.from('plants').select('*').order('name')
+    const { data: ords } = await supabase.from('orders').select('*, order_items(*)').order('id', { ascending: false })
     setCategories(cats || [])
     setPlants(pls || [])
+    setOrders(ords || [])
     setLoading(false)
+  }
+
+  async function approveOrder(order) {
+    for (const item of order.order_items) {
+      const plant = plants.find(p => p.id === item.plant_id)
+      if (plant) {
+        await supabase.from('plants').update({ stock: plant.stock - item.quantity }).eq('id', item.plant_id)
+      }
+    }
+    await supabase.from('orders').update({ status: 'aprobado' }).eq('id', order.id)
+    loadData()
   }
 
   
