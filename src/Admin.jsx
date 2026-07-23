@@ -370,8 +370,74 @@ async function updateCategoryName(catId, name) {
           </div>
         </>
       )}
-    </div>
 
-    
+      {tab === 'compras' && (
+        <>
+          <form className="admin-form" onSubmit={addCompra}>
+            <h3>Registrar compra nueva</h3>
+            <select value={compraForm.plant_id} onChange={e => setCompraForm({ ...compraForm, plant_id: e.target.value })}>
+              <option value="">Selecciona planta</option>
+              {plants.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+            </select>
+            <input placeholder="Cantidad" type="number" value={compraForm.quantity} onChange={e => setCompraForm({ ...compraForm, quantity: e.target.value })} />
+            <input placeholder="Costo por unidad" type="number" step="0.01" value={compraForm.unit_cost} onChange={e => setCompraForm({ ...compraForm, unit_cost: e.target.value })} />
+            <input placeholder="Proveedor" value={compraForm.proveedor} onChange={e => setCompraForm({ ...compraForm, proveedor: e.target.value })} />
+            <button type="submit" disabled={savingCompra}>{savingCompra ? 'Guardando...' : 'Registrar compra'}</button>
+          </form>
+
+          <input
+            className="order-search"
+            placeholder="Buscar por proveedor..."
+            value={compraSearch}
+            onChange={e => setCompraSearch(e.target.value)}
+          />
+          <select className="gallery-select" value={compraStatusFilter} onChange={e => setCompraStatusFilter(e.target.value)}>
+            <option value="all">Todos los estados</option>
+            <option value="pedido">Pedido</option>
+            <option value="pagado">Pagado</option>
+            <option value="recibido">Recibido</option>
+          </select>
+
+          <div className="admin-list">
+            {compras
+              .filter(c => compraStatusFilter === 'all' || c.status === compraStatusFilter)
+              .filter(c => (c.proveedor || '').toLowerCase().includes(compraSearch.toLowerCase()))
+              .length === 0 && (
+              <p className="status-msg">No se encontraron compras.</p>
+            )}
+            {compras
+              .filter(c => compraStatusFilter === 'all' || c.status === compraStatusFilter)
+              .filter(c => (c.proveedor || '').toLowerCase().includes(compraSearch.toLowerCase()))
+              .map(c => (
+                <div key={c.id} className="admin-item">
+                  <div className="admin-item-info">
+                    <strong>{c.plant_name}</strong>
+                    <span>Proveedor: {c.proveedor || 'Sin especificar'}</span>
+                    <span className={`order-badge order-${c.status}`}>{c.status}</span>
+                    <span>Pedido: {new Date(c.created_at).toLocaleDateString()}</span>
+                    {c.fecha_pago && <span>Pagado: {new Date(c.fecha_pago).toLocaleDateString()}</span>}
+                    {c.fecha_recibido && <span>Recibido: {new Date(c.fecha_recibido).toLocaleDateString()}</span>}
+                    <span>Cantidad: {c.quantity}</span>
+                    <span>Total: ${Number(c.total).toFixed(2)}</span>
+                    <div className="admin-item-actions">
+                      {c.status === 'pedido' && (
+                        <button onClick={() => markCompraPagada(c)} disabled={approvingIds.includes(c.id)}>
+                          {approvingIds.includes(c.id) ? 'Procesando...' : 'Marcar como pagado'}
+                        </button>
+                      )}
+                      {c.status === 'pagado' && (
+                        <button onClick={() => markCompraRecibida(c)} disabled={approvingIds.includes(c.id)}>
+                          {approvingIds.includes(c.id) ? 'Procesando...' : 'Marcar como recibido'}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ))}
+          </div>
+        </>
+      )}
+    </div>
   )
-}
+            }
+      
