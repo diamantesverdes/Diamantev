@@ -209,7 +209,16 @@ async function updateCategoryName(catId, name) {
         </div>
         </>
       )}
-    
+    {tab === 'gallery' && (
+        <div className="gallery-grid">
+          {plants.map(p => (
+            <div key={p.id} className="gallery-item">
+              {p.image_url ? <img src={p.image_url} alt={p.name} /> : <div className="no-img-sm">Sin foto</div>}
+              <span>{p.name}</span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
