@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+oimport { useState, useEffect } from 'react'
 import { supabase } from './supabaseClient'
 
 const ADMIN_KEY = import.meta.env.VITE_ADMIN_KEY
@@ -227,6 +227,7 @@ async function updateCategoryName(catId, name) {
         <button className={tab === 'categories' ? 'active' : ''} onClick={() => setTab('categories')}>Categorías</button>
         <button className={tab === 'gallery' ? 'active' : ''} onClick={() => setTab('gallery')}>Catálogo</button>
         <button className={tab === 'orders' ? 'active' : ''} onClick={() => setTab('orders')}>Ventas</button>
+        <button className={tab === 'compras' ? 'active' : ''} onClick={() => setTab('compras')}>Compras</button>
       </div>
 
       {tab === 'plants' && (
