@@ -71,7 +71,7 @@ export default function App() {
     setSending(true)
     const { data: order, error } = await supabase
       .from('orders')
-      .insert({ customer_name: customerName, customer_phone: customerPhone, total })
+      .insert({ customer_name: customerName, customer_phone: customerPhone, total, status: 'pendiente' })
       .select()
       .single()
     if (error) {
