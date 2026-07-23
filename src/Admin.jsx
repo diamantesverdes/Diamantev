@@ -8,6 +8,7 @@ export default function Admin() {
   const [pass, setPass] = useState('')
   const [tab, setTab] = useState('plants')
   const [galleryFilter, setGalleryFilter] = useState('all')
+ const [orders, setOrders] = useState([])
   const [plants, setPlants] = useState([])
   const [categories, setCategories] = useState([])
   const [loading, setLoading] = useState(true)
