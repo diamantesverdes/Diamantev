@@ -370,3 +370,14 @@ body {
 .order-pedido { background: #f0d9a0; color: #6b4f00; }
 .order-pagado { background: #a8d5a8; color: #1F3D2B; }
 .order-entregado { background: #cfd8dc; color: #37474f; }
+.order-search {
+  padding: 10px;
+  border: 1px solid #C9A24B;
+  border-radius: 6px;
+  font-family: inherit;
+  font-size: 0.9rem;
+  margin-bottom: 10px;
+  width: 100%;
+  max-width: 320px;
+  display: block;
+}
