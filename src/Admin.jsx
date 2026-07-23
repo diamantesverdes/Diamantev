@@ -259,38 +259,60 @@ async function updateCategoryName(catId, name) {
         </>
       )}
     {tab === 'orders' && (
-        <div className="admin-list">
-          {orders.filter(o => o.status !== 'entregado').length === 0 && (
-            <p className="status-msg">No hay ventas en curso.</p>
-          )}
-          {orders.filter(o => o.status !== 'entregado').map(o => (
-            <div key={o.id} className="admin-item">
-              <div className="admin-item-info">
-                <strong>{o.customer_name}</strong>
-                <span>{o.customer_phone}</span>
-                <span className={`order-badge order-${o.status}`}>{o.status}</span>
-                <span>Pedido: {new Date(o.created_at).toLocaleDateString()}</span>
-                {(o.order_items || []).map(it => {
-                  const plant = plants.find(p => p.id === it.plant_id)
-                  return <span key={it.id}>{plant ? plant.name : 'Planta'} x{it.quantity}</span>
-                })}
-                <span>Total: ${Number(o.total).toFixed(2)}</span>
-                <div className="admin-item-actions">
-                  {o.status === 'pedido' && (
-                    <button onClick={() => markAsPaid(o)} disabled={approvingIds.includes(o.id)}>
-                      {approvingIds.includes(o.id) ? 'Procesando...' : 'Marcar como pagado'}
-                    </button>
-                  )}
-                  {o.status === 'pagado' && (
-                    <button onClick={() => markAsDelivered(o)} disabled={approvingIds.includes(o.id)}>
-                      {approvingIds.includes(o.id) ? 'Procesando...' : 'Marcar como entregado'}
-                    </button>
-                  )}
+        <>
+          <input
+            className="order-search"
+            placeholder="Buscar por nombre de cliente..."
+            value={orderSearch}
+            onChange={e => setOrderSearch(e.target.value)}
+          />
+          <select className="gallery-select" value={orderStatusFilter} onChange={e => setOrderStatusFilter(e.target.value)}>
+            <option value="all">Todos los estados</option>
+            <option value="pedido">Pedido</option>
+            <option value="pagado">Pagado</option>
+            <option value="entregado">Entregado</option>
+          </select>
+          <div className="admin-list">
+            {orders
+              .filter(o => orderStatusFilter === 'all' || o.status === orderStatusFilter)
+              .filter(o => o.customer_name.toLowerCase().includes(orderSearch.toLowerCase()))
+              .length === 0 && (
+              <p className="status-msg">No se encontraron ventas.</p>
+            )}
+            {orders
+              .filter(o => orderStatusFilter === 'all' || o.status === orderStatusFilter)
+              .filter(o => o.customer_name.toLowerCase().includes(orderSearch.toLowerCase()))
+              .map(o => (
+                <div key={o.id} className="admin-item">
+                  <div className="admin-item-info">
+                    <strong>{o.customer_name}</strong>
+                    <span>{o.customer_phone}</span>
+                    <span className={`order-badge order-${o.status}`}>{o.status}</span>
+                    <span>Pedido: {new Date(o.created_at).toLocaleDateString()}</span>
+                    {o.fecha_pago && <span>Pagado: {new Date(o.fecha_pago).toLocaleDateString()}</span>}
+                    {o.fecha_entrega && <span>Entregado: {new Date(o.fecha_entrega).toLocaleDateString()}</span>}
+                    {(o.order_items || []).map(it => {
+                      const plant = plants.find(p => p.id === it.plant_id)
+                      return <span key={it.id}>{plant ? plant.name : 'Planta'} x{it.quantity}</span>
+                    })}
+                    <span>Total: ${Number(o.total).toFixed(2)}</span>
+                    <div className="admin-item-actions">
+                      {o.status === 'pedido' && (
+                        <button onClick={() => markAsPaid(o)} disabled={approvingIds.includes(o.id)}>
+                          {approvingIds.includes(o.id) ? 'Procesando...' : 'Marcar como pagado'}
+                        </button>
+                      )}
+                      {o.status === 'pagado' && (
+                        <button onClick={() => markAsDelivered(o)} disabled={approvingIds.includes(o.id)}>
+                          {approvingIds.includes(o.id) ? 'Procesando...' : 'Marcar como entregado'}
+                        </button>
+                      )}
+                    </div>
+                  </div>
                 </div>
-              </div>
-            </div>
-          ))}
-        </div>
+              ))}
+          </div>
+        </>
       )}
     </div>
 
