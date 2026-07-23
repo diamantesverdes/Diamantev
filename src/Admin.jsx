@@ -245,6 +245,31 @@ async function updateCategoryName(catId, name) {
           </div>
         </>
       )}
+    {tab === 'orders' && (
+        <div className="admin-list">
+          {orders.filter(o => o.status === 'pendiente').length === 0 && (
+            <p className="status-msg">No hay pedidos pendientes.</p>
+          )}
+          {orders.filter(o => o.status === 'pendiente').map(o => (
+            <div key={o.id} className="admin-item">
+              <div className="admin-item-info">
+                <strong>{o.customer_name}</strong>
+                <span>{o.customer_phone}</span>
+                {o.order_items.map(it => {
+                  const plant = plants.find(p => p.id === it.plant_id)
+                  return <span key={it.id}>{plant ? plant.name : 'Planta'} x{it.quantity}</span>
+                })}
+                <span>Total: ${Number(o.total).toFixed(2)}</span>
+                <div className="admin-item-actions">
+                  <button onClick={() => approveOrder(o)}>Aprobar y descontar stock</button>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
+
+    
   )
 }
