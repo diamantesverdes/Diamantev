@@ -142,6 +142,7 @@ async function updateCategoryName(catId, name) {
       <div className="admin-tabs">
         <button className={tab === 'plants' ? 'active' : ''} onClick={() => setTab('plants')}>Plantas</button>
         <button className={tab === 'categories' ? 'active' : ''} onClick={() => setTab('categories')}>Categorías</button>
+        <button className={tab === 'gallery' ? 'active' : ''} onClick={() => setTab('gallery')}>Catálogo</button>
       </div>
 
       {tab === 'plants' && (
