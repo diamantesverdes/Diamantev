@@ -259,6 +259,21 @@ body {
   border-radius: 6px;
   cursor: pointer;
   font-size: 0.85rem;
+  .admin-link {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  font-size: 1.3rem;
+  text-decoration: none;
+  opacity: 1;
+  background: #E6007E;
+  border-radius: 50%;
+  width: 34px;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
 }
 .admin-link {
   position: absolute;
