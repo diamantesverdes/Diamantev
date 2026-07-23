@@ -31,15 +31,23 @@ export default function Admin() {
     setLoading(false)
   }
 
-  async function approveOrder(order) {
-    if (order.status !== 'pendiente') return
-    await supabase.from('orders').update({ status: 'aprobado' }).eq('id', order.id)
+  async function markAsPaid(order) {
+    if (order.status !== 'pedido' || approvingIds.includes(order.id)) return
+    setApprovingIds(prev => [...prev, order.id])
+    await supabase.from('orders').update({ status: 'pagado', fecha_pago: new Date().toISOString() }).eq('id', order.id)
     for (const item of order.order_items) {
       const plant = plants.find(p => p.id === item.plant_id)
       if (plant) {
         await supabase.from('plants').update({ stock: plant.stock - item.quantity }).eq('id', item.plant_id)
       }
     }
+    loadData()
+  }
+
+  async function markAsDelivered(order) {
+    if (order.status !== 'pagado' || approvingIds.includes(order.id)) return
+    setApprovingIds(prev => [...prev, order.id])
+    await supabase.from('orders').update({ status: 'entregado', fecha_entrega: new Date().toISOString() }).eq('id', order.id)
     loadData()
   }
 
