@@ -341,3 +341,20 @@ body {
   max-width: 260px;
   display: block;
 }
+.admin-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.back-to-store {
+  padding: 6px 14px;
+  background: #C9A24B;
+  color: #1F3D2B;
+  border-radius: 20px;
+  text-decoration: none;
+  font-size: 0.85rem;
+  font-weight: bold;
+  white-space: nowrap;
+}
