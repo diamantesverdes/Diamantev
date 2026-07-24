@@ -476,7 +476,8 @@ export default function Admin() {
       )}
 
       {mainTab === 'catalogo' && (
-        <div className="admin-subtabs">
+       <hr className="admin-divider" />. 
+      <div className="admin-subtabs">
             <button className={invSubTab === 'stock' ? 'active' : ''}
      <div className="admin-subtabs">
             <button className={invSubTab === 'stock' ? 'active' : ''}
