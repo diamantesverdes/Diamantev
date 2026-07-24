@@ -666,3 +666,51 @@ body {
     margin: 1cm;
   }
 }
+
+/* ==========================================================
+   NOTAS POR CATEGORÍA
+   ========================================================== */
+
+.note-file-count {
+  font-size: 0.78rem;
+  color: #6b6b5f;
+}
+
+.note-item {
+  position: relative;
+  padding-left: 34px;
+}
+
+.note-checkbox {
+  position: absolute;
+  top: 10px;
+  left: 8px;
+}
+
+.note-text {
+  margin: 2px 0;
+  font-size: 0.85rem;
+  color: #2C3B2D;
+  white-space: pre-wrap;
+}
+
+.note-photos {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 4px 0;
+}
+
+.note-photos img {
+  width: 64px;
+  height: 64px;
+  object-fit: cover;
+  border-radius: 6px;
+  border: 1px solid #e2d8bf;
+}
+
+.note-video {
+  max-width: 100%;
+  border-radius: 8px;
+  margin: 4px 0;
+}
