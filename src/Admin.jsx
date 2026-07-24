@@ -1,4 +1,3 @@
-
 import { useState, useEffect } from 'react'
 import { supabase } from './supabaseClient'
 
@@ -63,6 +62,7 @@ export default function Admin() {
     return data.publicUrl
   }
 
+  // ---------- Ingresos (compras) ----------
   async function addCompra(e) {
     e.preventDefault()
     const usingNew = !compraForm.plant_id && compraForm.new_plant_name
@@ -145,6 +145,7 @@ export default function Admin() {
     setApprovingIds(prev => prev.filter(id => id !== compra.id))
   }
 
+  // ---------- Ventas ----------
   async function markAsPaid(order) {
     if (order.status !== 'pedido' || approvingIds.includes(order.id)) return
     setApprovingIds(prev => [...prev, order.id])
@@ -167,6 +168,7 @@ export default function Admin() {
     setApprovingIds(prev => prev.filter(id => id !== order.id))
   }
 
+  // ---------- Decrementos manuales ----------
   async function addDecremento(e) {
     e.preventDefault()
     if (!decForm.plant_id || !decForm.quantity || !decForm.motivo) {
@@ -195,6 +197,8 @@ export default function Admin() {
     loadData()
   }
 
+<hr className="admin-divider" />
+   // ---------- Stock actual ----------
   async function updateStock(id, newStock) {
     await supabase.from('plants').update({ stock: newStock }).eq('id', id)
     loadData()
@@ -216,6 +220,7 @@ export default function Admin() {
     loadData()
   }
 
+  // ---------- Categorías ----------
   async function uploadCategoryImage(catId, file) {
     const url = await uploadImage(file)
     if (url) {
@@ -265,6 +270,7 @@ export default function Admin() {
     )
   }
 
+  // Lista unificada de ventas + decrementos manuales, para "Ventas y decrementos"
   const movimientos = [
     ...orders.map(o => ({ ...o, _type: 'venta' })),
     ...decrementos.map(d => ({ ...d, _type: 'decremento' })),
@@ -384,8 +390,9 @@ export default function Admin() {
               </div>
             </>
           )}
-
-          {invSubTab === 'movimientos' && (
+          <hr className="admin-divider" />
+          
+       {invSubTab === 'movimientos' && (
             <>
               <form className="admin-form" onSubmit={addDecremento}>
                 <h3>Registrar decremento manual</h3>
@@ -476,16 +483,9 @@ export default function Admin() {
       )}
 
       {mainTab === 'catalogo' && (
-       <hr className="admin-divider" />. 
-      <div className="admin-subtabs">
-            <button className={invSubTab === 'stock' ? 'active' : ''}
-    <hr className="admin-divider" />
-              <div className="admin-subtabs">
-            <button className={invSubTab === 'stock' ? 'active' : ''}
-              <><div className="admin-subtabs">
-            <button className={invSubTab === 'stock' ? 'active' : ''}
-         <hr className="admin-divider" />.
-              <div className="admin-subtabs">
+        <>
+          <hr className="admin-divider" />
+          <div className="admin-subtabs">
             <button className={catSubTab === 'categories' ? 'active' : ''} onClick={() => setCatSubTab('categories')}>Categorías</button>
             <button className={catSubTab === 'gallery' ? 'active' : ''} onClick={() => setCatSubTab('gallery')}>Galería</button>
           </div>
@@ -538,3 +538,4 @@ export default function Admin() {
     </div>
   )
 }
+                              
