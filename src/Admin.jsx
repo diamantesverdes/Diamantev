@@ -43,24 +43,43 @@ export default function Admin() {
 
   async function addCompra(e) {
     e.preventDefault()
-    if (!compraForm.plant_id || !compraForm.quantity || !compraForm.unit_cost) {
-      alert('Selecciona la planta, cantidad y costo')
+    const usingNew = !compraForm.plant_id && compraForm.new_plant_name
+    if ((!compraForm.plant_id && !usingNew) || !compraForm.quantity || !compraForm.unit_cost) {
+      alert('Selecciona una planta o escribe el nombre de una nueva, y completa cantidad y costo')
+      return
+    }
+    if (usingNew && !compraForm.new_plant_category) {
+      alert('Selecciona una categoría para la planta nueva')
       return
     }
     setSavingCompra(true)
-    const plant = plants.find(p => p.id === compraForm.plant_id)
     const quantity = Number(compraForm.quantity)
     const unit_cost = Number(compraForm.unit_cost)
-    await supabase.from('compras').insert({
-      plant_id: compraForm.plant_id,
-      plant_name: plant ? plant.name : '',
-      quantity,
-      unit_cost,
-      total: quantity * unit_cost,
-      proveedor: compraForm.proveedor,
-      status: 'pedido',
-    })
-    setCompraForm({ plant_id: '', quantity: '', unit_cost: '', proveedor: '' })
+
+    if (usingNew) {
+      await supabase.from('compras').insert({
+        plant_id: null,
+        plant_name: compraForm.new_plant_name,
+        new_plant_category: compraForm.new_plant_category,
+        quantity,
+        unit_cost,
+        total: quantity * unit_cost,
+        proveedor: compraForm.proveedor,
+        status: 'pedido',
+      })
+    } else {
+      const plant = plants.find(p => p.id === compraForm.plant_id)
+      await supabase.from('compras').insert({
+        plant_id: compraForm.plant_id,
+        plant_name: plant ? plant.name : '',
+        quantity,
+        unit_cost,
+        total: quantity * unit_cost,
+        proveedor: compraForm.proveedor,
+        status: 'pedido',
+      })
+    }
+    setCompraForm({ plant_id: '', quantity: '', unit_cost: '', proveedor: '', new_plant_name: '', new_plant_category: '' })
     setSavingCompra(false)
     loadData()
   }
