@@ -300,12 +300,17 @@ export default function Admin() {
     let video_url = null
     if (noteForm.video) video_url = await uploadImage(noteForm.video, 'category-notes')
 
-    await supabase.from('category_notes').insert({
+    const { error } = await supabase.from('category_notes').insert({
       category_id: noteForm.category_id,
       text: noteForm.text,
       photo_urls,
       video_url,
     })
+    if (error) {
+      alert('Error al guardar la nota: ' + error.message)
+      setSavingNote(false)
+      return
+    }
     setNoteForm({ category_id: noteForm.category_id, text: '', photos: [], video: null })
     setSavingNote(false)
     loadData()
