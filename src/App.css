@@ -209,14 +209,6 @@ body {
 .admin { max-width: 700px; margin: 0 auto; padding: 16px; }
 .admin h1 { color: #1F3D2B; font-size: 1.3rem; }
 
-.admin-tabs { display: flex; gap: 10px; margin: 16px 0; }
-.admin-tabs button {
-  padding: 8px 16px; border-radius: 20px;
-  border: 1px solid #1F3D2B; background: transparent;
-  cursor: pointer; font-family: inherit;
-}
-.admin-tabs button.active { background: #1F3D2B; color: #fff; }
-
 .admin-form {
   background: #fff; border: 1px solid #e2d8bf; border-radius: 10px;
   padding: 16px; margin-bottom: 24px;
@@ -330,7 +322,7 @@ body {
   font-size: 0.75rem;
   color: #1F3D2B;
 }
-..gallery-select {
+.gallery-select {
   padding: 10px;
   border: 1px solid #C9A24B;
   border-radius: 6px;
@@ -406,4 +398,141 @@ body {
   display: flex;
   gap: 10px;
   flex-wrap: wrap;
+}
+
+/* ==========================================================
+   PANTALLA DE INICIO DEL ADMIN — tarjetas grandes + hoja
+   ========================================================== */
+
+.admin-home {
+  padding: 8px 0 30px;
+}
+
+.admin-home-title {
+  text-align: center;
+  margin: 10px 0 26px;
+}
+
+.admin-script {
+  font-family: 'Playfair Display', serif;
+  font-style: italic;
+  font-size: 1.9rem;
+  color: #a1665e;
+}
+
+.admin-home-sub {
+  font-size: 0.85rem;
+  color: #6b6b5f;
+  margin: 4px 0 0;
+}
+
+.admin-card-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 14px;
+}
+
+.admin-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  background: #fff;
+  border: 1px solid #e6b8a8;
+  border-radius: 16px;
+  padding: 18px 16px;
+  cursor: pointer;
+  font-family: inherit;
+  text-align: left;
+  box-shadow: 0 3px 10px rgba(161, 102, 94, 0.12);
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.admin-card:hover,
+.admin-card:focus-visible {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(161, 102, 94, 0.2);
+  outline: none;
+}
+
+.admin-card-icon {
+  font-size: 1.6rem;
+}
+
+.admin-card-count {
+  font-size: 1.8rem;
+  font-weight: bold;
+  color: #a1665e;
+  line-height: 1;
+}
+
+.admin-card-label {
+  font-size: 0.85rem;
+  color: #6b6b5f;
+  font-weight: bold;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.admin-sheet-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(31, 61, 43, 0.35);
+  z-index: 40;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+}
+
+.admin-sheet {
+  background: #F3ECDD;
+  width: 100%;
+  max-width: 700px;
+  max-height: 92vh;
+  border-radius: 20px 20px 0 0;
+  padding: 16px 16px 24px;
+  overflow-y: auto;
+  box-shadow: 0 -4px 24px rgba(0, 0, 0, 0.25);
+  animation: sheetUp 0.28s ease-out;
+}
+
+@keyframes sheetUp {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+
+.admin-sheet-header {
+  position: sticky;
+  top: 0;
+  background: #F3ECDD;
+  padding-bottom: 10px;
+  margin-bottom: 6px;
+  border-bottom: 2px solid #C9A24B;
+}
+
+.admin-sheet-back {
+  background: none;
+  border: none;
+  color: #a1665e;
+  font-family: inherit;
+  font-size: 0.9rem;
+  font-weight: bold;
+  cursor: pointer;
+  padding: 0 0 6px;
+}
+
+.admin-sheet-header h2 {
+  margin: 0;
+  color: #1F3D2B;
+  font-size: 1.15rem;
+}
+
+.admin-sheet-body {
+  padding-top: 10px;
+}
+
+@media (min-width: 720px) {
+  .admin-card-grid {
+    grid-template-columns: repeat(4, 1fr);
+  }
 }
