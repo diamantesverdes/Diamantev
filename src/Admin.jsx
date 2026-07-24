@@ -13,6 +13,7 @@ export default function Admin() {
   const [catSubTab, setCatSubTab] = useState('categories')
 
   const [galleryFilter, setGalleryFilter] = useState('all')
+  const [selectedLabels, setSelectedLabels] = useState(new Set())
 
   const [orders, setOrders] = useState([])
   const [approvingIds, setApprovingIds] = useState([])
@@ -248,6 +249,28 @@ export default function Admin() {
     loadData()
   }
 
+  // ---------- Etiquetas para imprimir ----------
+  function toggleLabelSelect(id) {
+    setSelectedLabels(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  function selectAllLabels(list) {
+    setSelectedLabels(new Set(list.map(p => p.id)))
+  }
+
+  function clearLabels() {
+    setSelectedLabels(new Set())
+  }
+
+  function printLabels() {
+    window.print()
+  }
+
   if (!authed) {
     return (
       <div className="admin-login">
@@ -409,16 +432,38 @@ export default function Admin() {
                           <option key={c.id} value={c.id}>{c.emoji} {c.name}</option>
                         ))}
                       </select>
-                      <div className="gallery-grid">
-                        {plants
-                          .filter(p => galleryFilter === 'all' || p.category_id === galleryFilter)
-                          .map(p => (
-                            <div key={p.id} className="gallery-item">
-                              {p.image_url ? <img src={p.image_url} alt={p.name} /> : <div className="no-img-sm">Sin foto</div>}
-                              <span>{p.name}</span>
+
+                      {(() => {
+                        const galleryPlants = plants.filter(p => galleryFilter === 'all' || p.category_id === galleryFilter)
+                        return (
+                          <>
+                            <div className="label-select-bar">
+                              <button type="button" onClick={() => selectAllLabels(galleryPlants)}>Seleccionar todas</button>
+                              <button type="button" onClick={clearLabels}>Deseleccionar todas</button>
+                              {selectedLabels.size > 0 && (
+                                <button type="button" className="print-btn" onClick={printLabels}>
+                                  🏷️ Imprimir etiquetas ({selectedLabels.size})
+                                </button>
+                              )}
                             </div>
-                          ))}
-                      </div>
+                            <div className="gallery-grid">
+                              {galleryPlants.map(p => (
+                                <div key={p.id} className="gallery-item">
+                                  <label className="gallery-checkbox">
+                                    <input
+                                      type="checkbox"
+                                      checked={selectedLabels.has(p.id)}
+                                      onChange={() => toggleLabelSelect(p.id)}
+                                    />
+                                  </label>
+                                  {p.image_url ? <img src={p.image_url} alt={p.name} /> : <div className="no-img-sm">Sin foto</div>}
+                                  <span>{p.name}</span>
+                                </div>
+                              ))}
+                            </div>
+                          </>
+                        )
+                      })()}
                     </>
                   )}
                 </>
@@ -570,6 +615,20 @@ export default function Admin() {
           </div>
         </div>
       )}
+
+      {/* ---------- HOJA IMPRIMIBLE DE ETIQUETAS (solo visible al imprimir) ---------- */}
+      <div className="print-labels-sheet">
+        <div className="label-grid">
+          {plants.filter(p => selectedLabels.has(p.id)).map(p => (
+            <div key={p.id} className="label-card">
+              <span className="label-name">{p.name}</span>
+              {p.image_url
+                ? <img src={p.image_url} alt={p.name} className="label-photo" />
+                : <div className="label-photo label-no-img">Sin foto</div>}
+            </div>
+          ))}
+        </div>
+      </div>
     </div>
   )
 }
