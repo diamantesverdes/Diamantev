@@ -476,7 +476,11 @@ export default function Admin() {
       )}
 
       {mainTab === 'catalogo' && (
-        <><div className="admin-subtabs">
+        <div className="admin-subtabs">
+            <button className={invSubTab === 'stock' ? 'active' : ''}
+     <div className="admin-subtabs">
+            <button className={invSubTab === 'stock' ? 'active' : ''}
+              <><div className="admin-subtabs">
             <button className={invSubTab === 'stock' ? 'active' : ''}
           <div className="admin-subtabs">
             <button className={catSubTab === 'categories' ? 'active' : ''} onClick={() => setCatSubTab('categories')}>Categorías</button>
