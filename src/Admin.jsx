@@ -296,7 +296,7 @@ export default function Admin() {
 
       {mainTab === 'inventario' && (
         <>
-          <hr className="admin-divider" />.
+          <hr className="admin-divider" />
           <div className="admin-subtabs">
             <button className={invSubTab === 'stock' ? 'active' : ''} onClick={() => setInvSubTab('stock')}>Stock actual</button>
             <button className={invSubTab === 'ingresos' ? 'active' : ''} onClick={() => setInvSubTab('ingresos')}>Ingresos</button>
@@ -479,7 +479,7 @@ export default function Admin() {
        <hr className="admin-divider" />. 
       <div className="admin-subtabs">
             <button className={invSubTab === 'stock' ? 'active' : ''}
-    <hr className="admin-divider" />.
+    <hr className="admin-divider" />
               <div className="admin-subtabs">
             <button className={invSubTab === 'stock' ? 'active' : ''}
               <><div className="admin-subtabs">
