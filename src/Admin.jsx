@@ -479,11 +479,13 @@ export default function Admin() {
        <hr className="admin-divider" />. 
       <div className="admin-subtabs">
             <button className={invSubTab === 'stock' ? 'active' : ''}
-     <div className="admin-subtabs">
+    <hr className="admin-divider" />.
+              <div className="admin-subtabs">
             <button className={invSubTab === 'stock' ? 'active' : ''}
               <><div className="admin-subtabs">
             <button className={invSubTab === 'stock' ? 'active' : ''}
-          <div className="admin-subtabs">
+         <hr className="admin-divider" />.
+              <div className="admin-subtabs">
             <button className={catSubTab === 'categories' ? 'active' : ''} onClick={() => setCatSubTab('categories')}>Categorías</button>
             <button className={catSubTab === 'gallery' ? 'active' : ''} onClick={() => setCatSubTab('gallery')}>Galería</button>
           </div>
