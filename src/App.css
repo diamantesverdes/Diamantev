@@ -381,3 +381,29 @@ body {
   max-width: 320px;
   display: block;
 }
+.admin-subtabs {
+  display: flex;
+  gap: 8px;
+  margin: 14px 0;
+  flex-wrap: wrap;
+}
+.admin-subtabs button {
+  padding: 6px 14px;
+  border-radius: 16px;
+  border: 1px solid #C9A24B;
+  background: transparent;
+  color: #1F3D2B;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.85rem;
+}
+.admin-subtabs button.active {
+  background: #C9A24B;
+  color: #1F3D2B;
+  font-weight: bold;
+}
+.mov-filters {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
