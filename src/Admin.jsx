@@ -96,9 +96,19 @@ export default function Admin() {
     if (compra.status !== 'pagado' || approvingIds.includes(compra.id)) return
     setApprovingIds(prev => [...prev, compra.id])
     await supabase.from('compras').update({ status: 'recibido', fecha_recibido: new Date().toISOString() }).eq('id', compra.id)
-    const plant = plants.find(p => p.id === compra.plant_id)
-    if (plant) {
-      await supabase.from('plants').update({ stock: plant.stock + compra.quantity }).eq('id', plant.id)
+
+    if (compra.plant_id) {
+      const plant = plants.find(p => p.id === compra.plant_id)
+      if (plant) {
+        await supabase.from('plants').update({ stock: plant.stock + compra.quantity }).eq('id', plant.id)
+      }
+    } else if (compra.new_plant_category) {
+      await supabase.from('plants').insert({
+        name: compra.plant_name,
+        category_id: compra.new_plant_category,
+        price: 0,
+        stock: compra.quantity,
+      })
     }
     await loadData()
     setApprovingIds(prev => prev.filter(id => id !== compra.id))
