@@ -287,6 +287,8 @@ export default function Admin() {
         <a href="/" className="back-to-store">🌿 Ver tienda</a>
       </div>
 
+      <hr className="admin-divider" />
+
       <div className="admin-tabs">
         <button className={mainTab === 'inventario' ? 'active' : ''} onClick={() => setMainTab('inventario')}>Inventario</button>
         <button className={mainTab === 'catalogo' ? 'active' : ''} onClick={() => setMainTab('catalogo')}>Catálogo</button>
