@@ -375,9 +375,15 @@ async function updateCategoryName(catId, name) {
         <>
           <form className="admin-form" onSubmit={addCompra}>
             <h3>Registrar compra nueva</h3>
-            <select value={compraForm.plant_id} onChange={e => setCompraForm({ ...compraForm, plant_id: e.target.value })}>
-              <option value="">Selecciona planta</option>
+            <select value={compraForm.plant_id} onChange={e => setCompraForm({ ...compraForm, plant_id: e.target.value, new_plant_name: '', new_plant_category: '' })}>
+              <option value="">Selecciona planta existente</option>
               {plants.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+            </select>
+            <p style={{ margin: '4px 0', fontSize: '0.8rem', color: '#6b6b5f' }}>— o registra una planta nueva —</p>
+            <input placeholder="Nombre de planta nueva" value={compraForm.new_plant_name || ''} onChange={e => setCompraForm({ ...compraForm, plant_id: '', new_plant_name: e.target.value })} />
+            <select value={compraForm.new_plant_category || ''} onChange={e => setCompraForm({ ...compraForm, new_plant_category: e.target.value })}>
+              <option value="">Selecciona categoría para la planta nueva</option>
+              {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
             <input placeholder="Cantidad" type="number" value={compraForm.quantity} onChange={e => setCompraForm({ ...compraForm, quantity: e.target.value })} />
             <input placeholder="Costo por unidad" type="number" step="0.01" value={compraForm.unit_cost} onChange={e => setCompraForm({ ...compraForm, unit_cost: e.target.value })} />
