@@ -30,6 +30,10 @@ export default function Admin() {
   const [selectedDay, setSelectedDay] = useState(null)
   const [newTagForm, setNewTagForm] = useState({ name: '', color: '#a1665e' })
   const [taskFormOpen, setTaskFormOpen] = useState(false)
+  const [taskSearch, setTaskSearch] = useState('')
+  const [freeNoteBlocks, setFreeNoteBlocks] = useState([])
+  const [freeNoteCurrentText, setFreeNoteCurrentText] = useState('')
+  const [savingFreeNote, setSavingFreeNote] = useState(false)
   const [taskForm, setTaskForm] = useState({ tag_id: '', date: '', note: '', repeat: 'none' })
   const [sharingNotes, setSharingNotes] = useState(false)
 
@@ -466,6 +470,61 @@ export default function Admin() {
     if (!selectedDay) return
     const { error } = await supabase.from('garden_tasks').insert({ tag_id: tagId, date: selectedDay, note: '', repeat: 'none' })
     if (error) { alert('Error al agregar tarea: ' + error.message); return }
+    loadData()
+  }
+
+  function insertPhotoBlockToNote(file) {
+    if (!file) return
+    setFreeNoteBlocks(prev => {
+      const next = [...prev]
+      if (freeNoteCurrentText.trim()) next.push({ type: 'text', content: freeNoteCurrentText })
+      next.push({ type: 'photo', file })
+      return next
+    })
+    setFreeNoteCurrentText('')
+  }
+
+  function insertVideoBlockToNote(file) {
+    if (!file) return
+    setFreeNoteBlocks(prev => {
+      const next = [...prev]
+      if (freeNoteCurrentText.trim()) next.push({ type: 'text', content: freeNoteCurrentText })
+      next.push({ type: 'video', file })
+      return next
+    })
+    setFreeNoteCurrentText('')
+  }
+
+  function removeLastNoteBlock() {
+    setFreeNoteBlocks(prev => prev.slice(0, -1))
+  }
+
+  async function quickAddFreeNote() {
+    if (!selectedDay) return
+    const blocks = [...freeNoteBlocks]
+    if (freeNoteCurrentText.trim()) blocks.push({ type: 'text', content: freeNoteCurrentText })
+    if (blocks.length === 0) return
+    setSavingFreeNote(true)
+    const finalBlocks = []
+    for (const b of blocks) {
+      if (b.type === 'text') {
+        finalBlocks.push(b)
+      } else {
+        const url = await uploadImage(b.file, 'category-notes')
+        if (url) finalBlocks.push({ type: b.type, url })
+      }
+    }
+    const { error } = await supabase.from('garden_tasks').insert({
+      tag_id: null,
+      date: selectedDay,
+      note: '',
+      repeat: 'none',
+      content_blocks: finalBlocks,
+    })
+    if (error) { alert('Error al agregar la nota: ' + error.message); setSavingFreeNote(false); return }
+    setFreeNoteBlocks([])
+    setFreeNoteCurrentText('')
+    setSavingFreeNote(false)
     loadData()
   }
 
@@ -1001,6 +1060,42 @@ export default function Admin() {
                     <button type="button" onClick={() => changeMonth(1)}>→</button>
                   </div>
 
+                  <input
+                    className="order-search"
+                    placeholder="Buscar tarea por palabra o etiqueta..."
+                    value={taskSearch}
+                    onChange={e => setTaskSearch(e.target.value)}
+                  />
+
+                  {taskSearch.trim() && (() => {
+                    const term = taskSearch.trim().toLowerCase()
+                    const matches = gardenTasks
+                      .filter(t => {
+                        const tag = gardenTags.find(g => g.id === t.tag_id)
+                        return (t.note || '').toLowerCase().includes(term) || (tag?.name || '').toLowerCase().includes(term)
+                      })
+                      .sort((a, b) => a.date.localeCompare(b.date))
+                    return (
+                      <div className="day-panel">
+                        <h4>Resultados de búsqueda ({matches.length})</h4>
+                        {matches.length === 0 && <p className="status-msg">No se encontraron tareas.</p>}
+                        <div className="day-task-list">
+                          {matches.map(t => {
+                            const tag = gardenTags.find(g => g.id === t.tag_id)
+                            const isPast = t.date < todayStr
+                            return (
+                              <div key={t.id} className={`day-task-item ${isPast ? 'done' : ''}`} onClick={() => setSelectedDay(t.date)}>
+                                <span className="task-tag-dot" style={{ background: tag?.color || '#a1665e' }} />
+                                <span className="task-tag-name">{new Date(t.date + 'T00:00:00').toLocaleDateString('es-EC', { day: 'numeric', month: 'short' })} — {tag?.name || (t.tag_id ? 'Etiqueta borrada' : '📝 Nota libre')}</span>
+                                {t.note && <span className="task-note">— {t.note}</span>}
+                              </div>
+                            )
+                          })}
+                        </div>
+                      </div>
+                    )
+                  })()}
+
                   <div className="calendar-grid">
                     {['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'].map(d => (
                       <div key={d} className="calendar-weekday">{d}</div>
@@ -1023,10 +1118,10 @@ export default function Admin() {
                                 <span
                                   key={t.id}
                                   className={`calendar-task-label ${dateStr < todayStr ? 'done' : ''}`}
-                                  style={{ background: tag?.color || '#a1665e' }}
-                                  title={tag?.name}
+                                  style={{ background: tag?.color || (t.tag_id ? '#a1665e' : '#B5A88F') }}
+                                  title={tag?.name || t.note}
                                 >
-                                  {tag?.name || '•'}
+                                  {tag?.name || (t.note ? `📝 ${t.note}` : '📝')}
                                 </span>
                               )
                             })}
@@ -1096,6 +1191,50 @@ export default function Admin() {
                         </div>
                       )}
 
+                      <div className="free-note-box">
+                        {freeNoteBlocks.length > 0 && (
+                          <div className="note-blocks-preview">
+                            {freeNoteBlocks.map((b, i) => (
+                              <div key={i} className="note-block-item">
+                                {b.type === 'text' && <p>{b.content}</p>}
+                                {b.type === 'photo' && <span className="note-block-chip">📷 {b.file.name}</span>}
+                                {b.type === 'video' && <span className="note-block-chip">🎥 {b.file.name}</span>}
+                              </div>
+                            ))}
+                            <button type="button" className="note-block-undo" onClick={removeLastNoteBlock}>Deshacer último</button>
+                          </div>
+                        )}
+                        <textarea
+                          placeholder="Sigue escribiendo aquí..."
+                          rows={2}
+                          value={freeNoteCurrentText}
+                          onChange={e => setFreeNoteCurrentText(e.target.value)}
+                        />
+                        <div className="free-note-actions">
+                          <label className="file-label small">
+                            📷 Insertar foto aquí
+                            <input
+                              type="file"
+                              accept="image/*"
+                              style={{ display: 'none' }}
+                              onChange={e => { insertPhotoBlockToNote(e.target.files[0]); e.target.value = '' }}
+                            />
+                          </label>
+                          <label className="file-label small">
+                            🎥 Insertar video aquí
+                            <input
+                              type="file"
+                              accept="video/*"
+                              style={{ display: 'none' }}
+                              onChange={e => { insertVideoBlockToNote(e.target.files[0]); e.target.value = '' }}
+                            />
+                          </label>
+                        </div>
+                        <button type="button" className="save-note-btn" onClick={quickAddFreeNote} disabled={savingFreeNote}>
+                          {savingFreeNote ? 'Guardando...' : 'Guardar nota'}
+                        </button>
+                      </div>
+
                       <button
                         type="button"
                         className="full-form-btn"
@@ -1111,12 +1250,34 @@ export default function Admin() {
                         {(tasksByDay[selectedDay] || []).map(t => {
                           const tag = gardenTags.find(g => g.id === t.tag_id)
                           const isPast = selectedDay < todayStr
+                          const hasMedia = (t.photo_urls && t.photo_urls.length > 0) || t.video_url
+                          const hasBlocks = t.content_blocks && t.content_blocks.length > 0
                           return (
-                            <div key={t.id} className={`day-task-item ${isPast ? 'done' : ''}`}>
-                              <span className="task-tag-dot" style={{ background: tag?.color || '#a1665e' }} />
-                              <span className="task-tag-name">{tag?.name || 'Etiqueta borrada'}</span>
-                              {t.note && <span className="task-note">— {t.note}</span>}
-                              <button type="button" className="task-delete-btn" onClick={() => deleteTask(t.id)}>✕</button>
+                            <div key={t.id} className={`day-task-item ${isPast ? 'done' : ''} ${(hasMedia || hasBlocks) ? 'has-media' : ''}`}>
+                              <div className="day-task-row">
+                                <span className="task-tag-dot" style={{ background: tag?.color || (t.tag_id ? '#a1665e' : '#B5A88F') }} />
+                                {!hasBlocks && <span className="task-tag-name">{tag?.name || (t.tag_id ? 'Etiqueta borrada' : '📝 Nota libre')}</span>}
+                                {!hasBlocks && t.note && <span className="task-note">— {t.note}</span>}
+                                {hasBlocks && <span className="task-tag-name">📝 Nota libre</span>}
+                                <button type="button" className="task-delete-btn" onClick={() => deleteTask(t.id)}>✕</button>
+                              </div>
+                              {hasBlocks && (
+                                <div className="note-blocks-view">
+                                  {t.content_blocks.map((b, i) => (
+                                    <div key={i}>
+                                      {b.type === 'text' && <p className="task-note">{b.content}</p>}
+                                      {b.type === 'photo' && <img src={b.url} alt="" className="note-block-photo" />}
+                                      {b.type === 'video' && <video src={b.url} controls className="note-video" />}
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                              {!hasBlocks && t.photo_urls && t.photo_urls.length > 0 && (
+                                <div className="note-photos">
+                                  {t.photo_urls.map((url, i) => <img key={i} src={url} alt="" />)}
+                                </div>
+                              )}
+                              {!hasBlocks && t.video_url && <video src={t.video_url} controls className="note-video" />}
                             </div>
                           )
                         })}
