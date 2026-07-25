@@ -106,7 +106,7 @@ export default function Admin() {
     if (compraForm.file) image_url = await uploadImage(compraForm.file)
 
     if (usingNew) {
-      await supabase.from('compras').insert({
+      const { error } = await supabase.from('compras').insert({
         plant_id: null,
         plant_name: compraForm.new_plant_name,
         new_plant_category: compraForm.new_plant_category,
@@ -118,9 +118,14 @@ export default function Admin() {
         proveedor: compraForm.proveedor,
         status: 'pedido',
       })
+      if (error) {
+        alert('Error al registrar el ingreso: ' + error.message)
+        setSavingCompra(false)
+        return
+      }
     } else {
       const plant = plants.find(p => p.id === compraForm.plant_id)
-      await supabase.from('compras').insert({
+      const { error } = await supabase.from('compras').insert({
         plant_id: compraForm.plant_id,
         plant_name: plant ? plant.name : '',
         quantity,
@@ -131,6 +136,11 @@ export default function Admin() {
         proveedor: compraForm.proveedor,
         status: 'pedido',
       })
+      if (error) {
+        alert('Error al registrar el ingreso: ' + error.message)
+        setSavingCompra(false)
+        return
+      }
     }
     setCompraForm({ plant_id: '', quantity: '', unit_cost: '', sale_price: '', proveedor: '', new_plant_name: '', new_plant_category: '', file: null })
     setSavingCompra(false)
