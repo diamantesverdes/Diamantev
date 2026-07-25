@@ -248,7 +248,11 @@ export default function Admin() {
 
   async function deletePlant(id) {
     if (!confirm('¿Borrar esta planta permanentemente?')) return
-    await supabase.from('plants').delete().eq('id', id)
+    const { error } = await supabase.from('plants').delete().eq('id', id)
+    if (error) {
+      alert('Error al borrar la planta: ' + error.message)
+      return
+    }
     loadData()
   }
 
@@ -629,7 +633,7 @@ export default function Admin() {
                               <label>Stock: <input type="number" defaultValue={p.stock} onBlur={e => updateStock(p.id, Number(e.target.value))} /></label>
                             </div>
                             <div className="admin-item-actions">
-                              <button onClick={() => toggleActive(p.id, p.active)}>{p.active ? 'Desactivar' : 'Activar'}</button>
+                              <button onClick={() => toggleActive(p.id, p.active)}>{p.active ? 'Ocultar' : 'Mostrar'}</button>
                               <button onClick={() => deletePlant(p.id)} className="danger">Borrar</button>
                             </div>
                           </div>
