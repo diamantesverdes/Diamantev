@@ -250,7 +250,11 @@ export default function Admin() {
     if (!confirm('¿Borrar esta planta permanentemente?')) return
     const { error } = await supabase.from('plants').delete().eq('id', id)
     if (error) {
-      alert('Error al borrar la planta: ' + error.message)
+      if (error.code === '23503') {
+        alert('Esta planta no se puede borrar porque ya tiene pedidos registrados (se perdería ese historial). Usa "Ocultar" en su lugar.')
+      } else {
+        alert('Error al borrar la planta: ' + error.message)
+      }
       return
     }
     loadData()
