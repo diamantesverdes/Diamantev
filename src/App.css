@@ -949,6 +949,109 @@ body {
   margin-bottom: 12px;
 }
 
+.free-note-box {
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px;
+  margin-bottom: 12px;
+}
+
+.free-note-box textarea {
+  width: 100%;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-family: inherit;
+  font-size: 0.85rem;
+  box-sizing: border-box;
+  resize: vertical;
+}
+
+.free-note-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-top: 8px;
+  flex-wrap: wrap;
+}
+
+.free-note-actions button {
+  padding: 7px 14px;
+  background: var(--dark);
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.8rem;
+}
+
+.file-label.small {
+  padding: 6px 10px;
+  font-size: 0.78rem;
+}
+
+.note-blocks-preview {
+  background: var(--cream-alt);
+  border-radius: 8px;
+  padding: 8px;
+  margin-bottom: 8px;
+}
+
+.note-blocks-preview p {
+  margin: 0 0 6px;
+  font-size: 0.82rem;
+  color: var(--dark);
+  white-space: pre-wrap;
+}
+
+.note-block-chip {
+  display: inline-block;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 3px 8px;
+  font-size: 0.78rem;
+  margin-bottom: 6px;
+}
+
+.note-block-undo {
+  display: block;
+  background: none;
+  border: none;
+  color: var(--muted);
+  font-size: 0.75rem;
+  text-decoration: underline;
+  cursor: pointer;
+  padding: 2px 0 0;
+}
+
+.save-note-btn {
+  width: 100%;
+  padding: 8px;
+  background: var(--dark);
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.85rem;
+  margin-top: 8px;
+}
+
+.note-blocks-view {
+  margin-top: 4px;
+}
+
+.note-block-photo {
+  width: 100%;
+  max-width: 220px;
+  border-radius: 8px;
+  margin: 4px 0;
+  display: block;
+}
+
 .day-task-list {
   display: flex;
   flex-direction: column;
@@ -957,15 +1060,25 @@ body {
 
 .day-task-item {
   display: flex;
-  align-items: center;
-  gap: 8px;
+  flex-direction: column;
+  gap: 4px;
   font-size: 0.85rem;
   padding: 6px 0;
   border-bottom: 1px solid #f0eadb;
 }
 
+.day-task-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .day-task-item.done {
   opacity: 0.5;
+}
+
+.day-task-item.done .task-tag-name,
+.day-task-item.done .task-note {
   text-decoration: line-through;
 }
 
