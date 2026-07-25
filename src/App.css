@@ -717,3 +717,262 @@ body {
   margin: 4px 0;
   background: #000;
 }
+
+/* ==========================================================
+   CALENDARIO DE JARDÍN
+   ========================================================== */
+
+.garden-tags-section {
+  margin-bottom: 20px;
+}
+
+.garden-tags-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 10px 0;
+}
+
+.garden-tag-chip {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: #fff;
+  border: 1px solid #e2d8bf;
+  border-radius: 20px;
+  padding: 4px 6px 4px 4px;
+}
+
+.tag-color-input {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  cursor: pointer;
+  background: none;
+}
+
+.tag-name-input {
+  border: none;
+  background: transparent;
+  font-family: inherit;
+  font-size: 0.82rem;
+  width: 110px;
+}
+
+.tag-delete-btn {
+  background: none;
+  border: none;
+  color: #b03434;
+  cursor: pointer;
+  font-size: 0.8rem;
+  padding: 0 2px;
+}
+
+.garden-tag-form {
+  flex-direction: row !important;
+  align-items: center;
+  flex-wrap: wrap;
+  padding: 12px !important;
+}
+.garden-tag-form input[type="text"],
+.garden-tag-form input:not([type="color"]) {
+  flex: 1;
+  min-width: 160px;
+}
+.garden-tag-form input[type="color"] {
+  width: 40px;
+  height: 38px;
+  padding: 2px;
+  border: 1px solid #C9A24B;
+  border-radius: 6px;
+}
+
+.calendar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 14px 0 10px;
+}
+.calendar-header h3 {
+  margin: 0;
+  color: #1F3D2B;
+  text-transform: capitalize;
+  font-size: 1rem;
+}
+.calendar-header button {
+  background: #C9A24B;
+  color: #1F3D2B;
+  border: none;
+  border-radius: 50%;
+  width: 32px;
+  height: 32px;
+  cursor: pointer;
+  font-size: 1rem;
+}
+
+.calendar-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 3px;
+  margin-bottom: 14px;
+}
+
+.calendar-weekday {
+  text-align: center;
+  font-size: 0.7rem;
+  font-weight: bold;
+  color: #a1665e;
+  padding-bottom: 4px;
+}
+
+.calendar-day {
+  background: #fff;
+  border: 1px solid #e2d8bf;
+  border-radius: 8px;
+  min-height: 46px;
+  padding: 3px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.calendar-day.outside {
+  background: transparent;
+  border: none;
+  cursor: default;
+}
+
+.calendar-day.today {
+  border: 2px solid #a1665e;
+}
+
+.calendar-day.selected {
+  background: #f3e0d6;
+}
+
+.calendar-day-num {
+  font-size: 0.75rem;
+  color: #1F3D2B;
+}
+
+.calendar-day-tasks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  justify-content: center;
+  margin-top: 3px;
+}
+
+.calendar-task-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+}
+
+.calendar-task-dot.done {
+  opacity: 0.35;
+}
+
+.day-panel {
+  background: #fff;
+  border: 1px solid #e2d8bf;
+  border-radius: 10px;
+  padding: 14px;
+  margin-bottom: 16px;
+}
+
+.day-panel h4 {
+  margin: 0 0 10px;
+  color: #1F3D2B;
+  text-transform: capitalize;
+  font-size: 0.95rem;
+}
+
+.day-tag-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.day-tag-btn {
+  padding: 6px 12px;
+  border-radius: 16px;
+  border: 2px solid #a1665e;
+  background: #fff;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.8rem;
+  font-weight: bold;
+}
+
+.full-form-btn {
+  display: block;
+  width: 100%;
+  padding: 8px;
+  background: transparent;
+  border: 1px dashed #C9A24B;
+  border-radius: 8px;
+  color: #1F3D2B;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.8rem;
+  margin-bottom: 12px;
+}
+
+.day-task-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.day-task-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.85rem;
+  padding: 6px 0;
+  border-bottom: 1px solid #f0eadb;
+}
+
+.day-task-item.done {
+  opacity: 0.5;
+  text-decoration: line-through;
+}
+
+.task-tag-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.task-tag-name {
+  font-weight: bold;
+  color: #1F3D2B;
+}
+
+.task-note {
+  color: #6b6b5f;
+  flex: 1;
+}
+
+.task-delete-btn {
+  background: none;
+  border: none;
+  color: #b03434;
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+
+.task-form-modal {
+  background: #F3ECDD;
+  width: 100%;
+  max-width: 420px;
+  border-radius: 16px;
+  padding: 16px;
+  margin: 16px;
+}
