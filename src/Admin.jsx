@@ -20,6 +20,7 @@ export default function Admin() {
   const [savingNote, setSavingNote] = useState(false)
   const [selectedNotes, setSelectedNotes] = useState(new Set())
   const [notesCategoryFilter, setNotesCategoryFilter] = useState('all')
+  const [notesSearch, setNotesSearch] = useState('')
   const [sharingNotes, setSharingNotes] = useState(false)
 
   const [orders, setOrders] = useState([])
@@ -772,8 +773,22 @@ export default function Admin() {
                     {categories.map(c => <option key={c.id} value={c.id}>{c.emoji} {c.name}</option>)}
                   </select>
 
+                  <input
+                    className="order-search"
+                    placeholder="Buscar en las notas..."
+                    value={notesSearch}
+                    onChange={e => setNotesSearch(e.target.value)}
+                  />
+
                   {(() => {
-                    const filteredNotes = notes.filter(n => notesCategoryFilter === 'all' || n.category_id === notesCategoryFilter)
+                    const filteredNotes = notes
+                      .filter(n => notesCategoryFilter === 'all' || n.category_id === notesCategoryFilter)
+                      .filter(n => {
+                        const term = notesSearch.trim().toLowerCase()
+                        if (!term) return true
+                        const cat = categories.find(c => c.id === n.category_id)
+                        return (n.text || '').toLowerCase().includes(term) || (cat?.name || '').toLowerCase().includes(term)
+                      })
                     return (
                       <>
                         <div className="label-select-bar">
