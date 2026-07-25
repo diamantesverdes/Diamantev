@@ -995,41 +995,6 @@ export default function Admin() {
 
               {view === 'calendario' && (
                 <>
-                  <div className="garden-tags-section">
-                    <h3>Etiquetas de tareas</h3>
-                    <div className="garden-tags-list">
-                      {gardenTags.map(tag => (
-                        <div key={tag.id} className="garden-tag-chip">
-                          <input
-                            type="color"
-                            className="tag-color-input"
-                            value={tag.color}
-                            onChange={e => updateTagColor(tag.id, e.target.value)}
-                          />
-                          <input
-                            className="tag-name-input"
-                            defaultValue={tag.name}
-                            onBlur={e => updateTagName(tag.id, e.target.value)}
-                          />
-                          <button type="button" className="tag-delete-btn" onClick={() => deleteTag(tag.id)}>✕</button>
-                        </div>
-                      ))}
-                    </div>
-                    <form className="admin-form garden-tag-form" onSubmit={addTag}>
-                      <input
-                        placeholder="Nueva etiqueta (ej: Riego delantero)"
-                        value={newTagForm.name}
-                        onChange={e => setNewTagForm({ ...newTagForm, name: e.target.value })}
-                      />
-                      <input
-                        type="color"
-                        value={newTagForm.color}
-                        onChange={e => setNewTagForm({ ...newTagForm, color: e.target.value })}
-                      />
-                      <button type="submit">Agregar etiqueta</button>
-                    </form>
-                  </div>
-
                   <div className="calendar-header">
                     <button type="button" onClick={() => changeMonth(-1)}>←</button>
                     <h3>{calMonthLabel}</h3>
@@ -1072,6 +1037,41 @@ export default function Admin() {
                         </div>
                       )
                     })}
+                  </div>
+
+                  <div className="garden-tags-section">
+                    <h3>Etiquetas de tareas</h3>
+                    <div className="garden-tags-list">
+                      {gardenTags.map(tag => (
+                        <div key={tag.id} className="garden-tag-chip">
+                          <input
+                            type="color"
+                            className="tag-color-input"
+                            value={tag.color}
+                            onChange={e => updateTagColor(tag.id, e.target.value)}
+                          />
+                          <input
+                            className="tag-name-input"
+                            defaultValue={tag.name}
+                            onBlur={e => updateTagName(tag.id, e.target.value)}
+                          />
+                          <button type="button" className="tag-delete-btn" onClick={() => deleteTag(tag.id)}>✕</button>
+                        </div>
+                      ))}
+                    </div>
+                    <form className="admin-form garden-tag-form" onSubmit={addTag}>
+                      <input
+                        placeholder="Nueva etiqueta (ej: Riego delantero)"
+                        value={newTagForm.name}
+                        onChange={e => setNewTagForm({ ...newTagForm, name: e.target.value })}
+                      />
+                      <input
+                        type="color"
+                        value={newTagForm.color}
+                        onChange={e => setNewTagForm({ ...newTagForm, color: e.target.value })}
+                      />
+                      <button type="submit">Agregar etiqueta</button>
+                    </form>
                   </div>
 
                   {selectedDay && (
