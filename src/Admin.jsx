@@ -13,6 +13,8 @@ export default function Admin() {
   const [catSubTab, setCatSubTab] = useState('categories')
 
   const [galleryFilter, setGalleryFilter] = useState('all')
+  const [plantsFilter, setPlantsFilter] = useState('all')
+  const [plantsSearch, setPlantsSearch] = useState('')
   const [selectedLabels, setSelectedLabels] = useState(new Set())
 
   const [notes, setNotes] = useState([])
@@ -624,9 +626,27 @@ export default function Admin() {
               {view === 'plantas' && (
                 <>
                   <h3>Plantas existentes ({plants.length})</h3>
-                  {loading ? <p>Cargando...</p> : (
+
+                  <select className="gallery-select" value={plantsFilter} onChange={e => setPlantsFilter(e.target.value)}>
+                    <option value="all">Todas las categorías</option>
+                    {categories.map(c => <option key={c.id} value={c.id}>{c.emoji} {c.name}</option>)}
+                  </select>
+
+                  <input
+                    className="order-search"
+                    placeholder="Buscar planta por nombre..."
+                    value={plantsSearch}
+                    onChange={e => setPlantsSearch(e.target.value)}
+                  />
+
+                  {loading ? <p>Cargando...</p> : (() => {
+                    const filteredPlants = plants
+                      .filter(p => plantsFilter === 'all' || p.category_id === plantsFilter)
+                      .filter(p => p.name.toLowerCase().includes(plantsSearch.trim().toLowerCase()))
+                    return (
                     <div className="admin-list">
-                      {plants.map(p => (
+                      {filteredPlants.length === 0 && <p className="status-msg">No se encontraron plantas.</p>}
+                      {filteredPlants.map(p => (
                         <div key={p.id} className={`admin-item ${!p.active ? 'inactive' : ''}`}>
                           {p.image_url ? <img src={p.image_url} alt={p.name} /> : <div className="no-img-sm">Sin foto</div>}
                           <div className="admin-item-info">
@@ -644,7 +664,8 @@ export default function Admin() {
                         </div>
                       ))}
                     </div>
-                  )}
+                    )
+                  })()}
                 </>
               )}
 
