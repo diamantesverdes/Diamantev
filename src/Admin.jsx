@@ -1013,16 +1013,22 @@ export default function Admin() {
                         >
                           <span className="calendar-day-num">{cell.getDate()}</span>
                           <div className="calendar-day-tasks">
-                            {dayTasks.slice(0, 4).map(t => {
+                            {dayTasks.slice(0, 3).map(t => {
                               const tag = gardenTags.find(g => g.id === t.tag_id)
                               return (
                                 <span
                                   key={t.id}
-                                  className={`calendar-task-dot ${dateStr < todayStr ? 'done' : ''}`}
+                                  className={`calendar-task-label ${dateStr < todayStr ? 'done' : ''}`}
                                   style={{ background: tag?.color || '#a1665e' }}
-                                />
+                                  title={tag?.name}
+                                >
+                                  {tag?.name || '•'}
+                                </span>
                               )
                             })}
+                            {dayTasks.length > 3 && (
+                              <span className="calendar-task-more">+{dayTasks.length - 3}</span>
+                            )}
                           </div>
                         </div>
                       )
