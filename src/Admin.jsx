@@ -1107,7 +1107,15 @@ export default function Admin() {
                             const tag = gardenTags.find(g => g.id === t.tag_id)
                             const isPast = t.date < todayStr
                             return (
-                              <div key={t.id} className={`day-task-item ${isPast ? 'done' : ''}`} onClick={() => setSelectedDay(t.date)}>
+                              <div
+                                key={t.id}
+                                className={`day-task-item ${isPast ? 'done' : ''}`}
+                                onClick={() => {
+                                  setSelectedDay(t.date)
+                                  setTaskSearch('')
+                                  if (t.content_blocks && t.content_blocks.length > 0) openEditNote(t)
+                                }}
+                              >
                                 <span className="task-tag-dot" style={{ background: tag?.color || '#a1665e' }} />
                                 <span className="task-tag-name">{new Date(t.date + 'T00:00:00').toLocaleDateString('es-EC', { day: 'numeric', month: 'short' })} — {tag?.name || (t.tag_id ? 'Etiqueta borrada' : '📝 Nota libre')}</span>
                                 {t.note && <span className="task-note">— {t.note}</span>}
