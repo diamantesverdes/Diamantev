@@ -32,6 +32,8 @@ export default function Admin() {
   const [taskFormOpen, setTaskFormOpen] = useState(false)
   const [taskSearch, setTaskSearch] = useState('')
   const [freeNoteModalOpen, setFreeNoteModalOpen] = useState(false)
+  const [editingTaskId, setEditingTaskId] = useState(null)
+  const [tagMenuOpen, setTagMenuOpen] = useState(false)
   const [freeNoteBlocks, setFreeNoteBlocks] = useState([])
   const [freeNoteCurrentText, setFreeNoteCurrentText] = useState('')
   const [savingFreeNote, setSavingFreeNote] = useState(false)
@@ -500,6 +502,13 @@ export default function Admin() {
     setFreeNoteBlocks(prev => prev.slice(0, -1))
   }
 
+  function openEditNote(t) {
+    setEditingTaskId(t.id)
+    setFreeNoteBlocks(t.content_blocks || [])
+    setFreeNoteCurrentText('')
+    setFreeNoteModalOpen(true)
+  }
+
   async function quickAddFreeNote() {
     if (!selectedDay) return
     const blocks = [...freeNoteBlocks]
@@ -510,21 +519,26 @@ export default function Admin() {
     for (const b of blocks) {
       if (b.type === 'text') {
         finalBlocks.push(b)
+      } else if (b.url) {
+        finalBlocks.push(b)
       } else {
         const url = await uploadImage(b.file, 'category-notes')
         if (url) finalBlocks.push({ type: b.type, url })
       }
     }
-    const { error } = await supabase.from('garden_tasks').insert({
-      tag_id: null,
-      date: selectedDay,
-      note: '',
-      repeat: 'none',
-      content_blocks: finalBlocks,
-    })
-    if (error) { alert('Error al agregar la nota: ' + error.message); setSavingFreeNote(false); return }
+    const { error } = editingTaskId
+      ? await supabase.from('garden_tasks').update({ content_blocks: finalBlocks }).eq('id', editingTaskId)
+      : await supabase.from('garden_tasks').insert({
+          tag_id: null,
+          date: selectedDay,
+          note: '',
+          repeat: 'none',
+          content_blocks: finalBlocks,
+        })
+    if (error) { alert('Error al guardar la nota: ' + error.message); setSavingFreeNote(false); return }
     setFreeNoteBlocks([])
     setFreeNoteCurrentText('')
+    setEditingTaskId(null)
     setSavingFreeNote(false)
     setFreeNoteModalOpen(false)
     loadData()
@@ -1182,43 +1196,66 @@ export default function Admin() {
                       {gardenTags.length === 0 ? (
                         <p className="status-msg">Agrega una etiqueta arriba para poder añadir tareas.</p>
                       ) : (
-                        <div className="day-tag-buttons">
-                          {gardenTags.map(tag => (
-                            <button
-                              key={tag.id}
-                              type="button"
-                              className="day-tag-btn"
-                              style={{ borderColor: tag.color, color: tag.color }}
-                              onClick={() => quickAddTask(tag.id)}
-                            >
-                              + {tag.name}
-                            </button>
-                          ))}
+                        <button type="button" className="full-form-btn" onClick={() => setTagMenuOpen(true)}>
+                          🏷️ Elegir etiqueta para este día
+                        </button>
+                      )}
+
+                      {tagMenuOpen && (
+                        <div className="tag-menu-overlay" onClick={() => setTagMenuOpen(false)}>
+                          <div className="tag-menu-panel" onClick={e => e.stopPropagation()}>
+                            <div className="tag-menu-header">
+                              <h4>Elegir etiqueta</h4>
+                              <button type="button" className="modal-close-btn" onClick={() => setTagMenuOpen(false)}>✕</button>
+                            </div>
+                            <div className="tag-menu-list">
+                              {gardenTags.map(tag => (
+                                <button
+                                  key={tag.id}
+                                  type="button"
+                                  className="tag-menu-item"
+                                  onClick={() => { quickAddTask(tag.id); setTagMenuOpen(false) }}
+                                >
+                                  <span className="tag-menu-dot" style={{ background: tag.color }} />
+                                  {tag.name}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
                         </div>
                       )}
 
                       <button
                         type="button"
                         className="full-form-btn"
-                        onClick={() => { setFreeNoteBlocks([]); setFreeNoteCurrentText(''); setFreeNoteModalOpen(true) }}
+                        onClick={() => { setEditingTaskId(null); setFreeNoteBlocks([]); setFreeNoteCurrentText(''); setFreeNoteModalOpen(true) }}
                       >
                         📝 Escribir nota libre
                       </button>
 
                       {freeNoteModalOpen && (
-                        <div className="admin-sheet-overlay" onClick={() => setFreeNoteModalOpen(false)}>
+                        <div className="admin-sheet-overlay">
                           <div className="free-note-modal" onClick={e => e.stopPropagation()}>
                             <div className="free-note-modal-header">
-                              <h4>Nota libre — {new Date(selectedDay + 'T00:00:00').toLocaleDateString('es-EC', { day: 'numeric', month: 'long' })}</h4>
-                              <button type="button" className="modal-close-btn" onClick={() => setFreeNoteModalOpen(false)}>✕</button>
+                              <h4>{editingTaskId ? 'Editar nota' : 'Nota libre'} — {new Date(selectedDay + 'T00:00:00').toLocaleDateString('es-EC', { day: 'numeric', month: 'long' })}</h4>
+                              <button
+                                type="button"
+                                className="modal-close-btn"
+                                onClick={() => {
+                                  const hasUnsaved = freeNoteCurrentText.trim().length > 0
+                                  if (hasUnsaved && !confirm('¿Cerrar sin guardar? Perderás lo que escribiste.')) return
+                                  setFreeNoteModalOpen(false)
+                                  setEditingTaskId(null)
+                                }}
+                              >✕</button>
                             </div>
                             <div className="free-note-sheet">
                               {freeNoteBlocks.map((b, i) => (
                                 <div key={i} className="note-sheet-block">
                                   {b.type === 'text' && <p>{b.content}</p>}
-                                  {b.type === 'photo' && <img src={URL.createObjectURL(b.file)} alt="" className="note-sheet-photo" />}
+                                  {b.type === 'photo' && <img src={b.url || URL.createObjectURL(b.file)} alt="" className="note-sheet-photo" />}
                                   {b.type === 'video' && (
-                                    <video src={URL.createObjectURL(b.file)} controls className="note-video" />
+                                    <video src={b.url || URL.createObjectURL(b.file)} controls className="note-video" />
                                   )}
                                 </div>
                               ))}
@@ -1285,6 +1322,7 @@ export default function Admin() {
                                 {!hasBlocks && <span className="task-tag-name">{tag?.name || (t.tag_id ? 'Etiqueta borrada' : '📝 Nota libre')}</span>}
                                 {!hasBlocks && t.note && <span className="task-note">— {t.note}</span>}
                                 {hasBlocks && <span className="task-tag-name">📝 Nota libre</span>}
+                                {hasBlocks && <button type="button" className="task-edit-btn" onClick={() => openEditNote(t)}>✏️</button>}
                                 <button type="button" className="task-delete-btn" onClick={() => deleteTask(t.id)}>✕</button>
                               </div>
                               {hasBlocks && (
