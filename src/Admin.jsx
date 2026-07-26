@@ -31,6 +31,7 @@ export default function Admin() {
   const [newTagForm, setNewTagForm] = useState({ name: '', color: '#a1665e' })
   const [taskFormOpen, setTaskFormOpen] = useState(false)
   const [taskSearch, setTaskSearch] = useState('')
+  const [freeNoteModalOpen, setFreeNoteModalOpen] = useState(false)
   const [freeNoteBlocks, setFreeNoteBlocks] = useState([])
   const [freeNoteCurrentText, setFreeNoteCurrentText] = useState('')
   const [savingFreeNote, setSavingFreeNote] = useState(false)
@@ -525,6 +526,7 @@ export default function Admin() {
     setFreeNoteBlocks([])
     setFreeNoteCurrentText('')
     setSavingFreeNote(false)
+    setFreeNoteModalOpen(false)
     loadData()
   }
 
@@ -1191,49 +1193,69 @@ export default function Admin() {
                         </div>
                       )}
 
-                      <div className="free-note-box">
-                        {freeNoteBlocks.length > 0 && (
-                          <div className="note-blocks-preview">
-                            {freeNoteBlocks.map((b, i) => (
-                              <div key={i} className="note-block-item">
-                                {b.type === 'text' && <p>{b.content}</p>}
-                                {b.type === 'photo' && <span className="note-block-chip">📷 {b.file.name}</span>}
-                                {b.type === 'video' && <span className="note-block-chip">🎥 {b.file.name}</span>}
+                      <button
+                        type="button"
+                        className="full-form-btn"
+                        onClick={() => { setFreeNoteBlocks([]); setFreeNoteCurrentText(''); setFreeNoteModalOpen(true) }}
+                      >
+                        📝 Escribir nota libre
+                      </button>
+
+                      {freeNoteModalOpen && (
+                        <div className="admin-sheet-overlay" onClick={() => setFreeNoteModalOpen(false)}>
+                          <div className="free-note-modal" onClick={e => e.stopPropagation()}>
+                            <div className="free-note-modal-header">
+                              <h4>Nota libre — {new Date(selectedDay + 'T00:00:00').toLocaleDateString('es-EC', { day: 'numeric', month: 'long' })}</h4>
+                              <button type="button" className="modal-close-btn" onClick={() => setFreeNoteModalOpen(false)}>✕</button>
+                            </div>
+                            <div className="free-note-sheet">
+                              {freeNoteBlocks.map((b, i) => (
+                                <div key={i} className="note-sheet-block">
+                                  {b.type === 'text' && <p>{b.content}</p>}
+                                  {b.type === 'photo' && <img src={URL.createObjectURL(b.file)} alt="" className="note-sheet-photo" />}
+                                  {b.type === 'video' && (
+                                    <video src={URL.createObjectURL(b.file)} controls className="note-video" />
+                                  )}
+                                </div>
+                              ))}
+                              <textarea
+                                className="note-sheet-textarea"
+                                placeholder={freeNoteBlocks.length > 0 ? 'Sigue escribiendo...' : 'Escribe una nota libre para este día...'}
+                                rows={freeNoteBlocks.length > 0 ? 2 : 4}
+                                value={freeNoteCurrentText}
+                                onChange={e => setFreeNoteCurrentText(e.target.value)}
+                                autoFocus
+                              />
+                              <div className="note-sheet-toolbar">
+                                <label className="icon-btn" title="Insertar foto aquí">
+                                  📷
+                                  <input
+                                    type="file"
+                                    accept="image/*"
+                                    style={{ display: 'none' }}
+                                    onChange={e => { insertPhotoBlockToNote(e.target.files[0]); e.target.value = '' }}
+                                  />
+                                </label>
+                                <label className="icon-btn" title="Insertar video aquí">
+                                  🎥
+                                  <input
+                                    type="file"
+                                    accept="video/*"
+                                    style={{ display: 'none' }}
+                                    onChange={e => { insertVideoBlockToNote(e.target.files[0]); e.target.value = '' }}
+                                  />
+                                </label>
+                                {freeNoteBlocks.length > 0 && (
+                                  <button type="button" className="icon-btn-text" onClick={removeLastNoteBlock}>Deshacer</button>
+                                )}
+                                <button type="button" className="save-note-btn-inline" onClick={quickAddFreeNote} disabled={savingFreeNote}>
+                                  {savingFreeNote ? 'Guardando...' : 'Guardar'}
+                                </button>
                               </div>
-                            ))}
-                            <button type="button" className="note-block-undo" onClick={removeLastNoteBlock}>Deshacer último</button>
+                            </div>
                           </div>
-                        )}
-                        <textarea
-                          placeholder="Sigue escribiendo aquí..."
-                          rows={2}
-                          value={freeNoteCurrentText}
-                          onChange={e => setFreeNoteCurrentText(e.target.value)}
-                        />
-                        <div className="free-note-actions">
-                          <label className="file-label small">
-                            📷 Insertar foto aquí
-                            <input
-                              type="file"
-                              accept="image/*"
-                              style={{ display: 'none' }}
-                              onChange={e => { insertPhotoBlockToNote(e.target.files[0]); e.target.value = '' }}
-                            />
-                          </label>
-                          <label className="file-label small">
-                            🎥 Insertar video aquí
-                            <input
-                              type="file"
-                              accept="video/*"
-                              style={{ display: 'none' }}
-                              onChange={e => { insertVideoBlockToNote(e.target.files[0]); e.target.value = '' }}
-                            />
-                          </label>
                         </div>
-                        <button type="button" className="save-note-btn" onClick={quickAddFreeNote} disabled={savingFreeNote}>
-                          {savingFreeNote ? 'Guardando...' : 'Guardar nota'}
-                        </button>
-                      </div>
+                      )}
 
                       <button
                         type="button"
