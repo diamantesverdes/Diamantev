@@ -1088,7 +1088,7 @@ export default function Admin() {
                     <button
                       type="button"
                       className="task-search-btn"
-                      onClick={() => setTaskSearchSubmitted(taskSearch)}
+                      onClick={() => { document.activeElement && document.activeElement.blur(); setTaskSearchSubmitted(taskSearch) }}
                     >
                       🔍 Buscar
                     </button>
@@ -1117,15 +1117,25 @@ export default function Admin() {
                           {matches.map(t => {
                             const tag = gardenTags.find(g => g.id === t.tag_id)
                             const isPast = t.date < todayStr
+                            const hasBlocks = t.content_blocks && t.content_blocks.length > 0
                             return (
                               <div
                                 key={t.id}
-                                className={`day-task-item ${isPast ? 'done' : ''}`}
+                                className="day-task-item"
                                 onClick={() => {
-                                  setSelectedDay(t.date)
-                                  setTaskSearch('')
-                                  setTaskSearchSubmitted('')
-                                  if (t.content_blocks && t.content_blocks.length > 0) openEditNote(t)
+                                  try {
+                                    setTaskSearch('')
+                                    setTaskSearchSubmitted('')
+                                    setSelectedDay(t.date)
+                                    if (hasBlocks) {
+                                      setEditingTaskId(t.id)
+                                      setFreeNoteBlocks(t.content_blocks)
+                                      setFreeNoteCurrentText('')
+                                      setFreeNoteModalOpen(true)
+                                    }
+                                  } catch (err) {
+                                    alert('Error al abrir: ' + err.message)
+                                  }
                                 }}
                               >
                                 <span className="task-tag-dot" style={{ background: tag?.color || '#a1665e' }} />
@@ -1157,10 +1167,11 @@ export default function Admin() {
                           <div className="calendar-day-tasks">
                             {dayTasks.slice(0, 3).map(t => {
                               const tag = gardenTags.find(g => g.id === t.tag_id)
+                              const hasBlocks = t.content_blocks && t.content_blocks.length > 0
                               return (
                                 <span
                                   key={t.id}
-                                  className={`calendar-task-label ${dateStr < todayStr ? 'done' : ''}`}
+                                  className="calendar-task-label"
                                   style={{ background: tag?.color || (t.tag_id ? '#a1665e' : '#B5A88F') }}
                                   title={tag?.name || t.note}
                                 >
@@ -1343,7 +1354,7 @@ export default function Admin() {
                           const hasMedia = (t.photo_urls && t.photo_urls.length > 0) || t.video_url
                           const hasBlocks = t.content_blocks && t.content_blocks.length > 0
                           return (
-                            <div key={t.id} className={`day-task-item ${isPast ? 'done' : ''} ${(hasMedia || hasBlocks) ? 'has-media' : ''}`}>
+                            <div key={t.id} className={`day-task-item ${(hasMedia || hasBlocks) ? 'has-media' : ''}`}>
                               <div className="day-task-row">
                                 <span className="task-tag-dot" style={{ background: tag?.color || (t.tag_id ? '#a1665e' : '#B5A88F') }} />
                                 {!hasBlocks && <span className="task-tag-name">{tag?.name || (t.tag_id ? 'Etiqueta borrada' : '📝 Nota libre')}</span>}
