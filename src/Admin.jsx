@@ -1172,8 +1172,12 @@ export default function Admin() {
                   </div>
 
                   {selectedDay && (
-                    <div className="day-panel">
-                      <h4>{new Date(selectedDay + 'T00:00:00').toLocaleDateString('es-EC', { weekday: 'long', day: 'numeric', month: 'long' })}</h4>
+                    <div className="admin-sheet-overlay" onClick={() => setSelectedDay(null)}>
+                      <div className="day-panel day-panel-modal" onClick={e => e.stopPropagation()}>
+                        <div className="free-note-modal-header">
+                          <h4>{new Date(selectedDay + 'T00:00:00').toLocaleDateString('es-EC', { weekday: 'long', day: 'numeric', month: 'long' })}</h4>
+                          <button type="button" className="modal-close-btn" onClick={() => setSelectedDay(null)}>✕</button>
+                        </div>
 
                       {gardenTags.length === 0 ? (
                         <p className="status-msg">Agrega una etiqueta arriba para poder añadir tareas.</p>
@@ -1303,6 +1307,7 @@ export default function Admin() {
                             </div>
                           )
                         })}
+                      </div>
                       </div>
                     </div>
                   )}
