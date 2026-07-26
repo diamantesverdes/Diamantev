@@ -910,6 +910,16 @@ body {
   margin-bottom: 16px;
 }
 
+.day-panel-modal {
+  width: 100%;
+  max-width: 480px;
+  max-height: 85vh;
+  overflow-y: auto;
+  margin: 0 12px;
+  border-radius: 16px;
+  animation: sheetUp 0.25s ease-out;
+}
+
 .day-panel h4 {
   margin: 0 0 10px;
   color: var(--dark);
