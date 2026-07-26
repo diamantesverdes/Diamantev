@@ -31,6 +31,7 @@ export default function Admin() {
   const [newTagForm, setNewTagForm] = useState({ name: '', color: '#a1665e' })
   const [taskFormOpen, setTaskFormOpen] = useState(false)
   const [taskSearch, setTaskSearch] = useState('')
+  const [taskSearchSubmitted, setTaskSearchSubmitted] = useState('')
   const [freeNoteModalOpen, setFreeNoteModalOpen] = useState(false)
   const [editingTaskId, setEditingTaskId] = useState(null)
   const [tagMenuOpen, setTagMenuOpen] = useState(false)
@@ -1076,15 +1077,25 @@ export default function Admin() {
                     <button type="button" onClick={() => changeMonth(1)}>→</button>
                   </div>
 
-                  <input
-                    className="order-search"
-                    placeholder="Buscar tarea por palabra o etiqueta..."
-                    value={taskSearch}
-                    onChange={e => setTaskSearch(e.target.value)}
-                  />
+                  <div className="task-search-row">
+                    <input
+                      className="order-search"
+                      placeholder="Buscar tarea por palabra o etiqueta..."
+                      value={taskSearch}
+                      onChange={e => setTaskSearch(e.target.value)}
+                      onKeyDown={e => e.key === 'Enter' && (e.target.blur(), setTaskSearchSubmitted(taskSearch))}
+                    />
+                    <button
+                      type="button"
+                      className="task-search-btn"
+                      onClick={() => setTaskSearchSubmitted(taskSearch)}
+                    >
+                      🔍 Buscar
+                    </button>
+                  </div>
 
-                  {taskSearch.trim() && (() => {
-                    const term = taskSearch.trim().toLowerCase()
+                  {taskSearchSubmitted.trim() && (() => {
+                    const term = taskSearchSubmitted.trim().toLowerCase()
                     const matches = gardenTasks
                       .filter(t => {
                         const tag = gardenTags.find(g => g.id === t.tag_id)
@@ -1113,6 +1124,7 @@ export default function Admin() {
                                 onClick={() => {
                                   setSelectedDay(t.date)
                                   setTaskSearch('')
+                                  setTaskSearchSubmitted('')
                                   if (t.content_blocks && t.content_blocks.length > 0) openEditNote(t)
                                 }}
                               >
