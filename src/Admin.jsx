@@ -1088,7 +1088,14 @@ export default function Admin() {
                     const matches = gardenTasks
                       .filter(t => {
                         const tag = gardenTags.find(g => g.id === t.tag_id)
-                        return (t.note || '').toLowerCase().includes(term) || (tag?.name || '').toLowerCase().includes(term)
+                        const blocksText = (t.content_blocks || [])
+                          .filter(b => b.type === 'text')
+                          .map(b => b.content)
+                          .join(' ')
+                          .toLowerCase()
+                        return (t.note || '').toLowerCase().includes(term)
+                          || (tag?.name || '').toLowerCase().includes(term)
+                          || blocksText.includes(term)
                       })
                       .sort((a, b) => a.date.localeCompare(b.date))
                     return (
