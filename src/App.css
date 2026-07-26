@@ -386,6 +386,31 @@ body {
   max-width: 320px;
   display: block;
 }
+
+.task-search-row {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  margin-bottom: 10px;
+}
+
+.task-search-row .order-search {
+  margin-bottom: 0;
+  max-width: none;
+  flex: 1;
+}
+
+.task-search-btn {
+  padding: 10px 14px;
+  background: var(--dark);
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.85rem;
+  white-space: nowrap;
+}
 .admin-subtabs {
   display: flex;
   gap: 8px;
