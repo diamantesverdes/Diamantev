@@ -927,22 +927,74 @@ body {
   font-size: 0.95rem;
 }
 
-.day-tag-buttons {
+.tag-menu-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(31, 61, 43, 0.35);
+  z-index: 50;
   display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-bottom: 10px;
+  justify-content: flex-end;
 }
 
-.day-tag-btn {
-  padding: 6px 12px;
-  border-radius: 16px;
-  border: 2px solid var(--pink);
+.tag-menu-panel {
   background: #fff;
+  width: 78%;
+  max-width: 280px;
+  height: 100%;
+  padding: 16px;
+  box-sizing: border-box;
+  box-shadow: -4px 0 20px rgba(0,0,0,0.2);
+  animation: tagMenuIn 0.22s ease-out;
+  overflow-y: auto;
+}
+
+@keyframes tagMenuIn {
+  from { transform: translateX(100%); }
+  to { transform: translateX(0); }
+}
+
+.tag-menu-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 8px;
+}
+
+.tag-menu-header h4 {
+  margin: 0;
+  color: var(--dark);
+  font-size: 0.95rem;
+}
+
+.tag-menu-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.tag-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 8px;
+  border: none;
+  background: var(--cream);
+  border-radius: 8px;
   cursor: pointer;
   font-family: inherit;
-  font-size: 0.8rem;
+  font-size: 0.85rem;
   font-weight: bold;
+  color: var(--dark);
+  text-align: left;
+}
+
+.tag-menu-dot {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  flex-shrink: 0;
 }
 
 .full-form-btn {
@@ -1135,6 +1187,14 @@ body {
   color: #b03434;
   cursor: pointer;
   font-size: 0.9rem;
+}
+
+.task-edit-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 0.9rem;
+  margin-left: auto;
 }
 
 .task-form-modal {
