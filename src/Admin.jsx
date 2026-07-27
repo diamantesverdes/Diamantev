@@ -1124,6 +1124,7 @@ export default function Admin() {
                                 className="day-task-item"
                                 onClick={() => {
                                   try {
+                                    alert('Toque detectado, fecha: ' + t.date + ', tiene nota: ' + hasBlocks)
                                     setTaskSearch('')
                                     setTaskSearchSubmitted('')
                                     setSelectedDay(t.date)
