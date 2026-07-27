@@ -117,6 +117,14 @@ export default function Admin() {
       alert('Selecciona una categoría para la planta nueva')
       return
     }
+    if (usingNew) {
+      const nameNormalized = lineForm.new_plant_name.trim().toLowerCase()
+      const existing = plants.find(p => p.name.trim().toLowerCase() === nameNormalized)
+      if (existing) {
+        alert(`Ya existe una planta llamada "${existing.name}". Selecciónala de la lista "Selecciona planta existente" en vez de escribirla como nueva, para no duplicarla.`)
+        return
+      }
+    }
     const plant = lineForm.plant_id ? plants.find(p => p.id === lineForm.plant_id) : null
     setLoteLines(prev => [...prev, { ...lineForm, plant_name: usingNew ? lineForm.new_plant_name : (plant ? plant.name : '') }])
     setLineForm({ plant_id: '', new_plant_name: '', new_plant_category: '', quantity: '', unit_cost: '', sale_price: '', file: null })
