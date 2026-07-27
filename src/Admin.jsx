@@ -17,13 +17,6 @@ export default function Admin() {
   const [plantsSearch, setPlantsSearch] = useState('')
   const [selectedLabels, setSelectedLabels] = useState(new Set())
 
-  const [notes, setNotes] = useState([])
-  const [noteForm, setNoteForm] = useState({ category_id: '', text: '', photos: [], video: null })
-  const [savingNote, setSavingNote] = useState(false)
-  const [selectedNotes, setSelectedNotes] = useState(new Set())
-  const [notesCategoryFilter, setNotesCategoryFilter] = useState('all')
-  const [notesSearch, setNotesSearch] = useState('')
-
   const [gardenTags, setGardenTags] = useState([])
   const [gardenTasks, setGardenTasks] = useState([])
   const [calendarMonth, setCalendarMonth] = useState(() => { const d = new Date(); d.setDate(1); return d })
@@ -87,7 +80,6 @@ export default function Admin() {
     const { data: comps } = await supabase.from('compras').select('*').order('created_at', { ascending: false })
     const { data: lts } = await supabase.from('compra_lotes').select('*').order('numero', { ascending: false })
     const { data: decs } = await supabase.from('decrementos').select('*').order('created_at', { ascending: false })
-    const { data: nts } = await supabase.from('category_notes').select('*').order('created_at', { ascending: false })
     const { data: pnts } = await supabase.from('plant_notes').select('*').order('created_at', { ascending: false })
     const { data: tags } = await supabase.from('garden_tags').select('*').order('created_at')
     const { data: tasks } = await supabase.from('garden_tasks').select('*').order('date')
@@ -97,7 +89,6 @@ export default function Admin() {
     setCompras(comps || [])
     setLotes(lts || [])
     setDecrementos(decs || [])
-    setNotes(nts || [])
     setPlantNotes(pnts || [])
     setGardenTags(tags || [])
     setGardenTasks(tasks || [])
@@ -406,70 +397,6 @@ export default function Admin() {
     window.print()
   }
 
-  // ---------- Notas por categoría ----------
-  async function addNote(e) {
-    e.preventDefault()
-    if (!noteForm.category_id) {
-      alert('Selecciona la categoría de la nota')
-      return
-    }
-    if (!noteForm.text.trim() && noteForm.photos.length === 0 && !noteForm.video) {
-      alert('Agrega texto, fotos o un video a la nota')
-      return
-    }
-    setSavingNote(true)
-    const photo_urls = []
-    for (const file of noteForm.photos) {
-      const url = await uploadImage(file, 'category-notes')
-      if (url) photo_urls.push(url)
-    }
-    let video_url = null
-    if (noteForm.video) video_url = await uploadImage(noteForm.video, 'category-notes')
-
-    const { error } = await supabase.from('category_notes').insert({
-      category_id: noteForm.category_id,
-      text: noteForm.text,
-      photo_urls,
-      video_url,
-    })
-    if (error) {
-      alert('Error al guardar la nota: ' + error.message)
-      setSavingNote(false)
-      return
-    }
-    setNoteForm({ category_id: noteForm.category_id, text: '', photos: [], video: null })
-    setSavingNote(false)
-    loadData()
-  }
-
-  async function deleteNote(id) {
-    if (!confirm('¿Borrar esta nota permanentemente?')) return
-    await supabase.from('category_notes').delete().eq('id', id)
-    setSelectedNotes(prev => {
-      const next = new Set(prev)
-      next.delete(id)
-      return next
-    })
-    loadData()
-  }
-
-  function toggleNoteSelect(id) {
-    setSelectedNotes(prev => {
-      const next = new Set(prev)
-      if (next.has(id)) next.delete(id)
-      else next.add(id)
-      return next
-    })
-  }
-
-  function selectAllNotes(list) {
-    setSelectedNotes(new Set(list.map(n => n.id)))
-  }
-
-  function clearNoteSelection() {
-    setSelectedNotes(new Set())
-  }
-
   async function urlToFile(url) {
     try {
       const res = await fetch(url)
@@ -481,29 +408,20 @@ export default function Admin() {
     }
   }
 
-  async function shareNotes() {
-    const selected = notes.filter(n => selectedNotes.has(n.id))
-    if (selected.length === 0) return
+  async function shareCalendarNote(t) {
     setSharingNotes(true)
     try {
-      const textParts = []
-      const fileUrls = []
-      for (const n of selected) {
-        const cat = categories.find(c => c.id === n.category_id)
-        const header = `${cat ? (cat.emoji + ' ' + cat.name) : 'Nota'} (${new Date(n.created_at).toLocaleDateString()})`
-        textParts.push(n.text ? `${header}:\n${n.text}` : header)
-        for (const url of (n.photo_urls || [])) fileUrls.push(url)
-        if (n.video_url) fileUrls.push(n.video_url)
-      }
-      const shareText = textParts.join('\n\n')
+      const header = `🌿 Calendario (${new Date(t.date + 'T00:00:00').toLocaleDateString()})`
+      const textBlocks = (t.content_blocks || []).filter(b => b.type === 'text').map(b => b.content).join('\n')
+      const shareText = textBlocks ? `${header}:\n${textBlocks}` : header
+      const fileUrls = (t.content_blocks || []).filter(b => (b.type === 'photo' || b.type === 'video') && b.url).map(b => b.url)
       const files = (await Promise.all(fileUrls.map(urlToFile))).filter(Boolean)
 
       if (navigator.share && files.length > 0 && navigator.canShare && navigator.canShare({ files })) {
-        await navigator.share({ title: 'Notas Diamantev', text: shareText, files })
+        await navigator.share({ title: 'Nota del calendario Diamantev', text: shareText, files })
       } else if (navigator.share) {
-        await navigator.share({ title: 'Notas Diamantev', text: shareText })
+        await navigator.share({ title: 'Nota del calendario Diamantev', text: shareText })
       } else {
-        alert('Tu navegador no puede compartir archivos directamente. Se abrirá WhatsApp solo con el texto; las fotos/video deberás adjuntarlas manualmente.')
         window.open(`https://wa.me/?text=${encodeURIComponent(shareText)}`, '_blank')
       }
     } catch (err) {
@@ -512,57 +430,21 @@ export default function Admin() {
     setSharingNotes(false)
   }
 
-  async function shareAllNotes() {
+  async function sharePlantNote(n) {
     setSharingNotes(true)
     try {
-      const textParts = []
-      const fileUrls = []
-
-      for (const n of notes) {
-        const cat = categories.find(c => c.id === n.category_id)
-        const header = `🏷️ ${cat ? (cat.emoji + ' ' + cat.name) : 'Nota'} (${new Date(n.created_at).toLocaleDateString()})`
-        textParts.push(n.text ? `${header}:\n${n.text}` : header)
-        for (const url of (n.photo_urls || [])) fileUrls.push(url)
-        if (n.video_url) fileUrls.push(n.video_url)
-      }
-
-      for (const t of gardenTasks) {
-        if (!t.content_blocks || t.content_blocks.length === 0) continue
-        const header = `🌿 Calendario (${new Date(t.date + 'T00:00:00').toLocaleDateString()})`
-        const textBlocks = t.content_blocks.filter(b => b.type === 'text').map(b => b.content).join('\n')
-        textParts.push(textBlocks ? `${header}:\n${textBlocks}` : header)
-        for (const b of t.content_blocks) {
-          if (b.type === 'photo' && b.url) fileUrls.push(b.url)
-          if (b.type === 'video' && b.url) fileUrls.push(b.url)
-        }
-      }
-
-      for (const n of plantNotes) {
-        const plant = plants.find(p => p.id === n.plant_id)
-        const header = `🪴 ${plant ? plant.name : 'Planta'} (${new Date(n.created_at).toLocaleDateString()})`
-        const textBlocks = (n.content_blocks || []).filter(b => b.type === 'text').map(b => b.content).join('\n')
-        textParts.push(textBlocks ? `${header}:\n${textBlocks}` : header)
-        for (const b of (n.content_blocks || [])) {
-          if (b.type === 'photo' && b.url) fileUrls.push(b.url)
-          if (b.type === 'video' && b.url) fileUrls.push(b.url)
-        }
-      }
-
-      if (textParts.length === 0) {
-        alert('Todavía no hay notas para respaldar.')
-        setSharingNotes(false)
-        return
-      }
-
-      const shareText = textParts.join('\n\n')
+      const plant = plants.find(p => p.id === n.plant_id)
+      const header = `🪴 ${plant ? plant.name : 'Planta'} (${new Date(n.created_at).toLocaleDateString()})`
+      const textBlocks = (n.content_blocks || []).filter(b => b.type === 'text').map(b => b.content).join('\n')
+      const shareText = textBlocks ? `${header}:\n${textBlocks}` : header
+      const fileUrls = (n.content_blocks || []).filter(b => (b.type === 'photo' || b.type === 'video') && b.url).map(b => b.url)
       const files = (await Promise.all(fileUrls.map(urlToFile))).filter(Boolean)
 
       if (navigator.share && files.length > 0 && navigator.canShare && navigator.canShare({ files })) {
-        await navigator.share({ title: 'Respaldo de notas Diamantev', text: shareText, files })
+        await navigator.share({ title: 'Nota de planta Diamantev', text: shareText, files })
       } else if (navigator.share) {
-        await navigator.share({ title: 'Respaldo de notas Diamantev', text: shareText })
+        await navigator.share({ title: 'Nota de planta Diamantev', text: shareText })
       } else {
-        alert('Tu navegador no puede compartir archivos directamente. Se abrirá WhatsApp solo con el texto; las fotos/video deberás adjuntarlas manualmente.')
         window.open(`https://wa.me/?text=${encodeURIComponent(shareText)}`, '_blank')
       }
     } catch (err) {
@@ -770,7 +652,6 @@ export default function Admin() {
     { key: 'categorias', label: 'Categorías', icon: '🏷️', count: categories.length },
     { key: 'pedidos', label: 'Ventas y Decrementos', icon: '🧾', count: pedidosPendientes },
     { key: 'ingresos', label: 'Ingresos', icon: '📦', count: ingresosEnCurso },
-    { key: 'notas', label: 'Notas', icon: '📝', count: notes.length },
     { key: 'calendario', label: 'Calendario', icon: '🌿', count: gardenTasks.filter(t => t.date >= formatDateStr(new Date())).length },
   ]
 
@@ -779,7 +660,6 @@ export default function Admin() {
     categorias: '🏷️ Categorías',
     pedidos: '🧾 Ventas y Decrementos',
     ingresos: '📦 Ingresos',
-    notas: '📝 Notas',
     calendario: '🌿 Calendario de Jardín',
   }
 
@@ -893,6 +773,7 @@ export default function Admin() {
                                     <div className="day-task-row">
                                       <span className="task-note">{new Date(n.created_at).toLocaleDateString()}</span>
                                       <button type="button" className="task-edit-btn" onClick={() => openEditPlantNote(n)}>✏️</button>
+                                      <button type="button" className="task-edit-btn" onClick={() => sharePlantNote(n)} disabled={sharingNotes} title="Compartir por WhatsApp">📲</button>
                                       <button type="button" className="task-delete-btn" onClick={() => deletePlantNote(n.id)}>✕</button>
                                     </div>
                                     {(n.content_blocks || []).map((b, i) => (
@@ -1280,116 +1161,6 @@ export default function Admin() {
                 )
               })()}
 
-              {view === 'notas' && (
-                <>
-                  <button type="button" className="print-btn" onClick={shareAllNotes} disabled={sharingNotes} style={{ marginBottom: 12 }}>
-                    {sharingNotes ? 'Preparando...' : '📤 Respaldar todas las notas (categoría + calendario + planta)'}
-                  </button>
-
-                  <form className="admin-form" onSubmit={addNote}>
-                    <h3>Agregar nota</h3>
-                    <select value={noteForm.category_id} onChange={e => setNoteForm({ ...noteForm, category_id: e.target.value })}>
-                      <option value="">Selecciona categoría</option>
-                      {categories.map(c => <option key={c.id} value={c.id}>{c.emoji} {c.name}</option>)}
-                    </select>
-                    <textarea
-                      placeholder="Escribe tu nota..."
-                      rows={3}
-                      value={noteForm.text}
-                      onChange={e => setNoteForm({ ...noteForm, text: e.target.value })}
-                    />
-                    <label className="file-label">
-                      📷 Agregar fotos
-                      <input
-                        type="file"
-                        accept="image/*"
-                        multiple
-                        style={{ display: 'none' }}
-                        onChange={e => setNoteForm({ ...noteForm, photos: Array.from(e.target.files) })}
-                      />
-                    </label>
-                    {noteForm.photos.length > 0 && <span className="note-file-count">{noteForm.photos.length} foto(s) seleccionadas</span>}
-                    <label className="file-label">
-                      🎥 Agregar video
-                      <input
-                        type="file"
-                        accept="video/*"
-                        style={{ display: 'none' }}
-                        onChange={e => setNoteForm({ ...noteForm, video: e.target.files[0] || null })}
-                      />
-                    </label>
-                    {noteForm.video && <span className="note-file-count">Video: {noteForm.video.name}</span>}
-                    <button type="submit" disabled={savingNote}>{savingNote ? 'Guardando...' : 'Guardar nota'}</button>
-                  </form>
-
-                  <select className="gallery-select" value={notesCategoryFilter} onChange={e => setNotesCategoryFilter(e.target.value)}>
-                    <option value="all">Todas las categorías</option>
-                    {categories.map(c => <option key={c.id} value={c.id}>{c.emoji} {c.name}</option>)}
-                  </select>
-
-                  <input
-                    className="order-search"
-                    placeholder="Buscar en las notas..."
-                    value={notesSearch}
-                    onChange={e => setNotesSearch(e.target.value)}
-                  />
-
-                  {(() => {
-                    const filteredNotes = notes
-                      .filter(n => notesCategoryFilter === 'all' || n.category_id === notesCategoryFilter)
-                      .filter(n => {
-                        const term = notesSearch.trim().toLowerCase()
-                        if (!term) return true
-                        const cat = categories.find(c => c.id === n.category_id)
-                        return (n.text || '').toLowerCase().includes(term) || (cat?.name || '').toLowerCase().includes(term)
-                      })
-                    return (
-                      <>
-                        <div className="label-select-bar">
-                          <button type="button" onClick={() => selectAllNotes(filteredNotes)}>Seleccionar todas</button>
-                          <button type="button" onClick={clearNoteSelection}>Deseleccionar todas</button>
-                          {selectedNotes.size > 0 && (
-                            <button type="button" className="print-btn" onClick={shareNotes} disabled={sharingNotes}>
-                              {sharingNotes ? 'Preparando...' : `📲 Compartir seleccionadas (${selectedNotes.size})`}
-                            </button>
-                          )}
-                        </div>
-
-                        {filteredNotes.length === 0 && <p className="status-msg">Todavía no hay notas en esta categoría.</p>}
-                        <div className="admin-list">
-                          {filteredNotes.map(n => {
-                            const cat = categories.find(c => c.id === n.category_id)
-                            return (
-                              <div key={n.id} className="admin-item note-item">
-                                <label className="gallery-checkbox note-checkbox">
-                                  <input type="checkbox" checked={selectedNotes.has(n.id)} onChange={() => toggleNoteSelect(n.id)} />
-                                </label>
-                                <div className="admin-item-info">
-                                  <strong>{cat ? `${cat.emoji} ${cat.name}` : 'Sin categoría'}</strong>
-                                  <span>{new Date(n.created_at).toLocaleDateString()}</span>
-                                  {n.text && <p className="note-text">{n.text}</p>}
-                                  {n.photo_urls && n.photo_urls.length > 0 && (
-                                    <div className="note-photos">
-                                      {n.photo_urls.map((url, i) => <img key={i} src={url} alt="" />)}
-                                    </div>
-                                  )}
-                                  {n.video_url && (
-                                    <video src={n.video_url} controls className="note-video" />
-                                  )}
-                                  <div className="admin-item-actions">
-                                    <button onClick={() => deleteNote(n.id)} className="danger">Borrar</button>
-                                  </div>
-                                </div>
-                              </div>
-                            )
-                          })}
-                        </div>
-                      </>
-                    )
-                  })()}
-                </>
-              )}
-
               {view === 'calendario' && (
                 <>
                   <div className="calendar-header">
@@ -1683,6 +1454,7 @@ export default function Admin() {
                                 {!hasBlocks && t.note && <span className="task-note">— {t.note}</span>}
                                 {hasBlocks && <span className="task-tag-name">📝 Nota libre</span>}
                                 {hasBlocks && <button type="button" className="task-edit-btn" onClick={() => openEditNote(t)}>✏️</button>}
+                                {hasBlocks && <button type="button" className="task-edit-btn" onClick={() => shareCalendarNote(t)} disabled={sharingNotes} title="Compartir por WhatsApp">📲</button>}
                                 <button type="button" className="task-delete-btn" onClick={() => deleteTask(t.id)}>✕</button>
                               </div>
                               {hasBlocks && (
