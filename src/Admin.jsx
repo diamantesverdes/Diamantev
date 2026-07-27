@@ -512,6 +512,65 @@ export default function Admin() {
     setSharingNotes(false)
   }
 
+  async function shareAllNotes() {
+    setSharingNotes(true)
+    try {
+      const textParts = []
+      const fileUrls = []
+
+      for (const n of notes) {
+        const cat = categories.find(c => c.id === n.category_id)
+        const header = `🏷️ ${cat ? (cat.emoji + ' ' + cat.name) : 'Nota'} (${new Date(n.created_at).toLocaleDateString()})`
+        textParts.push(n.text ? `${header}:\n${n.text}` : header)
+        for (const url of (n.photo_urls || [])) fileUrls.push(url)
+        if (n.video_url) fileUrls.push(n.video_url)
+      }
+
+      for (const t of gardenTasks) {
+        if (!t.content_blocks || t.content_blocks.length === 0) continue
+        const header = `🌿 Calendario (${new Date(t.date + 'T00:00:00').toLocaleDateString()})`
+        const textBlocks = t.content_blocks.filter(b => b.type === 'text').map(b => b.content).join('\n')
+        textParts.push(textBlocks ? `${header}:\n${textBlocks}` : header)
+        for (const b of t.content_blocks) {
+          if (b.type === 'photo' && b.url) fileUrls.push(b.url)
+          if (b.type === 'video' && b.url) fileUrls.push(b.url)
+        }
+      }
+
+      for (const n of plantNotes) {
+        const plant = plants.find(p => p.id === n.plant_id)
+        const header = `🪴 ${plant ? plant.name : 'Planta'} (${new Date(n.created_at).toLocaleDateString()})`
+        const textBlocks = (n.content_blocks || []).filter(b => b.type === 'text').map(b => b.content).join('\n')
+        textParts.push(textBlocks ? `${header}:\n${textBlocks}` : header)
+        for (const b of (n.content_blocks || [])) {
+          if (b.type === 'photo' && b.url) fileUrls.push(b.url)
+          if (b.type === 'video' && b.url) fileUrls.push(b.url)
+        }
+      }
+
+      if (textParts.length === 0) {
+        alert('Todavía no hay notas para respaldar.')
+        setSharingNotes(false)
+        return
+      }
+
+      const shareText = textParts.join('\n\n')
+      const files = (await Promise.all(fileUrls.map(urlToFile))).filter(Boolean)
+
+      if (navigator.share && files.length > 0 && navigator.canShare && navigator.canShare({ files })) {
+        await navigator.share({ title: 'Respaldo de notas Diamantev', text: shareText, files })
+      } else if (navigator.share) {
+        await navigator.share({ title: 'Respaldo de notas Diamantev', text: shareText })
+      } else {
+        alert('Tu navegador no puede compartir archivos directamente. Se abrirá WhatsApp solo con el texto; las fotos/video deberás adjuntarlas manualmente.')
+        window.open(`https://wa.me/?text=${encodeURIComponent(shareText)}`, '_blank')
+      }
+    } catch (err) {
+      if (err.name !== 'AbortError') alert('No se pudo compartir. Intenta de nuevo.')
+    }
+    setSharingNotes(false)
+  }
+
   // ---------- Calendario de Jardín ----------
   function formatDateStr(d) {
     const y = d.getFullYear()
@@ -1223,6 +1282,10 @@ export default function Admin() {
 
               {view === 'notas' && (
                 <>
+                  <button type="button" className="print-btn" onClick={shareAllNotes} disabled={sharingNotes} style={{ marginBottom: 12 }}>
+                    {sharingNotes ? 'Preparando...' : '📤 Respaldar todas las notas (categoría + calendario + planta)'}
+                  </button>
+
                   <form className="admin-form" onSubmit={addNote}>
                     <h3>Agregar nota</h3>
                     <select value={noteForm.category_id} onChange={e => setNoteForm({ ...noteForm, category_id: e.target.value })}>
