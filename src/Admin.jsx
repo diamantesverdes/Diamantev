@@ -45,8 +45,13 @@ export default function Admin() {
   const [approvingIds, setApprovingIds] = useState([])
 
   const [compras, setCompras] = useState([])
-  const [compraForm, setCompraForm] = useState({ plant_id: '', quantity: '', unit_cost: '', sale_price: '', proveedor: '', new_plant_name: '', new_plant_category: '' })
-  const [savingCompra, setSavingCompra] = useState(false)
+  const [lotes, setLotes] = useState([])
+  const [loteBuilderOpen, setLoteBuilderOpen] = useState(false)
+  const [loteNota, setLoteNota] = useState('')
+  const [loteProveedor, setLoteProveedor] = useState('')
+  const [loteLines, setLoteLines] = useState([])
+  const [lineForm, setLineForm] = useState({ plant_id: '', new_plant_name: '', new_plant_category: '', quantity: '', unit_cost: '', sale_price: '', file: null })
+  const [savingLote, setSavingLote] = useState(false)
 
   const [decrementos, setDecrementos] = useState([])
   const [decForm, setDecForm] = useState({ plant_id: '', quantity: '', motivo: '', motivo_otro: '' })
@@ -71,6 +76,7 @@ export default function Admin() {
     const { data: pls } = await supabase.from('plants').select('*').order('name')
     const { data: ords } = await supabase.from('orders').select('*, order_items(*)').order('id', { ascending: false })
     const { data: comps } = await supabase.from('compras').select('*').order('created_at', { ascending: false })
+    const { data: lts } = await supabase.from('compra_lotes').select('*').order('numero', { ascending: false })
     const { data: decs } = await supabase.from('decrementos').select('*').order('created_at', { ascending: false })
     const { data: nts } = await supabase.from('category_notes').select('*').order('created_at', { ascending: false })
     const { data: tags } = await supabase.from('garden_tags').select('*').order('created_at')
@@ -79,6 +85,7 @@ export default function Admin() {
     setPlants(pls || [])
     setOrders(ords || [])
     setCompras(comps || [])
+    setLotes(lts || [])
     setDecrementos(decs || [])
     setNotes(nts || [])
     setGardenTags(tags || [])
@@ -95,65 +102,54 @@ export default function Admin() {
     return data.publicUrl
   }
 
-  // ---------- Ingresos (compras) ----------
-  async function addCompra(e) {
+  // ---------- Ingresos (compras agrupadas en lotes) ----------
+  function addLineToLote(e) {
     e.preventDefault()
-    const usingNew = !compraForm.plant_id && compraForm.new_plant_name
-    if ((!compraForm.plant_id && !usingNew) || !compraForm.quantity || !compraForm.unit_cost) {
+    const usingNew = !lineForm.plant_id && lineForm.new_plant_name
+    if ((!lineForm.plant_id && !usingNew) || !lineForm.quantity || !lineForm.unit_cost) {
       alert('Selecciona una planta o escribe el nombre de una nueva, y completa cantidad y costo')
       return
     }
-    if (usingNew && !compraForm.new_plant_category) {
+    if (usingNew && !lineForm.new_plant_category) {
       alert('Selecciona una categoría para la planta nueva')
       return
     }
-    setSavingCompra(true)
-    const quantity = Number(compraForm.quantity)
-    const unit_cost = Number(compraForm.unit_cost)
-    const sale_price = compraForm.sale_price ? Number(compraForm.sale_price) : null
+    const plant = lineForm.plant_id ? plants.find(p => p.id === lineForm.plant_id) : null
+    setLoteLines(prev => [...prev, { ...lineForm, plant_name: usingNew ? lineForm.new_plant_name : (plant ? plant.name : '') }])
+    setLineForm({ plant_id: '', new_plant_name: '', new_plant_category: '', quantity: '', unit_cost: '', sale_price: '', file: null })
+  }
 
-    let image_url = null
-    if (compraForm.file) image_url = await uploadImage(compraForm.file)
+  function removeLoteLine(index) {
+    setLoteLines(prev => prev.filter((_, i) => i !== index))
+  }
 
-    if (usingNew) {
-      const { error } = await supabase.from('compras').insert({
-        plant_id: null,
-        plant_name: compraForm.new_plant_name,
-        new_plant_category: compraForm.new_plant_category,
-        quantity,
-        unit_cost,
-        sale_price,
-        image_url,
-        total: quantity * unit_cost,
-        proveedor: compraForm.proveedor,
-        status: 'pedido',
-      })
-      if (error) {
-        alert('Error al registrar el ingreso: ' + error.message)
-        setSavingCompra(false)
-        return
-      }
-    } else {
-      const plant = plants.find(p => p.id === compraForm.plant_id)
-      const { error } = await supabase.from('compras').insert({
-        plant_id: compraForm.plant_id,
-        plant_name: plant ? plant.name : '',
-        quantity,
-        unit_cost,
-        sale_price,
-        image_url,
-        total: quantity * unit_cost,
-        proveedor: compraForm.proveedor,
-        status: 'pedido',
-      })
-      if (error) {
-        alert('Error al registrar el ingreso: ' + error.message)
-        setSavingCompra(false)
-        return
-      }
+  async function saveLote() {
+    if (loteLines.length === 0) { alert('Agrega al menos una planta a la compra'); return }
+    setSavingLote(true)
+    const { data: lote, error: loteError } = await supabase
+      .from('compra_lotes').insert({ nota: loteNota, proveedor: loteProveedor }).select().single()
+    if (loteError) { alert('Error al crear la compra: ' + loteError.message); setSavingLote(false); return }
+
+    for (const line of loteLines) {
+      const usingNew = !line.plant_id && line.new_plant_name
+      const quantity = Number(line.quantity)
+      const unit_cost = Number(line.unit_cost)
+      const sale_price = line.sale_price ? Number(line.sale_price) : null
+      let image_url = null
+      if (line.file) image_url = await uploadImage(line.file)
+
+      const row = usingNew
+        ? { plant_id: null, plant_name: line.plant_name, new_plant_category: line.new_plant_category, quantity, unit_cost, sale_price, image_url, total: quantity * unit_cost, proveedor: loteProveedor, status: 'pedido', lote_id: lote.id }
+        : { plant_id: line.plant_id, plant_name: line.plant_name, quantity, unit_cost, sale_price, image_url, total: quantity * unit_cost, proveedor: loteProveedor, status: 'pedido', lote_id: lote.id }
+
+      const { error } = await supabase.from('compras').insert(row)
+      if (error) alert('Error al guardar una de las plantas: ' + error.message)
     }
-    setCompraForm({ plant_id: '', quantity: '', unit_cost: '', sale_price: '', proveedor: '', new_plant_name: '', new_plant_category: '', file: null })
-    setSavingCompra(false)
+    setLoteNota('')
+    setLoteProveedor('')
+    setLoteLines([])
+    setLoteBuilderOpen(false)
+    setSavingLote(false)
     loadData()
   }
 
@@ -601,7 +597,7 @@ export default function Admin() {
     )
   }
 
-  // Lista unificada de ventas + decrementos manuales, para "Pedidos"
+  // Lista unificada de ventas + decrementos manuales, para "Ventas y Decrementos"
   const movimientos = [
     ...orders.map(o => ({ ...o, _type: 'venta' })),
     ...decrementos.map(d => ({ ...d, _type: 'decremento' })),
@@ -908,60 +904,141 @@ export default function Admin() {
                 </>
               )}
 
-              {view === 'ingresos' && (
-                <>
-                  <form className="admin-form" onSubmit={addCompra}>
-                    <h3>Registrar ingreso (compra o stock inicial)</h3>
-                    <select value={compraForm.plant_id} onChange={e => setCompraForm({ ...compraForm, plant_id: e.target.value, new_plant_name: '', new_plant_category: '' })}>
-                      <option value="">Selecciona planta existente</option>
-                      {plants.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-                    </select>
-                    <p style={{ margin: '4px 0', fontSize: '0.8rem', color: '#6b6b5f' }}>— o registra una planta nueva —</p>
-                    <input placeholder="Nombre de planta nueva" value={compraForm.new_plant_name || ''} onChange={e => setCompraForm({ ...compraForm, plant_id: '', new_plant_name: e.target.value })} />
-                    <select value={compraForm.new_plant_category || ''} onChange={e => setCompraForm({ ...compraForm, new_plant_category: e.target.value })}>
-                      <option value="">Selecciona categoría (crea la categoría primero en Catálogo si no existe)</option>
-                      {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                    </select>
-                    <input placeholder="Procedencia / Proveedor" value={compraForm.proveedor} onChange={e => setCompraForm({ ...compraForm, proveedor: e.target.value })} />
-                    <input placeholder="Cantidad" type="number" value={compraForm.quantity} onChange={e => setCompraForm({ ...compraForm, quantity: e.target.value })} />
-                    <input placeholder="Precio de compra (por unidad)" type="number" step="0.01" value={compraForm.unit_cost} onChange={e => setCompraForm({ ...compraForm, unit_cost: e.target.value })} />
-                    <input placeholder="Precio de venta (opcional)" type="number" step="0.01" value={compraForm.sale_price} onChange={e => setCompraForm({ ...compraForm, sale_price: e.target.value })} />
-                    <input type="file" accept="image/*" onChange={e => setCompraForm({ ...compraForm, file: e.target.files[0] })} />
-                    <button type="submit" disabled={savingCompra}>{savingCompra ? 'Guardando...' : 'Registrar ingreso'}</button>
-                  </form>
+              {view === 'ingresos' && (() => {
+                const comprasByLote = {}
+                const comprasSinLote = []
+                compras.forEach(c => {
+                  if (c.lote_id) {
+                    if (!comprasByLote[c.lote_id]) comprasByLote[c.lote_id] = []
+                    comprasByLote[c.lote_id].push(c)
+                  } else {
+                    comprasSinLote.push(c)
+                  }
+                })
+                return (
+                  <>
+                    {!loteBuilderOpen ? (
+                      <button type="button" className="full-form-btn" onClick={() => setLoteBuilderOpen(true)}>🧺 Nueva compra</button>
+                    ) : (
+                      <div className="admin-form">
+                        <h3>Nueva compra</h3>
+                        <input placeholder="Proveedor (opcional)" value={loteProveedor} onChange={e => setLoteProveedor(e.target.value)} />
+                        <input placeholder="Nota (ej: 'Iris julio')" value={loteNota} onChange={e => setLoteNota(e.target.value)} />
 
-                  <div className="admin-list">
-                    {compras.length === 0 && <p className="status-msg">No hay ingresos registrados.</p>}
-                    {compras.map(c => (
-                      <div key={c.id} className="admin-item">
-                        {c.image_url ? <img src={c.image_url} alt={c.plant_name} /> : <div className="no-img-sm">Sin foto</div>}
-                        <div className="admin-item-info">
-                          <strong>{c.plant_name}</strong>
-                          <span>Procedencia: {c.proveedor || 'Sin especificar'}</span>
-                          <span className={`order-badge order-${c.status}`}>{c.status}</span>
-                          <span>Pedido: {new Date(c.created_at).toLocaleDateString()}</span>
-                          {c.fecha_pago && <span>Pagado: {new Date(c.fecha_pago).toLocaleDateString()}</span>}
-                          {c.fecha_recibido && <span>Recibido: {new Date(c.fecha_recibido).toLocaleDateString()}</span>}
-                          <span>Cantidad: {c.quantity}</span>
-                          <span>Total compra: ${Number(c.total).toFixed(2)}</span>
-                          <div className="admin-item-actions">
-                            {c.status === 'pedido' && (
-                              <button onClick={() => markCompraPagada(c)} disabled={approvingIds.includes(c.id)}>
-                                {approvingIds.includes(c.id) ? 'Procesando...' : 'Marcar como pagado'}
-                              </button>
-                            )}
-                            {c.status === 'pagado' && (
-                              <button onClick={() => markCompraRecibida(c)} disabled={approvingIds.includes(c.id)}>
-                                {approvingIds.includes(c.id) ? 'Procesando...' : 'Marcar como recibido'}
-                              </button>
-                            )}
+                        <h4>Agregar planta a esta compra</h4>
+                        <select value={lineForm.plant_id} onChange={e => setLineForm({ ...lineForm, plant_id: e.target.value, new_plant_name: '', new_plant_category: '' })}>
+                          <option value="">Selecciona planta existente</option>
+                          {plants.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                        </select>
+                        <p style={{ margin: '4px 0', fontSize: '0.8rem', color: '#6b6b5f' }}>— o registra una planta nueva —</p>
+                        <input placeholder="Nombre de planta nueva" value={lineForm.new_plant_name} onChange={e => setLineForm({ ...lineForm, plant_id: '', new_plant_name: e.target.value })} />
+                        <select value={lineForm.new_plant_category} onChange={e => setLineForm({ ...lineForm, new_plant_category: e.target.value })}>
+                          <option value="">Selecciona categoría (crea la categoría primero en Categorías si no existe)</option>
+                          {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                        </select>
+                        <input placeholder="Cantidad" type="number" value={lineForm.quantity} onChange={e => setLineForm({ ...lineForm, quantity: e.target.value })} />
+                        <input placeholder="Precio de compra (por unidad)" type="number" step="0.01" value={lineForm.unit_cost} onChange={e => setLineForm({ ...lineForm, unit_cost: e.target.value })} />
+                        <input placeholder="Precio de venta (opcional)" type="number" step="0.01" value={lineForm.sale_price} onChange={e => setLineForm({ ...lineForm, sale_price: e.target.value })} />
+                        <input type="file" accept="image/*" onChange={e => setLineForm({ ...lineForm, file: e.target.files[0] })} />
+                        <button type="button" onClick={addLineToLote}>➕ Agregar a la lista</button>
+
+                        {loteLines.length > 0 && (
+                          <div className="admin-list">
+                            <h4>Plantas en esta compra ({loteLines.length})</h4>
+                            {loteLines.map((line, i) => (
+                              <div key={i} className="admin-item">
+                                <div className="admin-item-info">
+                                  <strong>{line.plant_name}</strong>
+                                  <span>Cantidad: {line.quantity} — Costo: ${Number(line.unit_cost).toFixed(2)}</span>
+                                  <div className="admin-item-actions">
+                                    <button onClick={() => removeLoteLine(i)} className="danger">Quitar</button>
+                                  </div>
+                                </div>
+                              </div>
+                            ))}
                           </div>
+                        )}
+
+                        <div className="admin-item-actions">
+                          <button type="button" onClick={saveLote} disabled={savingLote || loteLines.length === 0}>
+                            {savingLote ? 'Guardando...' : 'Guardar compra'}
+                          </button>
+                          <button type="button" onClick={() => { setLoteBuilderOpen(false); setLoteLines([]); setLoteNota(''); setLoteProveedor('') }}>Cancelar</button>
                         </div>
                       </div>
-                    ))}
-                  </div>
-                </>
-              )}
+                    )}
+
+                    <div className="admin-list">
+                      {lotes.length === 0 && comprasSinLote.length === 0 && <p className="status-msg">No hay ingresos registrados.</p>}
+                      {lotes.map(lote => {
+                        const lineas = comprasByLote[lote.id] || []
+                        if (lineas.length === 0) return null
+                        const totalLote = lineas.reduce((sum, c) => sum + Number(c.total), 0)
+                        return (
+                          <div key={lote.id} className="admin-item lote-group">
+                            <div className="admin-item-info">
+                              <strong>🧺 Compra #{lote.numero}{lote.nota ? ` — ${lote.nota}` : ''}</strong>
+                              {lote.proveedor && <span>Procedencia: {lote.proveedor}</span>}
+                              <span>Fecha: {new Date(lote.created_at).toLocaleDateString()}</span>
+                              <span>Total compra: ${totalLote.toFixed(2)}</span>
+                              {lineas.map(c => (
+                                <div key={c.id} className="admin-item" style={{ marginLeft: 12 }}>
+                                  {c.image_url ? <img src={c.image_url} alt={c.plant_name} /> : <div className="no-img-sm">Sin foto</div>}
+                                  <div className="admin-item-info">
+                                    <strong>{c.plant_name}</strong>
+                                    <span className={`order-badge order-${c.status}`}>{c.status}</span>
+                                    <span>Cantidad: {c.quantity}</span>
+                                    <span>Subtotal: ${Number(c.total).toFixed(2)}</span>
+                                    <div className="admin-item-actions">
+                                      {c.status === 'pedido' && (
+                                        <button onClick={() => markCompraPagada(c)} disabled={approvingIds.includes(c.id)}>
+                                          {approvingIds.includes(c.id) ? 'Procesando...' : 'Marcar como pagado'}
+                                        </button>
+                                      )}
+                                      {c.status === 'pagado' && (
+                                        <button onClick={() => markCompraRecibida(c)} disabled={approvingIds.includes(c.id)}>
+                                          {approvingIds.includes(c.id) ? 'Procesando...' : 'Marcar como recibido'}
+                                        </button>
+                                      )}
+                                    </div>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )
+                      })}
+                      {comprasSinLote.map(c => (
+                        <div key={c.id} className="admin-item">
+                          {c.image_url ? <img src={c.image_url} alt={c.plant_name} /> : <div className="no-img-sm">Sin foto</div>}
+                          <div className="admin-item-info">
+                            <strong>{c.plant_name}</strong>
+                            <span>Procedencia: {c.proveedor || 'Sin especificar'}</span>
+                            <span className={`order-badge order-${c.status}`}>{c.status}</span>
+                            <span>Pedido: {new Date(c.created_at).toLocaleDateString()}</span>
+                            {c.fecha_pago && <span>Pagado: {new Date(c.fecha_pago).toLocaleDateString()}</span>}
+                            {c.fecha_recibido && <span>Recibido: {new Date(c.fecha_recibido).toLocaleDateString()}</span>}
+                            <span>Cantidad: {c.quantity}</span>
+                            <span>Total compra: ${Number(c.total).toFixed(2)}</span>
+                            <div className="admin-item-actions">
+                              {c.status === 'pedido' && (
+                                <button onClick={() => markCompraPagada(c)} disabled={approvingIds.includes(c.id)}>
+                                  {approvingIds.includes(c.id) ? 'Procesando...' : 'Marcar como pagado'}
+                                </button>
+                              )}
+                              {c.status === 'pagado' && (
+                                <button onClick={() => markCompraRecibida(c)} disabled={approvingIds.includes(c.id)}>
+                                  {approvingIds.includes(c.id) ? 'Procesando...' : 'Marcar como recibido'}
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                )
+              })()}
 
               {view === 'notas' && (
                 <>
