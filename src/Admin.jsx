@@ -771,8 +771,8 @@ export default function Admin() {
                               <label>Stock: <input type="number" defaultValue={p.stock} onBlur={e => updateStock(p.id, Number(e.target.value))} /></label>
                             </div>
                             <div className="admin-item-actions">
-                              <label className="icon-btn" title="Subir foto">
-                                📷 Foto
+                              <label className="file-label" title="Subir imagen">
+                                📷 Imagen
                                 <input
                                   type="file"
                                   accept="image/*"
