@@ -8,8 +8,11 @@ export default function App() {
   const [plants, setPlants] = useState([])
   const [categories, setCategories] = useState([])
   const [selectedCategory, setSelectedCategory] = useState(null)
+  const [stockFilter, setStockFilter] = useState('all') // 'all' | 'available'
   const [cart, setCart] = useState([])
   const [showCart, setShowCart] = useState(false)
+  const [favorites, setFavorites] = useState([])
+  const [showFavorites, setShowFavorites] = useState(false)
   const [loading, setLoading] = useState(true)
   const [customerName, setCustomerName] = useState('')
   const [customerPhone, setCustomerPhone] = useState('')
@@ -28,17 +31,31 @@ export default function App() {
 
   function openCategory(cat) {
     setSelectedCategory(cat)
+    setStockFilter('all')
+    setView('plants')
+  }
+
+  function openAllPlants() {
+    setSelectedCategory(null)
+    setStockFilter('all')
+    setView('plants')
+  }
+
+  function openAvailablePlants() {
+    setSelectedCategory(null)
+    setStockFilter('available')
     setView('plants')
   }
 
   function backToCategories() {
     setView('categories')
     setSelectedCategory(null)
+    setStockFilter('all')
   }
 
-  const filteredPlants = selectedCategory
-    ? plants.filter(p => p.category_id === selectedCategory.id)
-    : plants
+  const filteredPlants = plants
+    .filter(p => !selectedCategory || p.category_id === selectedCategory.id)
+    .filter(p => stockFilter === 'available' ? p.stock > 0 : true)
 
   function addToCart(plant) {
     setCart(prev => {
@@ -58,6 +75,25 @@ export default function App() {
       .map(i => i.id === id ? { ...i, quantity: i.quantity + delta } : i)
       .filter(i => i.quantity > 0)
     )
+  }
+
+  function toggleFavorite(plant) {
+    setFavorites(prev => {
+      const exists = prev.some(f => f.id === plant.id)
+      if (exists) return prev.filter(f => f.id !== plant.id)
+      return [...prev, plant]
+    })
+  }
+
+  function isFavorite(id) {
+    return favorites.some(f => f.id === id)
+  }
+
+  function sendFavorites() {
+    if (favorites.length === 0) return
+    const lines = favorites.map(f => `- ${f.name}`).join('%0A')
+    const message = `Hola, me interesan estas plantas de Jardín Diamantev:%0A%0A${lines}`
+    window.open(`https://wa.me/${WHATSAPP_NUMBER}?text=${message}`, '_blank')
   }
 
   const total = cart.reduce((sum, i) => sum + i.price * i.quantity, 0)
@@ -102,16 +138,29 @@ export default function App() {
 
   return (
     <div className="app">
-      
-<div className="banner">
-        <img src="/public/1784570963668.png" alt="Diamantev" className="logo" />
-        <a href="/admin" className="admin-link" aria-label="Administrador">⚙️</a>
+
+      <div className="banner">
+        <img src="/1784570963668.png" alt="Diamantev" className="logo" />
         <p className="welcome">Bienvenidos a nuestro jardín, donde cada planta es una joya viva.</p>
       </div>
+
       {toast && <div className="toast">{toast}</div>}
-      <button className="cart-fab" onClick={() => setShowCart(true)}>
+
+      <button className="favorites-fab" onClick={() => setShowFavorites(true)} aria-label="Mi lista">
+        ❤️ {favorites.length > 0 && <span className="cart-badge">{favorites.length}</span>}
+      </button>
+      <button className="cart-fab" onClick={() => setShowCart(true)} aria-label="Carrito">
         🛒 {cart.length > 0 && <span className="cart-badge">{cart.reduce((s, i) => s + i.quantity, 0)}</span>}
       </button>
+      <a
+        className="whatsapp-fab"
+        href={`https://wa.me/${WHATSAPP_NUMBER}`}
+        target="_blank"
+        rel="noreferrer"
+        aria-label="Escríbenos por WhatsApp"
+      >
+        💬
+      </a>
 
       {view === 'categories' ? (
         <>
@@ -123,9 +172,13 @@ export default function App() {
             <p className="status-msg">Cargando...</p>
           ) : (
             <div className="cat-list">
-              <div className="cat-row" onClick={() => { setSelectedCategory(null); setView('plants') }}>
+              <div className="cat-row" onClick={openAllPlants}>
                 <div className="cat-thumb cat-thumb-all">🪴</div>
                 <div className="cat-label"><span>Ver todas las plantas</span></div>
+              </div>
+              <div className="cat-row" onClick={openAvailablePlants}>
+                <div className="cat-thumb cat-thumb-all">✅</div>
+                <div className="cat-label"><span>Solo disponibles</span></div>
               </div>
               {categories.map(cat => (
                 <div key={cat.id} className="cat-row" onClick={() => openCategory(cat)}>
@@ -141,7 +194,11 @@ export default function App() {
       ) : (
         <>
           <button className="back-btn" onClick={backToCategories}>← Volver a categorías</button>
-          <h2 className="plants-title">{selectedCategory ? `${selectedCategory.emoji || ''} ${selectedCategory.name}` : 'Todas las plantas'}</h2>
+          <h2 className="plants-title">
+            {selectedCategory
+              ? `${selectedCategory.emoji || ''} ${selectedCategory.name}`
+              : stockFilter === 'available' ? '✅ Plantas disponibles' : 'Todas las plantas'}
+          </h2>
           {filteredPlants.length === 0 ? (
             <p className="status-msg">Todavía no hay plantas en esta categoría.</p>
           ) : (
@@ -150,7 +207,14 @@ export default function App() {
                 <div key={plant.id} className="card">
                   <div className="card-img">
                     {plant.image_url ? <img src={plant.image_url} alt={plant.name} /> : <div className="no-img">Sin foto</div>}
-                    <img src="/public/1784460904562.png" alt="" className="watermark" />
+                    <img src="/1784460904562.png" alt="" className="watermark" />
+                    <button
+                      className={`fav-toggle-btn ${isFavorite(plant.id) ? 'active' : ''}`}
+                      onClick={() => toggleFavorite(plant)}
+                      aria-label="Agregar a mi lista"
+                    >
+                      {isFavorite(plant.id) ? '❤️' : '🤍'}
+                    </button>
                   </div>
                   <div className="card-body">
                     <h3>{plant.name}</h3>
@@ -167,6 +231,32 @@ export default function App() {
             </div>
           )}
         </>
+      )}
+
+      {showFavorites && (
+        <div className="cart-overlay" onClick={() => setShowFavorites(false)}>
+          <div className="cart-panel" onClick={e => e.stopPropagation()}>
+            <div className="cart-header">
+              <h2>Mi lista</h2>
+              <button onClick={() => setShowFavorites(false)}>✕</button>
+            </div>
+            {favorites.length === 0 ? (
+              <p className="status-msg">Todavía no has agregado plantas a tu lista</p>
+            ) : (
+              <>
+                {favorites.map(item => (
+                  <div key={item.id} className="cart-item">
+                    <span>{item.name}</span>
+                    <button onClick={() => toggleFavorite(item)}>✕</button>
+                  </div>
+                ))}
+                <button className="checkout-btn" onClick={sendFavorites}>
+                  💬 Enviar lista por WhatsApp
+                </button>
+              </>
+            )}
+          </div>
+        </div>
       )}
 
       {showCart && (
@@ -202,6 +292,15 @@ export default function App() {
           </div>
         </div>
       )}
+
+      <footer className="site-footer">
+        <span className="footer-script">Diamantev</span>
+        <p className="footer-tagline">Vivero de plantas ornamentales · Joyas Vivas</p>
+        <p className="footer-whatsapp">
+          WhatsApp: <a href={`https://wa.me/${WHATSAPP_NUMBER}`} target="_blank" rel="noreferrer">0992734743</a>
+        </p>
+        <p className="footer-copy">© 2026 Diamantev</p>
+      </footer>
     </div>
   )
 }
