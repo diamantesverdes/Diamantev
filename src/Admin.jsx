@@ -21,6 +21,7 @@ export default function Admin() {
   const [gardenTasks, setGardenTasks] = useState([])
   const [calendarMonth, setCalendarMonth] = useState(() => { const d = new Date(); d.setDate(1); return d })
   const [selectedDay, setSelectedDay] = useState(null)
+  const [dayModalOpen, setDayModalOpen] = useState(false)
   const [newTagForm, setNewTagForm] = useState({ name: '', color: '#a1665e' })
   const [taskFormOpen, setTaskFormOpen] = useState(false)
   const [taskSearch, setTaskSearch] = useState('')
@@ -1235,19 +1236,15 @@ export default function Admin() {
                                 key={t.id}
                                 className="day-task-item"
                                 onClick={() => {
-                                  try {
-                                    alert('Toque detectado, fecha: ' + t.date + ', tiene nota: ' + hasBlocks)
-                                    setTaskSearch('')
-                                    setTaskSearchSubmitted('')
-                                    setSelectedDay(t.date)
-                                    if (hasBlocks) {
-                                      setEditingTaskId(t.id)
-                                      setFreeNoteBlocks(t.content_blocks)
-                                      setFreeNoteCurrentText('')
-                                      setFreeNoteModalOpen(true)
-                                    }
-                                  } catch (err) {
-                                    alert('Error al abrir: ' + err.message)
+                                  setTaskSearch('')
+                                  setTaskSearchSubmitted('')
+                                  setSelectedDay(t.date)
+                                  setDayModalOpen(true)
+                                  if (hasBlocks) {
+                                    setEditingTaskId(t.id)
+                                    setFreeNoteBlocks(t.content_blocks)
+                                    setFreeNoteCurrentText('')
+                                    setFreeNoteModalOpen(true)
                                   }
                                 }}
                               >
@@ -1302,10 +1299,24 @@ export default function Admin() {
                   </div>
 
                   <div className="garden-tags-section">
+                    {selectedDay && (
+                      <div className="day-selected-bar">
+                        <span>Día seleccionado: {new Date(selectedDay + 'T00:00:00').toLocaleDateString('es-EC', { day: 'numeric', month: 'long' })}</span>
+                        <button type="button" onClick={() => setDayModalOpen(true)}>👁️ Ver detalles del día</button>
+                      </div>
+                    )}
                     <h3>Etiquetas de tareas</h3>
+                    <p style={{ fontSize: '0.8rem', color: '#6b6b5f', margin: '0 0 8px' }}>Selecciona un día en el calendario y toca ➕ en una etiqueta para asignarla directo.</p>
                     <div className="garden-tags-list">
                       {gardenTags.map(tag => (
                         <div key={tag.id} className="garden-tag-chip">
+                          <button
+                            type="button"
+                            className="tag-quick-add-btn"
+                            onClick={() => quickAddTask(tag.id)}
+                            disabled={!selectedDay}
+                            title={selectedDay ? `Agregar "${tag.name}" al día seleccionado` : 'Selecciona un día primero'}
+                          >➕</button>
                           <input
                             type="color"
                             className="tag-color-input"
@@ -1336,12 +1347,12 @@ export default function Admin() {
                     </form>
                   </div>
 
-                  {selectedDay && (
-                    <div className="admin-sheet-overlay" onClick={() => setSelectedDay(null)}>
+                  {selectedDay && dayModalOpen && (
+                    <div className="admin-sheet-overlay" onClick={() => setDayModalOpen(false)}>
                       <div className="day-panel day-panel-modal" onClick={e => e.stopPropagation()}>
                         <div className="free-note-modal-header">
                           <h4>{new Date(selectedDay + 'T00:00:00').toLocaleDateString('es-EC', { weekday: 'long', day: 'numeric', month: 'long' })}</h4>
-                          <button type="button" className="modal-close-btn" onClick={() => setSelectedDay(null)}>✕</button>
+                          <button type="button" className="modal-close-btn" onClick={() => setDayModalOpen(false)}>✕</button>
                         </div>
 
                       {gardenTags.length === 0 ? (
