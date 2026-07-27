@@ -65,6 +65,15 @@ export default function Admin() {
   const [categories, setCategories] = useState([])
   const [loading, setLoading] = useState(true)
 
+  const [plantNotes, setPlantNotes] = useState([])
+  const [plantNoteModalOpen, setPlantNoteModalOpen] = useState(false)
+  const [currentNotePlantId, setCurrentNotePlantId] = useState(null)
+  const [editingPlantNoteId, setEditingPlantNoteId] = useState(null)
+  const [plantNoteBlocks, setPlantNoteBlocks] = useState([])
+  const [plantNoteCurrentText, setPlantNoteCurrentText] = useState('')
+  const [savingPlantNote, setSavingPlantNote] = useState(false)
+  const [openPlantNotesListId, setOpenPlantNotesListId] = useState(null)
+
   const [newCatName, setNewCatName] = useState('')
   const [newCatEmoji, setNewCatEmoji] = useState('🌿')
 
@@ -79,6 +88,7 @@ export default function Admin() {
     const { data: lts } = await supabase.from('compra_lotes').select('*').order('numero', { ascending: false })
     const { data: decs } = await supabase.from('decrementos').select('*').order('created_at', { ascending: false })
     const { data: nts } = await supabase.from('category_notes').select('*').order('created_at', { ascending: false })
+    const { data: pnts } = await supabase.from('plant_notes').select('*').order('created_at', { ascending: false })
     const { data: tags } = await supabase.from('garden_tags').select('*').order('created_at')
     const { data: tasks } = await supabase.from('garden_tasks').select('*').order('date')
     setCategories(cats || [])
@@ -88,6 +98,7 @@ export default function Admin() {
     setLotes(lts || [])
     setDecrementos(decs || [])
     setNotes(nts || [])
+    setPlantNotes(pnts || [])
     setGardenTags(tags || [])
     setGardenTasks(tasks || [])
     setLoading(false)
@@ -263,6 +274,84 @@ export default function Admin() {
       }
       return
     }
+    loadData()
+  }
+
+  // ---------- Notas libres por planta ----------
+  function openNewPlantNote(plantId) {
+    setCurrentNotePlantId(plantId)
+    setEditingPlantNoteId(null)
+    setPlantNoteBlocks([])
+    setPlantNoteCurrentText('')
+    setPlantNoteModalOpen(true)
+  }
+
+  function openEditPlantNote(note) {
+    setCurrentNotePlantId(note.plant_id)
+    setEditingPlantNoteId(note.id)
+    setPlantNoteBlocks(note.content_blocks || [])
+    setPlantNoteCurrentText('')
+    setPlantNoteModalOpen(true)
+  }
+
+  function insertPhotoBlockToPlantNote(file) {
+    if (!file) return
+    setPlantNoteBlocks(prev => {
+      const next = [...prev]
+      if (plantNoteCurrentText.trim()) next.push({ type: 'text', content: plantNoteCurrentText })
+      next.push({ type: 'photo', file })
+      return next
+    })
+    setPlantNoteCurrentText('')
+  }
+
+  function insertVideoBlockToPlantNote(file) {
+    if (!file) return
+    setPlantNoteBlocks(prev => {
+      const next = [...prev]
+      if (plantNoteCurrentText.trim()) next.push({ type: 'text', content: plantNoteCurrentText })
+      next.push({ type: 'video', file })
+      return next
+    })
+    setPlantNoteCurrentText('')
+  }
+
+  function removeLastPlantNoteBlock() {
+    setPlantNoteBlocks(prev => prev.slice(0, -1))
+  }
+
+  async function savePlantNote() {
+    if (!currentNotePlantId) return
+    const blocks = [...plantNoteBlocks]
+    if (plantNoteCurrentText.trim()) blocks.push({ type: 'text', content: plantNoteCurrentText })
+    if (blocks.length === 0) return
+    setSavingPlantNote(true)
+    const finalBlocks = []
+    for (const b of blocks) {
+      if (b.type === 'text') {
+        finalBlocks.push(b)
+      } else if (b.url) {
+        finalBlocks.push(b)
+      } else {
+        const url = await uploadImage(b.file, 'category-notes')
+        if (url) finalBlocks.push({ type: b.type, url })
+      }
+    }
+    const { error } = editingPlantNoteId
+      ? await supabase.from('plant_notes').update({ content_blocks: finalBlocks }).eq('id', editingPlantNoteId)
+      : await supabase.from('plant_notes').insert({ plant_id: currentNotePlantId, content_blocks: finalBlocks })
+    if (error) { alert('Error al guardar la nota: ' + error.message); setSavingPlantNote(false); return }
+    setPlantNoteBlocks([])
+    setPlantNoteCurrentText('')
+    setEditingPlantNoteId(null)
+    setSavingPlantNote(false)
+    setPlantNoteModalOpen(false)
+    loadData()
+  }
+
+  async function deletePlantNote(id) {
+    if (!confirm('¿Borrar esta nota permanentemente?')) return
+    await supabase.from('plant_notes').delete().eq('id', id)
     loadData()
   }
 
@@ -718,7 +807,10 @@ export default function Admin() {
                     return (
                     <div className="admin-list">
                       {filteredPlants.length === 0 && <p className="status-msg">No se encontraron plantas.</p>}
-                      {filteredPlants.map(p => (
+                      {filteredPlants.map(p => {
+                        const notesForPlant = plantNotes.filter(n => n.plant_id === p.id)
+                        const notesOpen = openPlantNotesListId === p.id
+                        return (
                         <div key={p.id} className={`admin-item ${!p.active ? 'inactive' : ''}`}>
                           {p.image_url ? <img src={p.image_url} alt={p.name} /> : <div className="no-img-sm">Sin foto</div>}
                           <div className="admin-item-info">
@@ -731,13 +823,102 @@ export default function Admin() {
                             <div className="admin-item-actions">
                               <button onClick={() => toggleActive(p.id, p.active)}>{p.active ? 'Ocultar' : 'Mostrar'}</button>
                               <button onClick={() => deletePlant(p.id)} className="danger">Borrar</button>
+                              <button onClick={() => setOpenPlantNotesListId(notesOpen ? null : p.id)}>📝 Notas ({notesForPlant.length})</button>
                             </div>
+                            {notesOpen && (
+                              <div className="plant-notes-panel">
+                                <button type="button" className="full-form-btn" onClick={() => openNewPlantNote(p.id)}>📝 Nueva nota</button>
+                                {notesForPlant.length === 0 && <p className="status-msg">Todavía no hay notas para esta planta.</p>}
+                                {notesForPlant.map(n => (
+                                  <div key={n.id} className="note-blocks-view plant-note-entry">
+                                    <div className="day-task-row">
+                                      <span className="task-note">{new Date(n.created_at).toLocaleDateString()}</span>
+                                      <button type="button" className="task-edit-btn" onClick={() => openEditPlantNote(n)}>✏️</button>
+                                      <button type="button" className="task-delete-btn" onClick={() => deletePlantNote(n.id)}>✕</button>
+                                    </div>
+                                    {(n.content_blocks || []).map((b, i) => (
+                                      <div key={i}>
+                                        {b.type === 'text' && <p className="task-note">{b.content}</p>}
+                                        {b.type === 'photo' && <img src={b.url} alt="" className="note-block-photo" />}
+                                        {b.type === 'video' && <video src={b.url} controls className="note-video" />}
+                                      </div>
+                                    ))}
+                                  </div>
+                                ))}
+                              </div>
+                            )}
                           </div>
                         </div>
-                      ))}
+                        )
+                      })}
                     </div>
                     )
                   })()}
+
+                  {plantNoteModalOpen && (
+                    <div className="admin-sheet-overlay">
+                      <div className="free-note-modal" onClick={e => e.stopPropagation()}>
+                        <div className="free-note-modal-header">
+                          <h4>{editingPlantNoteId ? 'Editar nota' : 'Nota'} — {plants.find(p => p.id === currentNotePlantId)?.name || ''}</h4>
+                          <button
+                            type="button"
+                            className="modal-close-btn"
+                            onClick={() => {
+                              const hasUnsaved = plantNoteCurrentText.trim().length > 0
+                              if (hasUnsaved && !confirm('¿Cerrar sin guardar? Perderás lo que escribiste.')) return
+                              setPlantNoteModalOpen(false)
+                              setEditingPlantNoteId(null)
+                            }}
+                          >✕</button>
+                        </div>
+                        <div className="free-note-sheet">
+                          {plantNoteBlocks.map((b, i) => (
+                            <div key={i} className="note-sheet-block">
+                              {b.type === 'text' && <p>{b.content}</p>}
+                              {b.type === 'photo' && <img src={b.url || URL.createObjectURL(b.file)} alt="" className="note-sheet-photo" />}
+                              {b.type === 'video' && (
+                                <video src={b.url || URL.createObjectURL(b.file)} controls className="note-video" />
+                              )}
+                            </div>
+                          ))}
+                          <textarea
+                            className="note-sheet-textarea"
+                            placeholder={plantNoteBlocks.length > 0 ? 'Sigue escribiendo...' : 'Escribe una nota para esta planta...'}
+                            rows={plantNoteBlocks.length > 0 ? 2 : 4}
+                            value={plantNoteCurrentText}
+                            onChange={e => setPlantNoteCurrentText(e.target.value)}
+                            autoFocus
+                          />
+                          <div className="note-sheet-toolbar">
+                            <label className="icon-btn" title="Insertar foto aquí">
+                              📷
+                              <input
+                                type="file"
+                                accept="image/*"
+                                style={{ display: 'none' }}
+                                onChange={e => { insertPhotoBlockToPlantNote(e.target.files[0]); e.target.value = '' }}
+                              />
+                            </label>
+                            <label className="icon-btn" title="Insertar video aquí">
+                              🎥
+                              <input
+                                type="file"
+                                accept="video/*"
+                                style={{ display: 'none' }}
+                                onChange={e => { insertVideoBlockToPlantNote(e.target.files[0]); e.target.value = '' }}
+                              />
+                            </label>
+                            {plantNoteBlocks.length > 0 && (
+                              <button type="button" className="icon-btn-text" onClick={removeLastPlantNoteBlock}>Deshacer</button>
+                            )}
+                            <button type="button" className="save-note-btn-inline" onClick={savePlantNote} disabled={savingPlantNote}>
+                              {savingPlantNote ? 'Guardando...' : 'Guardar'}
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </>
               )}
 
