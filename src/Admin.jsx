@@ -624,7 +624,7 @@ export default function Admin() {
   const cards = [
     { key: 'plantas', label: 'Plantas', icon: '🪴', count: plants.length },
     { key: 'categorias', label: 'Categorías', icon: '🏷️', count: categories.length },
-    { key: 'pedidos', label: 'Pedidos', icon: '🧾', count: pedidosPendientes },
+    { key: 'pedidos', label: 'Ventas y Decrementos', icon: '🧾', count: pedidosPendientes },
     { key: 'ingresos', label: 'Ingresos', icon: '📦', count: ingresosEnCurso },
     { key: 'notas', label: 'Notas', icon: '📝', count: notes.length },
     { key: 'calendario', label: 'Calendario', icon: '🌿', count: gardenTasks.filter(t => t.date >= formatDateStr(new Date())).length },
@@ -633,7 +633,7 @@ export default function Admin() {
   const sheetTitles = {
     plantas: '🪴 Plantas',
     categorias: '🏷️ Categorías',
-    pedidos: '🧾 Pedidos',
+    pedidos: '🧾 Ventas y Decrementos',
     ingresos: '📦 Ingresos',
     notas: '📝 Notas',
     calendario: '🌿 Calendario de Jardín',
