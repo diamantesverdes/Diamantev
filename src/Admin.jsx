@@ -60,6 +60,11 @@ export default function Admin() {
   const [loading, setLoading] = useState(true)
 
   const [plantNotes, setPlantNotes] = useState([])
+  const [loteNoteModalOpen, setLoteNoteModalOpen] = useState(false)
+  const [currentNoteLoteId, setCurrentNoteLoteId] = useState(null)
+  const [loteNoteBlocks, setLoteNoteBlocks] = useState([])
+  const [loteNoteCurrentText, setLoteNoteCurrentText] = useState('')
+  const [savingLoteNote, setSavingLoteNote] = useState(false)
   const [plantNoteModalOpen, setPlantNoteModalOpen] = useState(false)
   const [currentNotePlantId, setCurrentNotePlantId] = useState(null)
   const [editingPlantNoteId, setEditingPlantNoteId] = useState(null)
@@ -214,6 +219,105 @@ export default function Admin() {
     }
     await loadData()
     setApprovingIds(prev => prev.filter(id => id !== compra.id))
+  }
+
+  async function markLotePagado(loteId) {
+    if (approvingIds.includes(loteId)) return
+    const lineas = compras.filter(c => c.lote_id === loteId && c.status === 'pedido')
+    if (lineas.length === 0) return
+    setApprovingIds(prev => [...prev, loteId])
+    for (const c of lineas) {
+      await supabase.from('compras').update({ status: 'pagado', fecha_pago: new Date().toISOString() }).eq('id', c.id)
+    }
+    await loadData()
+    setApprovingIds(prev => prev.filter(id => id !== loteId))
+  }
+
+  async function markLoteRecibido(loteId) {
+    if (approvingIds.includes(loteId)) return
+    const lineas = compras.filter(c => c.lote_id === loteId && c.status === 'pagado')
+    if (lineas.length === 0) return
+    setApprovingIds(prev => [...prev, loteId])
+    for (const c of lineas) {
+      await supabase.from('compras').update({ status: 'recibido', fecha_recibido: new Date().toISOString() }).eq('id', c.id)
+      if (c.plant_id) {
+        const plant = plants.find(p => p.id === c.plant_id)
+        if (plant) {
+          const updates = { stock: plant.stock + c.quantity }
+          if (c.image_url) updates.image_url = c.image_url
+          await supabase.from('plants').update(updates).eq('id', plant.id)
+        }
+      } else if (c.new_plant_category) {
+        await supabase.from('plants').insert({
+          name: c.plant_name,
+          category_id: c.new_plant_category,
+          price: c.sale_price || 0,
+          stock: c.quantity,
+          image_url: c.image_url || null,
+        })
+      }
+    }
+    await loadData()
+    setApprovingIds(prev => prev.filter(id => id !== loteId))
+  }
+
+  // ---------- Nota libre por compra ----------
+  function openLoteNote(lote) {
+    setCurrentNoteLoteId(lote.id)
+    setLoteNoteBlocks(lote.content_blocks || [])
+    setLoteNoteCurrentText('')
+    setLoteNoteModalOpen(true)
+  }
+
+  function insertPhotoBlockToLoteNote(file) {
+    if (!file) return
+    setLoteNoteBlocks(prev => {
+      const next = [...prev]
+      if (loteNoteCurrentText.trim()) next.push({ type: 'text', content: loteNoteCurrentText })
+      next.push({ type: 'photo', file })
+      return next
+    })
+    setLoteNoteCurrentText('')
+  }
+
+  function insertVideoBlockToLoteNote(file) {
+    if (!file) return
+    setLoteNoteBlocks(prev => {
+      const next = [...prev]
+      if (loteNoteCurrentText.trim()) next.push({ type: 'text', content: loteNoteCurrentText })
+      next.push({ type: 'video', file })
+      return next
+    })
+    setLoteNoteCurrentText('')
+  }
+
+  function removeLastLoteNoteBlock() {
+    setLoteNoteBlocks(prev => prev.slice(0, -1))
+  }
+
+  async function saveLoteNote() {
+    if (!currentNoteLoteId) return
+    const blocks = [...loteNoteBlocks]
+    if (loteNoteCurrentText.trim()) blocks.push({ type: 'text', content: loteNoteCurrentText })
+    setSavingLoteNote(true)
+    const finalBlocks = []
+    for (const b of blocks) {
+      if (b.type === 'text') {
+        finalBlocks.push(b)
+      } else if (b.url) {
+        finalBlocks.push(b)
+      } else {
+        const url = await uploadImage(b.file, 'category-notes')
+        if (url) finalBlocks.push({ type: b.type, url })
+      }
+    }
+    const { error } = await supabase.from('compra_lotes').update({ content_blocks: finalBlocks }).eq('id', currentNoteLoteId)
+    if (error) { alert('Error al guardar la nota: ' + error.message); setSavingLoteNote(false); return }
+    setLoteNoteBlocks([])
+    setLoteNoteCurrentText('')
+    setSavingLoteNote(false)
+    setLoteNoteModalOpen(false)
+    loadData()
   }
 
   // ---------- Ventas ----------
@@ -1172,7 +1276,21 @@ export default function Admin() {
                                     Marcar toda la compra como recibida
                                   </button>
                                 )}
+                                <button onClick={() => openLoteNote(lote)}>
+                                  📝 {(lote.content_blocks && lote.content_blocks.length > 0) ? 'Editar nota de la compra' : 'Agregar nota de la compra'}
+                                </button>
                               </div>
+                              {lote.content_blocks && lote.content_blocks.length > 0 && (
+                                <div className="note-blocks-view">
+                                  {lote.content_blocks.map((b, i) => (
+                                    <div key={i}>
+                                      {b.type === 'text' && <p className="task-note">{b.content}</p>}
+                                      {b.type === 'photo' && <img src={b.url} alt="" className="note-block-photo" />}
+                                      {b.type === 'video' && <video src={b.url} controls className="note-video" />}
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
                               {lineas.map(c => (
                                 <div key={c.id} className="admin-item" style={{ marginLeft: 12 }}>
                                   {c.image_url ? <img src={c.image_url} alt={c.plant_name} /> : <div className="no-img-sm">Sin foto</div>}
@@ -1228,6 +1346,70 @@ export default function Admin() {
                         </div>
                       ))}
                     </div>
+
+                    {loteNoteModalOpen && (
+                      <div className="admin-sheet-overlay">
+                        <div className="free-note-modal" onClick={e => e.stopPropagation()}>
+                          <div className="free-note-modal-header">
+                            <h4>Nota de la compra #{lotes.find(l => l.id === currentNoteLoteId)?.numero || ''}</h4>
+                            <button
+                              type="button"
+                              className="modal-close-btn"
+                              onClick={() => {
+                                const hasUnsaved = loteNoteCurrentText.trim().length > 0
+                                if (hasUnsaved && !confirm('¿Cerrar sin guardar? Perderás lo que escribiste.')) return
+                                setLoteNoteModalOpen(false)
+                              }}
+                            >✕</button>
+                          </div>
+                          <div className="free-note-sheet">
+                            {loteNoteBlocks.map((b, i) => (
+                              <div key={i} className="note-sheet-block">
+                                {b.type === 'text' && <p>{b.content}</p>}
+                                {b.type === 'photo' && <img src={b.url || URL.createObjectURL(b.file)} alt="" className="note-sheet-photo" />}
+                                {b.type === 'video' && (
+                                  <video src={b.url || URL.createObjectURL(b.file)} controls className="note-video" />
+                                )}
+                              </div>
+                            ))}
+                            <textarea
+                              className="note-sheet-textarea"
+                              placeholder={loteNoteBlocks.length > 0 ? 'Sigue escribiendo...' : 'Escribe cómo fue esta compra...'}
+                              rows={loteNoteBlocks.length > 0 ? 2 : 4}
+                              value={loteNoteCurrentText}
+                              onChange={e => setLoteNoteCurrentText(e.target.value)}
+                              autoFocus
+                            />
+                            <div className="note-sheet-toolbar">
+                              <label className="icon-btn" title="Insertar foto aquí">
+                                📷
+                                <input
+                                  type="file"
+                                  accept="image/*"
+                                  style={{ display: 'none' }}
+                                  onChange={e => { insertPhotoBlockToLoteNote(e.target.files[0]); e.target.value = '' }}
+                                />
+                              </label>
+                              <label className="icon-btn" title="Insertar video aquí">
+                                🎥
+                                <input
+                                  type="file"
+                                  accept="video/*"
+                                  style={{ display: 'none' }}
+                                  onChange={e => { insertVideoBlockToLoteNote(e.target.files[0]); e.target.value = '' }}
+                                />
+                              </label>
+                              {loteNoteBlocks.length > 0 && (
+                                <button type="button" className="icon-btn-text" onClick={removeLastLoteNoteBlock}>Deshacer</button>
+                              )}
+                              <button type="button" className="save-note-btn-inline" onClick={saveLoteNote} disabled={savingLoteNote}>
+                                {savingLoteNote ? 'Guardando...' : 'Guardar'}
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
                   </>
                 )
               })()}
