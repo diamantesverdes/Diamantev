@@ -1,422 +1,1807 @@
 import { useState, useEffect } from 'react'
 import { supabase } from './supabaseClient'
 
-const WHATSAPP_NUMBER = '593992734743'
+const ADMIN_KEY = import.meta.env.VITE_ADMIN_KEY
 
-// Reseñas de ejemplo — reemplázalas por las reales cuando las tengas
-const TESTIMONIALS = [
-  { name: 'Clarita C.', text: 'Las plantas llegaron hermosas y bien empacadas. ¡Superó mis expectativas!', stars: 5 },
-  { name: 'Marco V.', text: 'Excelente atención por WhatsApp y variedad increíble de iris.', stars: 5 },
-  { name: 'Sofía R.', text: 'Mi jardín cambió por completo desde que compro en Diamantev.', stars: 5 },
-]
+export default function Admin() {
+  const [authed, setAuthed] = useState(false)
+  const [pass, setPass] = useState('')
+  const [failed, setFailed] = useState(false)
 
-export default function App() {
-  const [view, setView] = useState('categories')
+  // 'home' | 'plantas' | 'categorias' | 'pedidos' | 'ingresos'
+  const [view, setView] = useState('home')
+  const [catSubTab, setCatSubTab] = useState('categories')
+
+  const [galleryFilter, setGalleryFilter] = useState('all')
+  const [plantsFilter, setPlantsFilter] = useState('all')
+  const [plantsSearch, setPlantsSearch] = useState('')
+  const [selectedLabels, setSelectedLabels] = useState(new Set())
+
+  const [gardenTags, setGardenTags] = useState([])
+  const [gardenTasks, setGardenTasks] = useState([])
+  const [calendarMonth, setCalendarMonth] = useState(() => { const d = new Date(); d.setDate(1); return d })
+  const [selectedDay, setSelectedDay] = useState(null)
+  const [dayModalOpen, setDayModalOpen] = useState(false)
+  const [newTagForm, setNewTagForm] = useState({ name: '', color: '#a1665e' })
+  const [taskFormOpen, setTaskFormOpen] = useState(false)
+  const [taskSearch, setTaskSearch] = useState('')
+  const [taskSearchSubmitted, setTaskSearchSubmitted] = useState('')
+  const [freeNoteModalOpen, setFreeNoteModalOpen] = useState(false)
+  const [editingTaskId, setEditingTaskId] = useState(null)
+  const [tagMenuOpen, setTagMenuOpen] = useState(false)
+  const [freeNoteBlocks, setFreeNoteBlocks] = useState([])
+  const [freeNoteCurrentText, setFreeNoteCurrentText] = useState('')
+  const [savingFreeNote, setSavingFreeNote] = useState(false)
+  const [taskForm, setTaskForm] = useState({ tag_id: '', date: '', note: '', repeat: 'none' })
+  const [sharingNotes, setSharingNotes] = useState(false)
+
+  const [orders, setOrders] = useState([])
+  const [approvingIds, setApprovingIds] = useState([])
+
+  const [compras, setCompras] = useState([])
+  const [lotes, setLotes] = useState([])
+  const [loteBuilderOpen, setLoteBuilderOpen] = useState(false)
+  const [loteNota, setLoteNota] = useState('')
+  const [loteProveedor, setLoteProveedor] = useState('')
+  const [loteLines, setLoteLines] = useState([])
+  const [lineForm, setLineForm] = useState({ plant_id: '', new_plant_name: '', new_plant_category: '', quantity: '', unit_cost: '', sale_price: '', file: null })
+  const [savingLote, setSavingLote] = useState(false)
+
+  const [decrementos, setDecrementos] = useState([])
+  const [decForm, setDecForm] = useState({ plant_id: '', quantity: '', motivo: '', motivo_otro: '' })
+  const [savingDec, setSavingDec] = useState(false)
+
+  const [movSearch, setMovSearch] = useState('')
+  const [movStatusFilter, setMovStatusFilter] = useState('all')
+  const [movTypeFilter, setMovTypeFilter] = useState('all')
+
   const [plants, setPlants] = useState([])
   const [categories, setCategories] = useState([])
-  const [selectedCategory, setSelectedCategory] = useState(null)
-  const [stockFilter, setStockFilter] = useState('all') // 'all' | 'available'
-  const [cart, setCart] = useState([])
-  const [showCart, setShowCart] = useState(false)
-  const [favorites, setFavorites] = useState([])
-  const [showFavorites, setShowFavorites] = useState(false)
   const [loading, setLoading] = useState(true)
-  const [customerName, setCustomerName] = useState('')
-  const [customerPhone, setCustomerPhone] = useState('')
-  const [sending, setSending] = useState(false)
-  const [toast, setToast] = useState('')
-  const [menuOpen, setMenuOpen] = useState(false)
-  const [searchOpen, setSearchOpen] = useState(false)
-  const [searchQuery, setSearchQuery] = useState('')
 
-  useEffect(() => { loadData() }, [])
+  const [plantNotes, setPlantNotes] = useState([])
+  const [loteNoteModalOpen, setLoteNoteModalOpen] = useState(false)
+  const [currentNoteLoteId, setCurrentNoteLoteId] = useState(null)
+  const [loteNoteBlocks, setLoteNoteBlocks] = useState([])
+  const [loteNoteCurrentText, setLoteNoteCurrentText] = useState('')
+  const [savingLoteNote, setSavingLoteNote] = useState(false)
+  const [plantNoteModalOpen, setPlantNoteModalOpen] = useState(false)
+  const [currentNotePlantId, setCurrentNotePlantId] = useState(null)
+  const [editingPlantNoteId, setEditingPlantNoteId] = useState(null)
+  const [plantNoteBlocks, setPlantNoteBlocks] = useState([])
+  const [plantNoteCurrentText, setPlantNoteCurrentText] = useState('')
+  const [savingPlantNote, setSavingPlantNote] = useState(false)
+  const [openPlantNotesListId, setOpenPlantNotesListId] = useState(null)
+
+  const [newCatName, setNewCatName] = useState('')
+  const [newCatEmoji, setNewCatEmoji] = useState('🌿')
+
+  useEffect(() => { if (authed) loadData() }, [authed])
 
   async function loadData() {
     setLoading(true)
     const { data: cats } = await supabase.from('categories').select('*').order('name')
-    const { data: pls } = await supabase.from('plants').select('*').eq('active', true).order('name')
+    const { data: pls } = await supabase.from('plants').select('*').order('name')
+    const { data: ords } = await supabase.from('orders').select('*, order_items(*)').order('id', { ascending: false })
+    const { data: comps } = await supabase.from('compras').select('*').order('created_at', { ascending: false })
+    const { data: lts } = await supabase.from('compra_lotes').select('*').order('numero', { ascending: false })
+    const { data: decs } = await supabase.from('decrementos').select('*').order('created_at', { ascending: false })
+    const { data: pnts } = await supabase.from('plant_notes').select('*').order('created_at', { ascending: false })
+    const { data: tags } = await supabase.from('garden_tags').select('*').order('created_at')
+    const { data: tasks } = await supabase.from('garden_tasks').select('*').order('date')
     setCategories(cats || [])
     setPlants(pls || [])
+    setOrders(ords || [])
+    setCompras(comps || [])
+    setLotes(lts || [])
+    setDecrementos(decs || [])
+    setPlantNotes(pnts || [])
+    setGardenTags(tags || [])
+    setGardenTasks(tasks || [])
     setLoading(false)
   }
 
-  function openCategory(cat) {
-    setSelectedCategory(cat)
-    setStockFilter('all')
-    setSearchQuery('')
-    setSearchOpen(false)
-    setMenuOpen(false)
-    setView('plants')
+  async function uploadImage(file, bucket = 'plant-photos') {
+    const ext = file.name.split('.').pop()
+    const fileName = `${Date.now()}.${ext}`
+    const { error } = await supabase.storage.from(bucket).upload(fileName, file)
+    if (error) { alert('Error al subir el archivo'); return null }
+    const { data } = supabase.storage.from(bucket).getPublicUrl(fileName)
+    return data.publicUrl
   }
 
-  function openAllPlants() {
-    setSelectedCategory(null)
-    setStockFilter('all')
-    setSearchQuery('')
-    setSearchOpen(false)
-    setMenuOpen(false)
-    setView('plants')
-  }
-
-  function openAvailablePlants() {
-    setSelectedCategory(null)
-    setStockFilter('available')
-    setSearchQuery('')
-    setSearchOpen(false)
-    setMenuOpen(false)
-    setView('plants')
-  }
-
-  function backToCategories() {
-    setView('categories')
-    setSelectedCategory(null)
-    setStockFilter('all')
-    setSearchQuery('')
-  }
-
-  const isSearching = searchQuery.trim().length > 0
-
-  const filteredPlants = isSearching
-    ? plants.filter(p => p.name.toLowerCase().includes(searchQuery.trim().toLowerCase()))
-    : plants
-        .filter(p => !selectedCategory || p.category_id === selectedCategory.id)
-        .filter(p => stockFilter === 'available' ? p.stock > 0 : true)
-
-  const newPlants = plants.filter(p => p.is_new)
-
-  function addToCart(plant) {
-    setCart(prev => {
-      const existing = prev.find(i => i.id === plant.id)
+  // ---------- Ingresos (compras agrupadas en lotes) ----------
+  function addLineToLote(e) {
+    e.preventDefault()
+    const usingNew = !lineForm.plant_id && lineForm.new_plant_name
+    if ((!lineForm.plant_id && !usingNew) || !lineForm.quantity || !lineForm.unit_cost) {
+      alert('Selecciona una planta o escribe el nombre de una nueva, y completa cantidad y costo')
+      return
+    }
+    if (usingNew && !lineForm.new_plant_category) {
+      alert('Selecciona una categoría para la planta nueva')
+      return
+    }
+    if (usingNew) {
+      const nameNormalized = lineForm.new_plant_name.trim().toLowerCase()
+      const existing = plants.find(p => p.name.trim().toLowerCase() === nameNormalized)
       if (existing) {
-        if (existing.quantity >= plant.stock) return prev
-        return prev.map(i => i.id === plant.id ? { ...i, quantity: i.quantity + 1 } : i)
+        alert(`Ya existe una planta llamada "${existing.name}". Selecciónala de la lista "Selecciona planta existente" en vez de escribirla como nueva, para no duplicarla.`)
+        return
       }
-      return [...prev, { ...plant, quantity: 1 }]
-    })
-    setToast(`✅ ${plant.name} añadida al carrito`)
-    setTimeout(() => setToast(''), 1800)
-  }
-
-  function changeQty(id, delta) {
-    setCart(prev => prev
-      .map(i => i.id === id ? { ...i, quantity: i.quantity + delta } : i)
-      .filter(i => i.quantity > 0)
-    )
-  }
-
-  function toggleFavorite(plant) {
-    setFavorites(prev => {
-      const exists = prev.some(f => f.id === plant.id)
-      if (exists) return prev.filter(f => f.id !== plant.id)
-      return [...prev, plant]
-    })
-  }
-
-  function isFavorite(id) {
-    return favorites.some(f => f.id === id)
-  }
-
-  function sendFavorites() {
-    if (favorites.length === 0) return
-    const lines = favorites.map(f => `- ${f.name}`).join('%0A')
-    const message = `Hola, me interesan estas plantas de Jardín Diamantev:%0A%0A${lines}`
-    window.open(`https://wa.me/${WHATSAPP_NUMBER}?text=${message}`, '_blank')
-  }
-
-  const total = cart.reduce((sum, i) => sum + i.price * i.quantity, 0)
-
-  async function sendOrder() {
-    if (!customerName.trim() || !customerPhone.trim()) {
-      alert('Por favor ingresa tu nombre y teléfono')
-      return
     }
-    if (cart.length === 0) return
-    setSending(true)
-    const { data: order, error } = await supabase
-      .from('orders')
-      .insert({ customer_name: customerName, customer_phone: customerPhone, total, status: 'pedido' })
-      .select()
-      .single()
-    if (error) {
-      alert('Hubo un error al registrar el pedido. Intenta de nuevo.')
-      setSending(false)
-      return
+    const plant = lineForm.plant_id ? plants.find(p => p.id === lineForm.plant_id) : null
+    setLoteLines(prev => [...prev, { ...lineForm, plant_name: usingNew ? lineForm.new_plant_name : (plant ? plant.name : '') }])
+    setLineForm({ plant_id: '', new_plant_name: '', new_plant_category: '', quantity: '', unit_cost: '', sale_price: '', file: null })
+  }
+
+  function removeLoteLine(index) {
+    setLoteLines(prev => prev.filter((_, i) => i !== index))
+  }
+
+  async function saveLote() {
+    if (loteLines.length === 0) { alert('Agrega al menos una planta a la compra'); return }
+    setSavingLote(true)
+    const { data: lote, error: loteError } = await supabase
+      .from('compra_lotes').insert({ nota: loteNota, proveedor: loteProveedor }).select().single()
+    if (loteError) { alert('Error al crear la compra: ' + loteError.message); setSavingLote(false); return }
+
+    for (const line of loteLines) {
+      const usingNew = !line.plant_id && line.new_plant_name
+      const quantity = Number(line.quantity)
+      const unit_cost = Number(line.unit_cost)
+      const sale_price = line.sale_price ? Number(line.sale_price) : null
+      let image_url = null
+      if (line.file) image_url = await uploadImage(line.file)
+
+      const row = usingNew
+        ? { plant_id: null, plant_name: line.plant_name, new_plant_category: line.new_plant_category, quantity, unit_cost, sale_price, image_url, total: quantity * unit_cost, proveedor: loteProveedor, status: 'pedido', lote_id: lote.id }
+        : { plant_id: line.plant_id, plant_name: line.plant_name, quantity, unit_cost, sale_price, image_url, total: quantity * unit_cost, proveedor: loteProveedor, status: 'pedido', lote_id: lote.id }
+
+      const { error } = await supabase.from('compras').insert(row)
+      if (error) alert('Error al guardar una de las plantas: ' + error.message)
     }
-    const items = cart.map(i => ({
-      order_id: order.id, plant_id: i.id, quantity: i.quantity, unit_price: i.price,
-    }))
-    await supabase.from('order_items').insert(items)
-    for (const item of cart) {
-      await supabase
-        .from('plants')
-        .update({ stock: item.stock - item.quantity })
-        .eq('id', item.id)
-    }
-    const lines = cart.map(i => `- ${i.name} x${i.quantity} ($${(i.price * i.quantity).toFixed(2)})`).join('%0A')
-    const message = `Hola, quiero confirmar mi pedido en Jardín Diamantev:%0A%0A${lines}%0A%0ATotal: $${total.toFixed(2)}%0ANombre: ${customerName}%0ATeléfono: ${customerPhone}`
-    window.open(`https://wa.me/${WHATSAPP_NUMBER}?text=${message}`, '_blank')
-    setCart([])
-    setCustomerName('')
-    setCustomerPhone('')
-    setShowCart(false)
-    setSending(false)
+    setLoteNota('')
+    setLoteProveedor('')
+    setLoteLines([])
+    setLoteBuilderOpen(false)
+    setSavingLote(false)
     loadData()
   }
 
-  function renderPlantCard(plant) {
+  async function markLotePagado(loteId) {
+    const lineas = compras.filter(c => c.lote_id === loteId && c.status === 'pedido')
+    if (lineas.length === 0) return
+    setApprovingIds(prev => [...prev, ...lineas.map(c => c.id)])
+    await supabase.from('compras').update({ status: 'pagado', fecha_pago: new Date().toISOString() }).eq('lote_id', loteId).eq('status', 'pedido')
+    await loadData()
+    setApprovingIds(prev => prev.filter(id => !lineas.some(c => c.id === id)))
+  }
+
+  async function markLoteRecibido(loteId) {
+    const lineas = compras.filter(c => c.lote_id === loteId && c.status === 'pagado')
+    if (lineas.length === 0) return
+    setApprovingIds(prev => [...prev, ...lineas.map(c => c.id)])
+    for (const compra of lineas) {
+      await markCompraRecibida(compra)
+    }
+    setApprovingIds(prev => prev.filter(id => !lineas.some(c => c.id === id)))
+  }
+
+  async function markCompraPagada(compra) {
+    if (compra.status !== 'pedido' || approvingIds.includes(compra.id)) return
+    setApprovingIds(prev => [...prev, compra.id])
+    await supabase.from('compras').update({ status: 'pagado', fecha_pago: new Date().toISOString() }).eq('id', compra.id)
+    await loadData()
+    setApprovingIds(prev => prev.filter(id => id !== compra.id))
+  }
+
+  async function markCompraRecibida(compra) {
+    if (compra.status !== 'pagado' || approvingIds.includes(compra.id)) return
+    setApprovingIds(prev => [...prev, compra.id])
+    await supabase.from('compras').update({ status: 'recibido', fecha_recibido: new Date().toISOString() }).eq('id', compra.id)
+
+    if (compra.plant_id) {
+      const plant = plants.find(p => p.id === compra.plant_id)
+      if (plant) {
+        const updates = { stock: plant.stock + compra.quantity }
+        if (compra.image_url) updates.image_url = compra.image_url
+        await supabase.from('plants').update(updates).eq('id', plant.id)
+      }
+    } else if (compra.new_plant_category) {
+      await supabase.from('plants').insert({
+        name: compra.plant_name,
+        category_id: compra.new_plant_category,
+        price: compra.sale_price || 0,
+        stock: compra.quantity,
+        image_url: compra.image_url || null,
+      })
+    }
+    await loadData()
+    setApprovingIds(prev => prev.filter(id => id !== compra.id))
+  }
+
+  async function markLotePagado(loteId) {
+    if (approvingIds.includes(loteId)) return
+    const lineas = compras.filter(c => c.lote_id === loteId && c.status === 'pedido')
+    if (lineas.length === 0) return
+    setApprovingIds(prev => [...prev, loteId])
+    for (const c of lineas) {
+      await supabase.from('compras').update({ status: 'pagado', fecha_pago: new Date().toISOString() }).eq('id', c.id)
+    }
+    await loadData()
+    setApprovingIds(prev => prev.filter(id => id !== loteId))
+  }
+
+  async function markLoteRecibido(loteId) {
+    if (approvingIds.includes(loteId)) return
+    const lineas = compras.filter(c => c.lote_id === loteId && c.status === 'pagado')
+    if (lineas.length === 0) return
+    setApprovingIds(prev => [...prev, loteId])
+    for (const c of lineas) {
+      await supabase.from('compras').update({ status: 'recibido', fecha_recibido: new Date().toISOString() }).eq('id', c.id)
+      if (c.plant_id) {
+        const plant = plants.find(p => p.id === c.plant_id)
+        if (plant) {
+          const updates = { stock: plant.stock + c.quantity }
+          if (c.image_url) updates.image_url = c.image_url
+          await supabase.from('plants').update(updates).eq('id', plant.id)
+        }
+      } else if (c.new_plant_category) {
+        await supabase.from('plants').insert({
+          name: c.plant_name,
+          category_id: c.new_plant_category,
+          price: c.sale_price || 0,
+          stock: c.quantity,
+          image_url: c.image_url || null,
+        })
+      }
+    }
+    await loadData()
+    setApprovingIds(prev => prev.filter(id => id !== loteId))
+  }
+
+  // ---------- Nota libre por compra ----------
+  function openLoteNote(lote) {
+    setCurrentNoteLoteId(lote.id)
+    setLoteNoteBlocks(lote.content_blocks || [])
+    setLoteNoteCurrentText('')
+    setLoteNoteModalOpen(true)
+  }
+
+  function insertPhotoBlockToLoteNote(file) {
+    if (!file) return
+    setLoteNoteBlocks(prev => {
+      const next = [...prev]
+      if (loteNoteCurrentText.trim()) next.push({ type: 'text', content: loteNoteCurrentText })
+      next.push({ type: 'photo', file })
+      return next
+    })
+    setLoteNoteCurrentText('')
+  }
+
+  function insertVideoBlockToLoteNote(file) {
+    if (!file) return
+    setLoteNoteBlocks(prev => {
+      const next = [...prev]
+      if (loteNoteCurrentText.trim()) next.push({ type: 'text', content: loteNoteCurrentText })
+      next.push({ type: 'video', file })
+      return next
+    })
+    setLoteNoteCurrentText('')
+  }
+
+  function removeLastLoteNoteBlock() {
+    setLoteNoteBlocks(prev => prev.slice(0, -1))
+  }
+
+  async function saveLoteNote() {
+    if (!currentNoteLoteId) return
+    const blocks = [...loteNoteBlocks]
+    if (loteNoteCurrentText.trim()) blocks.push({ type: 'text', content: loteNoteCurrentText })
+    setSavingLoteNote(true)
+    const finalBlocks = []
+    for (const b of blocks) {
+      if (b.type === 'text') {
+        finalBlocks.push(b)
+      } else if (b.url) {
+        finalBlocks.push(b)
+      } else {
+        const url = await uploadImage(b.file, 'category-notes')
+        if (url) finalBlocks.push({ type: b.type, url })
+      }
+    }
+    const { error } = await supabase.from('compra_lotes').update({ content_blocks: finalBlocks }).eq('id', currentNoteLoteId)
+    if (error) { alert('Error al guardar la nota: ' + error.message); setSavingLoteNote(false); return }
+    setLoteNoteBlocks([])
+    setLoteNoteCurrentText('')
+    setSavingLoteNote(false)
+    setLoteNoteModalOpen(false)
+    loadData()
+  }
+
+  // ---------- Ventas ----------
+  async function markAsPaid(order) {
+    if (order.status !== 'pedido' || approvingIds.includes(order.id)) return
+    setApprovingIds(prev => [...prev, order.id])
+    await supabase.from('orders').update({ status: 'pagado', fecha_pago: new Date().toISOString() }).eq('id', order.id)
+    for (const item of order.order_items) {
+      const plant = plants.find(p => p.id === item.plant_id)
+      if (plant) {
+        await supabase.from('plants').update({ stock: plant.stock - item.quantity }).eq('id', item.plant_id)
+      }
+    }
+    await loadData()
+    setApprovingIds(prev => prev.filter(id => id !== order.id))
+  }
+
+  async function markAsDelivered(order) {
+    if (order.status !== 'pagado' || approvingIds.includes(order.id)) return
+    setApprovingIds(prev => [...prev, order.id])
+    await supabase.from('orders').update({ status: 'entregado', fecha_entrega: new Date().toISOString() }).eq('id', order.id)
+    await loadData()
+    setApprovingIds(prev => prev.filter(id => id !== order.id))
+  }
+
+  // ---------- Decrementos manuales ----------
+  async function addDecremento(e) {
+    e.preventDefault()
+    if (!decForm.plant_id || !decForm.quantity || !decForm.motivo) {
+      alert('Selecciona la planta, cantidad y motivo')
+      return
+    }
+    if (decForm.motivo === 'Otro' && !decForm.motivo_otro.trim()) {
+      alert('Escribe el motivo')
+      return
+    }
+    setSavingDec(true)
+    const plant = plants.find(p => p.id === decForm.plant_id)
+    const quantity = Number(decForm.quantity)
+    await supabase.from('decrementos').insert({
+      plant_id: decForm.plant_id,
+      plant_name: plant ? plant.name : '',
+      quantity,
+      motivo: decForm.motivo,
+      motivo_otro: decForm.motivo === 'Otro' ? decForm.motivo_otro : null,
+    })
+    if (plant) {
+      await supabase.from('plants').update({ stock: Math.max(0, plant.stock - quantity) }).eq('id', plant.id)
+    }
+    setDecForm({ plant_id: '', quantity: '', motivo: '', motivo_otro: '' })
+    setSavingDec(false)
+    loadData()
+  }
+
+  // ---------- Stock actual ----------
+  async function updateStock(id, newStock) {
+    await supabase.from('plants').update({ stock: newStock }).eq('id', id)
+    loadData()
+  }
+
+  async function updatePrice(id, newPrice) {
+    await supabase.from('plants').update({ price: newPrice }).eq('id', id)
+    loadData()
+  }
+
+  async function toggleActive(id, current) {
+    await supabase.from('plants').update({ active: !current }).eq('id', id)
+    loadData()
+  }
+
+  async function toggleIsNew(id, current) {
+    await supabase.from('plants').update({ is_new: !current }).eq('id', id)
+    loadData()
+  }
+
+  async function updatePlantImage(id, file) {
+    if (!file) return
+    const url = await uploadImage(file)
+    if (url) {
+      await supabase.from('plants').update({ image_url: url }).eq('id', id)
+      loadData()
+    }
+  }
+
+  async function deletePlant(id) {
+    if (!confirm('¿Borrar esta planta permanentemente?')) return
+    const { error } = await supabase.from('plants').delete().eq('id', id)
+    if (error) {
+      if (error.code === '23503') {
+        alert('Esta planta no se puede borrar porque ya tiene pedidos registrados (se perdería ese historial). Usa "Ocultar" en su lugar.')
+      } else {
+        alert('Error al borrar la planta: ' + error.message)
+      }
+      return
+    }
+    loadData()
+  }
+
+  // ---------- Notas libres por planta ----------
+  function openNewPlantNote(plantId) {
+    setCurrentNotePlantId(plantId)
+    setEditingPlantNoteId(null)
+    setPlantNoteBlocks([])
+    setPlantNoteCurrentText('')
+    setPlantNoteModalOpen(true)
+  }
+
+  function openEditPlantNote(note) {
+    setCurrentNotePlantId(note.plant_id)
+    setEditingPlantNoteId(note.id)
+    setPlantNoteBlocks(note.content_blocks || [])
+    setPlantNoteCurrentText('')
+    setPlantNoteModalOpen(true)
+  }
+
+  function insertPhotoBlockToPlantNote(file) {
+    if (!file) return
+    setPlantNoteBlocks(prev => {
+      const next = [...prev]
+      if (plantNoteCurrentText.trim()) next.push({ type: 'text', content: plantNoteCurrentText })
+      next.push({ type: 'photo', file })
+      return next
+    })
+    setPlantNoteCurrentText('')
+  }
+
+  function insertVideoBlockToPlantNote(file) {
+    if (!file) return
+    setPlantNoteBlocks(prev => {
+      const next = [...prev]
+      if (plantNoteCurrentText.trim()) next.push({ type: 'text', content: plantNoteCurrentText })
+      next.push({ type: 'video', file })
+      return next
+    })
+    setPlantNoteCurrentText('')
+  }
+
+  function removeLastPlantNoteBlock() {
+    setPlantNoteBlocks(prev => prev.slice(0, -1))
+  }
+
+  async function savePlantNote() {
+    if (!currentNotePlantId) return
+    const blocks = [...plantNoteBlocks]
+    if (plantNoteCurrentText.trim()) blocks.push({ type: 'text', content: plantNoteCurrentText })
+    if (blocks.length === 0) return
+    setSavingPlantNote(true)
+    const finalBlocks = []
+    for (const b of blocks) {
+      if (b.type === 'text') {
+        finalBlocks.push(b)
+      } else if (b.url) {
+        finalBlocks.push(b)
+      } else {
+        const url = await uploadImage(b.file, 'category-notes')
+        if (url) finalBlocks.push({ type: b.type, url })
+      }
+    }
+    const { error } = editingPlantNoteId
+      ? await supabase.from('plant_notes').update({ content_blocks: finalBlocks }).eq('id', editingPlantNoteId)
+      : await supabase.from('plant_notes').insert({ plant_id: currentNotePlantId, content_blocks: finalBlocks })
+    if (error) { alert('Error al guardar la nota: ' + error.message); setSavingPlantNote(false); return }
+    setPlantNoteBlocks([])
+    setPlantNoteCurrentText('')
+    setEditingPlantNoteId(null)
+    setSavingPlantNote(false)
+    setPlantNoteModalOpen(false)
+    loadData()
+  }
+
+  async function deletePlantNote(id) {
+    if (!confirm('¿Borrar esta nota permanentemente?')) return
+    await supabase.from('plant_notes').delete().eq('id', id)
+    loadData()
+  }
+
+  // ---------- Categorías ----------
+  async function uploadCategoryImage(catId, file) {
+    const url = await uploadImage(file)
+    if (url) {
+      await supabase.from('categories').update({ image_url: url }).eq('id', catId)
+      loadData()
+    }
+  }
+
+  async function updateCategoryEmoji(catId, emoji) {
+    await supabase.from('categories').update({ emoji }).eq('id', catId)
+    loadData()
+  }
+
+  async function updateCategoryName(catId, name) {
+    if (!name.trim()) return
+    await supabase.from('categories').update({ name }).eq('id', catId)
+    loadData()
+  }
+
+  async function addCategory(e) {
+    e.preventDefault()
+    if (!newCatName.trim()) return
+    await supabase.from('categories').insert({ name: newCatName, emoji: newCatEmoji })
+    setNewCatName('')
+    setNewCatEmoji('🌿')
+    loadData()
+  }
+
+  // ---------- Etiquetas para imprimir ----------
+  function toggleLabelSelect(id) {
+    setSelectedLabels(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  function selectAllLabels(list) {
+    setSelectedLabels(new Set(list.map(p => p.id)))
+  }
+
+  function clearLabels() {
+    setSelectedLabels(new Set())
+  }
+
+  function printLabels() {
+    window.print()
+  }
+
+  async function urlToFile(url) {
+    try {
+      const res = await fetch(url)
+      const blob = await res.blob()
+      const name = url.split('/').pop().split('?')[0]
+      return new File([blob], name, { type: blob.type })
+    } catch {
+      return null
+    }
+  }
+
+  async function shareCalendarNote(t) {
+    setSharingNotes(true)
+    try {
+      const header = `🌿 Calendario (${new Date(t.date + 'T00:00:00').toLocaleDateString()})`
+      const textBlocks = (t.content_blocks || []).filter(b => b.type === 'text').map(b => b.content).join('\n')
+      const shareText = textBlocks ? `${header}:\n${textBlocks}` : header
+      const fileUrls = (t.content_blocks || []).filter(b => (b.type === 'photo' || b.type === 'video') && b.url).map(b => b.url)
+      const files = (await Promise.all(fileUrls.map(urlToFile))).filter(Boolean)
+
+      if (navigator.share && files.length > 0 && navigator.canShare && navigator.canShare({ files })) {
+        await navigator.share({ title: 'Nota del calendario Diamantev', text: shareText, files })
+      } else if (navigator.share) {
+        await navigator.share({ title: 'Nota del calendario Diamantev', text: shareText })
+      } else {
+        window.open(`https://wa.me/?text=${encodeURIComponent(shareText)}`, '_blank')
+      }
+    } catch (err) {
+      if (err.name !== 'AbortError') alert('No se pudo compartir. Intenta de nuevo.')
+    }
+    setSharingNotes(false)
+  }
+
+  async function sharePlantNote(n) {
+    setSharingNotes(true)
+    try {
+      const plant = plants.find(p => p.id === n.plant_id)
+      const header = `🪴 ${plant ? plant.name : 'Planta'} (${new Date(n.created_at).toLocaleDateString()})`
+      const textBlocks = (n.content_blocks || []).filter(b => b.type === 'text').map(b => b.content).join('\n')
+      const shareText = textBlocks ? `${header}:\n${textBlocks}` : header
+      const fileUrls = (n.content_blocks || []).filter(b => (b.type === 'photo' || b.type === 'video') && b.url).map(b => b.url)
+      const files = (await Promise.all(fileUrls.map(urlToFile))).filter(Boolean)
+
+      if (navigator.share && files.length > 0 && navigator.canShare && navigator.canShare({ files })) {
+        await navigator.share({ title: 'Nota de planta Diamantev', text: shareText, files })
+      } else if (navigator.share) {
+        await navigator.share({ title: 'Nota de planta Diamantev', text: shareText })
+      } else {
+        window.open(`https://wa.me/?text=${encodeURIComponent(shareText)}`, '_blank')
+      }
+    } catch (err) {
+      if (err.name !== 'AbortError') alert('No se pudo compartir. Intenta de nuevo.')
+    }
+    setSharingNotes(false)
+  }
+
+  // ---------- Calendario de Jardín ----------
+  function formatDateStr(d) {
+    const y = d.getFullYear()
+    const m = String(d.getMonth() + 1).padStart(2, '0')
+    const day = String(d.getDate()).padStart(2, '0')
+    return `${y}-${m}-${day}`
+  }
+
+  function changeMonth(delta) {
+    setCalendarMonth(prev => {
+      const d = new Date(prev)
+      d.setMonth(d.getMonth() + delta)
+      return d
+    })
+    setSelectedDay(null)
+  }
+
+  async function addTag(e) {
+    e.preventDefault()
+    if (!newTagForm.name.trim()) return
+    const { error } = await supabase.from('garden_tags').insert({ name: newTagForm.name, color: newTagForm.color })
+    if (error) { alert('Error al agregar etiqueta: ' + error.message); return }
+    setNewTagForm({ name: '', color: '#a1665e' })
+    loadData()
+  }
+
+  async function updateTagName(id, name) {
+    if (!name.trim()) return
+    await supabase.from('garden_tags').update({ name }).eq('id', id)
+    loadData()
+  }
+
+  async function updateTagColor(id, color) {
+    await supabase.from('garden_tags').update({ color }).eq('id', id)
+    loadData()
+  }
+
+  async function deleteTag(id) {
+    if (!confirm('¿Borrar esta etiqueta? También se borrarán todas sus tareas.')) return
+    await supabase.from('garden_tags').delete().eq('id', id)
+    loadData()
+  }
+
+  async function quickAddTask(tagId) {
+    if (!selectedDay) return
+    const { error } = await supabase.from('garden_tasks').insert({ tag_id: tagId, date: selectedDay, note: '', repeat: 'none' })
+    if (error) { alert('Error al agregar tarea: ' + error.message); return }
+    loadData()
+  }
+
+  function insertPhotoBlockToNote(file) {
+    if (!file) return
+    setFreeNoteBlocks(prev => {
+      const next = [...prev]
+      if (freeNoteCurrentText.trim()) next.push({ type: 'text', content: freeNoteCurrentText })
+      next.push({ type: 'photo', file })
+      return next
+    })
+    setFreeNoteCurrentText('')
+  }
+
+  function insertVideoBlockToNote(file) {
+    if (!file) return
+    setFreeNoteBlocks(prev => {
+      const next = [...prev]
+      if (freeNoteCurrentText.trim()) next.push({ type: 'text', content: freeNoteCurrentText })
+      next.push({ type: 'video', file })
+      return next
+    })
+    setFreeNoteCurrentText('')
+  }
+
+  function removeLastNoteBlock() {
+    setFreeNoteBlocks(prev => prev.slice(0, -1))
+  }
+
+  function openEditNote(t) {
+    setEditingTaskId(t.id)
+    setFreeNoteBlocks(t.content_blocks || [])
+    setFreeNoteCurrentText('')
+    setFreeNoteModalOpen(true)
+  }
+
+  async function quickAddFreeNote() {
+    if (!selectedDay) return
+    const blocks = [...freeNoteBlocks]
+    if (freeNoteCurrentText.trim()) blocks.push({ type: 'text', content: freeNoteCurrentText })
+    if (blocks.length === 0) return
+    setSavingFreeNote(true)
+    const finalBlocks = []
+    for (const b of blocks) {
+      if (b.type === 'text') {
+        finalBlocks.push(b)
+      } else if (b.url) {
+        finalBlocks.push(b)
+      } else {
+        const url = await uploadImage(b.file, 'category-notes')
+        if (url) finalBlocks.push({ type: b.type, url })
+      }
+    }
+    const { error } = editingTaskId
+      ? await supabase.from('garden_tasks').update({ content_blocks: finalBlocks }).eq('id', editingTaskId)
+      : await supabase.from('garden_tasks').insert({
+          tag_id: null,
+          date: selectedDay,
+          note: '',
+          repeat: 'none',
+          content_blocks: finalBlocks,
+        })
+    if (error) { alert('Error al guardar la nota: ' + error.message); setSavingFreeNote(false); return }
+    setFreeNoteBlocks([])
+    setFreeNoteCurrentText('')
+    setEditingTaskId(null)
+    setSavingFreeNote(false)
+    setFreeNoteModalOpen(false)
+    loadData()
+  }
+
+  async function deleteTask(id) {
+    await supabase.from('garden_tasks').delete().eq('id', id)
+    loadData()
+  }
+
+  function buildRepeatDates(startDateStr, repeat) {
+    const dates = [startDateStr]
+    if (repeat === 'none') return dates
+    const [y, m, d] = startDateStr.split('-').map(Number)
+    const count = repeat === 'monthly' ? 6 : 8
+    for (let i = 1; i < count; i++) {
+      const next = new Date(y, m - 1, d)
+      if (repeat === 'weekly') next.setDate(next.getDate() + 7 * i)
+      else if (repeat === 'biweekly') next.setDate(next.getDate() + 14 * i)
+      else if (repeat === 'monthly') next.setMonth(next.getMonth() + i)
+      dates.push(formatDateStr(next))
+    }
+    return dates
+  }
+
+  async function addTaskFull(e) {
+    e.preventDefault()
+    if (!taskForm.tag_id || !taskForm.date) {
+      alert('Selecciona una etiqueta y una fecha')
+      return
+    }
+    const dates = buildRepeatDates(taskForm.date, taskForm.repeat)
+    const rows = dates.map(date => ({ tag_id: taskForm.tag_id, date, note: taskForm.note, repeat: taskForm.repeat }))
+    const { error } = await supabase.from('garden_tasks').insert(rows)
+    if (error) { alert('Error al guardar la tarea: ' + error.message); return }
+    setTaskForm({ tag_id: '', date: '', note: '', repeat: 'none' })
+    setTaskFormOpen(false)
+    loadData()
+  }
+
+  if (!authed) {
     return (
-      <div key={plant.id} className="card">
-        <div className="card-img">
-          {plant.image_url ? <img src={plant.image_url} alt={plant.name} /> : <div className="no-img">Sin foto</div>}
-          <img src="/1784460904562.png" alt="" className="watermark" />
-          {plant.is_new && <span className="new-badge">Nueva</span>}
-          <button
-            className={`fav-toggle-btn ${isFavorite(plant.id) ? 'active' : ''}`}
-            onClick={() => toggleFavorite(plant)}
-            aria-label="Agregar a mi lista"
-          >
-            {isFavorite(plant.id) ? '❤️' : '🤍'}
-          </button>
-        </div>
-        <div className="card-body">
-          <h3>{plant.name}</h3>
-          <p className="price">${Number(plant.price).toFixed(2)}</p>
-          <p className={plant.stock > 0 ? 'stock' : 'stock out'}>
-            {plant.stock > 0 ? `${plant.stock} disponibles` : 'Agotado'}
+      <div className="admin-login">
+        <h2>Panel de administrador</h2>
+        <input
+          type="text"
+          placeholder="Clave de acceso"
+          value={pass}
+          onChange={e => setPass(e.target.value)}
+          onKeyDown={e => e.key === 'Enter' && (pass === ADMIN_KEY ? setAuthed(true) : setFailed(true))}
+        />
+        <button onClick={() => pass === ADMIN_KEY ? setAuthed(true) : setFailed(true)}>Entrar</button>
+        {failed && (
+          <p style={{ color: '#b03434', fontSize: '0.85rem', marginTop: 10 }}>
+            Clave incorrecta. Si la olvidaste, revísala en Vercel → Settings → Environment Variables → VITE_ADMIN_KEY.
           </p>
-          <button className="add-btn" disabled={plant.stock <= 0} onClick={() => addToCart(plant)}>
-            Agregar al carrito
-          </button>
-        </div>
+        )}
       </div>
     )
   }
 
+  // Lista unificada de ventas + decrementos manuales, para "Ventas y Decrementos"
+  const movimientos = [
+    ...orders.map(o => ({ ...o, _type: 'venta' })),
+    ...decrementos.map(d => ({ ...d, _type: 'decremento' })),
+  ].sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+
+  const movimientosFiltrados = movimientos
+    .filter(m => movTypeFilter === 'all' || m._type === movTypeFilter)
+    .filter(m => movStatusFilter === 'all' || (m._type === 'venta' ? m.status === movStatusFilter : true))
+    .filter(m => {
+      const term = movSearch.toLowerCase()
+      if (!term) return true
+      if (m._type === 'venta') return (m.customer_name || '').toLowerCase().includes(term)
+      return (m.plant_name || '').toLowerCase().includes(term) || (m.motivo || '').toLowerCase().includes(term)
+    })
+
+  // Números resumen para las tarjetas de inicio
+  const pedidosPendientes = orders.filter(o => o.status === 'pedido').length
+  const ingresosEnCurso = compras.filter(c => c.status !== 'recibido').length
+
+  const cards = [
+    { key: 'plantas', label: 'Plantas', icon: '🪴', count: plants.length },
+    { key: 'categorias', label: 'Categorías', icon: '🏷️', count: categories.length },
+    { key: 'pedidos', label: 'Ventas y Decrementos', icon: '🧾', count: pedidosPendientes },
+    { key: 'ingresos', label: 'Ingresos', icon: '📦', count: ingresosEnCurso },
+    { key: 'calendario', label: 'Calendario', icon: '🌿', count: gardenTasks.filter(t => t.date >= formatDateStr(new Date())).length },
+  ]
+
+  const sheetTitles = {
+    plantas: '🪴 Plantas',
+    categorias: '🏷️ Categorías',
+    pedidos: '🧾 Ventas y Decrementos',
+    ingresos: '📦 Ingresos',
+    calendario: '🌿 Calendario de Jardín',
+  }
+
+  // Datos del mes visible en el calendario
+  const calYear = calendarMonth.getFullYear()
+  const calMonth = calendarMonth.getMonth()
+  const calFirstDay = new Date(calYear, calMonth, 1)
+  const calStartOffset = calFirstDay.getDay()
+  const calDaysInMonth = new Date(calYear, calMonth + 1, 0).getDate()
+  const calMonthLabel = calendarMonth.toLocaleDateString('es-EC', { month: 'long', year: 'numeric' })
+  const todayStr = formatDateStr(new Date())
+
+  const calCells = []
+  for (let i = 0; i < calStartOffset; i++) calCells.push(null)
+  for (let d = 1; d <= calDaysInMonth; d++) calCells.push(new Date(calYear, calMonth, d))
+
+  const tasksByDay = {}
+  gardenTasks.forEach(t => {
+    if (!tasksByDay[t.date]) tasksByDay[t.date] = []
+    tasksByDay[t.date].push(t)
+  })
+
   return (
-    <div className="app">
+    <div className="admin">
+      <div className="admin-header">
+        <h1>Panel de administrador — Diamantev</h1>
+        <a href="/" className="back-to-store">🌿 Ver tienda</a>
+      </div>
 
-      {/* ---------- FRANJA SUPERIOR ---------- */}
-      <div className="site-header">
-        <button className="header-icon-btn" onClick={() => setMenuOpen(true)} aria-label="Menú">☰</button>
-        <img src="/1784570963668.png" alt="Diamantev" className="header-logo" />
-        <div className="header-icons">
-          <button className="header-icon-btn" onClick={() => setSearchOpen(v => !v)} aria-label="Buscar">🔍</button>
-          <button className="header-icon-btn" onClick={() => setShowCart(true)} aria-label="Carrito">
-            🛒 {cart.length > 0 && <span className="cart-badge">{cart.reduce((s, i) => s + i.quantity, 0)}</span>}
-          </button>
+      <hr className="admin-divider" />
+
+      {/* ---------- PANTALLA DE INICIO ---------- */}
+      <div className="admin-home">
+        <div className="admin-home-title">
+          <span className="admin-script">Panel Diamantev</span>
+          <p className="admin-home-sub">Administra tu jardín de un vistazo</p>
         </div>
-      </div>
 
-      {searchOpen && (
-        <div className="search-bar">
-          <input
-            autoFocus
-            placeholder="Buscar planta por nombre..."
-            value={searchQuery}
-            onChange={e => setSearchQuery(e.target.value)}
-          />
-        </div>
-      )}
-
-      <div className="site-summary">
-        <p>🌿 Vivero de plantas ornamentales en Santo Domingo</p>
-        <p>🚚 Coordinamos entrega directo por WhatsApp</p>
-        <p>💎 Cada planta es una joya viva</p>
-      </div>
-
-      <div className="promo-banner">
-        <span>🌸 Escríbenos por WhatsApp y recibe asesoría gratis para tu jardín</span>
-        <a href={`https://wa.me/${WHATSAPP_NUMBER}`} target="_blank" rel="noreferrer" className="promo-btn">Escribir ahora</a>
-      </div>
-
-      {menuOpen && (
-        <div className="cart-overlay" onClick={() => setMenuOpen(false)}>
-          <div className="cart-panel" onClick={e => e.stopPropagation()}>
-            <div className="cart-header">
-              <h2>Menú</h2>
-              <button onClick={() => setMenuOpen(false)}>✕</button>
-            </div>
-            <div className="menu-list">
-              <button className="menu-item" onClick={openAllPlants}>🪴 Ver todas las plantas</button>
-              <button className="menu-item" onClick={openAvailablePlants}>✅ Solo disponibles</button>
-              {categories.map(cat => (
-                <button key={cat.id} className="menu-item" onClick={() => openCategory(cat)}>
-                  {cat.emoji || '🌿'} {cat.name}
-                </button>
-              ))}
-            </div>
+        {loading ? (
+          <p className="status-msg">Cargando...</p>
+        ) : (
+          <div className="admin-card-grid">
+            {cards.map(c => (
+              <button key={c.key} className="admin-card" onClick={() => setView(c.key)}>
+                <span className="admin-card-icon">{c.icon}</span>
+                <span className="admin-card-count">{c.count}</span>
+                <span className="admin-card-label">{c.label}</span>
+              </button>
+            ))}
           </div>
-        </div>
-      )}
+        )}
+      </div>
 
-      {toast && <div className="toast">{toast}</div>}
+      {/* ---------- HOJA DESLIZANTE ---------- */}
+      {view !== 'home' && (
+        <div className="admin-sheet-overlay" onClick={() => setView('home')}>
+          <div className="admin-sheet" onClick={e => e.stopPropagation()}>
+            <div className="admin-sheet-header">
+              <button className="admin-sheet-back" onClick={() => setView('home')}>← Volver al inicio</button>
+              <h2>{sheetTitles[view]}</h2>
+            </div>
 
-      <button className="favorites-fab" onClick={() => setShowFavorites(true)} aria-label="Mi lista">
-        ❤️ {favorites.length > 0 && <span className="cart-badge">{favorites.length}</span>}
-      </button>
-      <a
-        className="whatsapp-fab"
-        href={`https://wa.me/${WHATSAPP_NUMBER}`}
-        target="_blank"
-        rel="noreferrer"
-        aria-label="Escríbenos por WhatsApp"
-      >
-        💬
-      </a>
-
-      {isSearching ? (
-        <>
-          <h2 className="plants-title">Resultados para "{searchQuery}"</h2>
-          {filteredPlants.length === 0 ? (
-            <p className="status-msg">No encontramos plantas con ese nombre.</p>
-          ) : (
-            <div className="grid">{filteredPlants.map(renderPlantCard)}</div>
-          )}
-        </>
-      ) : view === 'categories' ? (
-        <>
-          {loading ? (
-            <p className="status-msg">Cargando...</p>
-          ) : (
-            <>
-              <div className="section-title">
-                <span className="section-script">Comprar por categoría</span>
-              </div>
-              <div className="shop-category-grid">
-                <div className="shop-cat-card" onClick={openAllPlants}>
-                  <div className="shop-cat-circle shop-cat-circle-all">🪴</div>
-                  <span>Todas</span>
-                </div>
-                <div className="shop-cat-card" onClick={openAvailablePlants}>
-                  <div className="shop-cat-circle shop-cat-circle-all">✅</div>
-                  <span>Disponibles</span>
-                </div>
-                {categories.map(cat => (
-                  <div key={cat.id} className="shop-cat-card" onClick={() => openCategory(cat)}>
-                    <div className="shop-cat-circle">
-                      {cat.image_url ? <img src={cat.image_url} alt={cat.name} /> : <span>{cat.emoji || '🌿'}</span>}
-                    </div>
-                    <span>{cat.name}</span>
-                  </div>
-                ))}
-              </div>
-
-              {newPlants.length > 0 && (
+            <div className="admin-sheet-body">
+              {view === 'plantas' && (
                 <>
-                  <div className="section-title">
-                    <span className="section-script">Lo nuevo</span>
-                  </div>
-                  <div className="carousel-row">
-                    {newPlants.map(plant => (
-                      <div key={plant.id} className="carousel-card">
-                        {plant.image_url ? <img src={plant.image_url} alt={plant.name} /> : <div className="no-img">Sin foto</div>}
-                        <p className="carousel-name">{plant.name}</p>
-                        <p className="price">${Number(plant.price).toFixed(2)}</p>
+                  <h3>Plantas existentes ({plants.length})</h3>
+
+                  <select className="gallery-select" value={plantsFilter} onChange={e => setPlantsFilter(e.target.value)}>
+                    <option value="all">Todas las categorías</option>
+                    {categories.map(c => <option key={c.id} value={c.id}>{c.emoji} {c.name}</option>)}
+                  </select>
+
+                  <input
+                    className="order-search"
+                    placeholder="Buscar planta por nombre..."
+                    value={plantsSearch}
+                    onChange={e => setPlantsSearch(e.target.value)}
+                  />
+
+                  {loading ? <p>Cargando...</p> : (() => {
+                    const filteredPlants = plants
+                      .filter(p => plantsFilter === 'all' || p.category_id === plantsFilter)
+                      .filter(p => p.name.toLowerCase().includes(plantsSearch.trim().toLowerCase()))
+                    return (
+                    <div className="admin-list">
+                      {filteredPlants.length === 0 && <p className="status-msg">No se encontraron plantas.</p>}
+                      {filteredPlants.map(p => {
+                        const notesForPlant = plantNotes.filter(n => n.plant_id === p.id)
+                        const notesOpen = openPlantNotesListId === p.id
+                        return (
+                        <div key={p.id} className={`admin-item ${!p.active ? 'inactive' : ''}`}>
+                          {p.image_url ? <img src={p.image_url} alt={p.name} /> : <div className="no-img-sm">Sin foto</div>}
+                          <div className="admin-item-info">
+                            <strong>{p.name}</strong>
+                            <span>{categories.find(c => c.id === p.category_id)?.name || 'Sin categoría'}</span>
+                            <div className="admin-item-controls">
+                              <label>$<input type="number" step="0.01" defaultValue={p.price} onBlur={e => updatePrice(p.id, Number(e.target.value))} /></label>
+                              <label>Stock: <input type="number" defaultValue={p.stock} onBlur={e => updateStock(p.id, Number(e.target.value))} /></label>
+                            </div>
+                            <div className="admin-item-actions">
+                              <label className="file-label" title="Subir imagen" style={{ background: 'transparent', color: 'inherit', border: '1px solid #ccc' }}>
+                                📷 Imagen
+                                <input
+                                  type="file"
+                                  accept="image/*"
+                                  style={{ display: 'none' }}
+                                  onChange={e => { updatePlantImage(p.id, e.target.files[0]); e.target.value = '' }}
+                                />
+                              </label>
+                              <button onClick={() => toggleActive(p.id, p.active)}>{p.active ? 'Ocultar' : 'Mostrar'}</button>
+                              <button onClick={() => toggleIsNew(p.id, p.is_new)}>{p.is_new ? '🌱 Nueva ✓' : 'Marcar como nueva'}</button>
+                              <button onClick={() => deletePlant(p.id)} className="danger">Borrar</button>
+                              <button onClick={() => setOpenPlantNotesListId(notesOpen ? null : p.id)}>📝 Notas ({notesForPlant.length})</button>
+                            </div>
+                            {notesOpen && (
+                              <div className="plant-notes-panel">
+                                <button type="button" className="full-form-btn" onClick={() => openNewPlantNote(p.id)}>📝 Nueva nota</button>
+                                {notesForPlant.length === 0 && <p className="status-msg">Todavía no hay notas para esta planta.</p>}
+                                {notesForPlant.map(n => (
+                                  <div key={n.id} className="note-blocks-view plant-note-entry">
+                                    <div className="day-task-row">
+                                      <span className="task-note">{new Date(n.created_at).toLocaleDateString()}</span>
+                                      <button type="button" className="task-edit-btn" onClick={() => openEditPlantNote(n)}>✏️</button>
+                                      <button type="button" className="task-edit-btn" onClick={() => sharePlantNote(n)} disabled={sharingNotes} title="Compartir por WhatsApp">📲</button>
+                                      <button type="button" className="task-delete-btn" onClick={() => deletePlantNote(n.id)}>✕</button>
+                                    </div>
+                                    {(n.content_blocks || []).map((b, i) => (
+                                      <div key={i}>
+                                        {b.type === 'text' && <p className="task-note">{b.content}</p>}
+                                        {b.type === 'photo' && <img src={b.url} alt="" className="note-block-photo" />}
+                                        {b.type === 'video' && <video src={b.url} controls className="note-video" />}
+                                      </div>
+                                    ))}
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                        )
+                      })}
+                    </div>
+                    )
+                  })()}
+
+                  {plantNoteModalOpen && (
+                    <div className="admin-sheet-overlay">
+                      <div className="free-note-modal" onClick={e => e.stopPropagation()}>
+                        <div className="free-note-modal-header">
+                          <h4>{editingPlantNoteId ? 'Editar nota' : 'Nota'} — {plants.find(p => p.id === currentNotePlantId)?.name || ''}</h4>
+                          <button
+                            type="button"
+                            className="modal-close-btn"
+                            onClick={() => {
+                              const hasUnsaved = plantNoteCurrentText.trim().length > 0
+                              if (hasUnsaved && !confirm('¿Cerrar sin guardar? Perderás lo que escribiste.')) return
+                              setPlantNoteModalOpen(false)
+                              setEditingPlantNoteId(null)
+                            }}
+                          >✕</button>
+                        </div>
+                        <div className="free-note-sheet">
+                          {plantNoteBlocks.map((b, i) => (
+                            <div key={i} className="note-sheet-block">
+                              {b.type === 'text' && <p>{b.content}</p>}
+                              {b.type === 'photo' && <img src={b.url || URL.createObjectURL(b.file)} alt="" className="note-sheet-photo" />}
+                              {b.type === 'video' && (
+                                <video src={b.url || URL.createObjectURL(b.file)} controls className="note-video" />
+                              )}
+                            </div>
+                          ))}
+                          <textarea
+                            className="note-sheet-textarea"
+                            placeholder={plantNoteBlocks.length > 0 ? 'Sigue escribiendo...' : 'Escribe una nota para esta planta...'}
+                            rows={plantNoteBlocks.length > 0 ? 2 : 4}
+                            value={plantNoteCurrentText}
+                            onChange={e => setPlantNoteCurrentText(e.target.value)}
+                            autoFocus
+                          />
+                          <div className="note-sheet-toolbar">
+                            <label className="icon-btn" title="Insertar foto aquí">
+                              📷
+                              <input
+                                type="file"
+                                accept="image/*"
+                                style={{ display: 'none' }}
+                                onChange={e => { insertPhotoBlockToPlantNote(e.target.files[0]); e.target.value = '' }}
+                              />
+                            </label>
+                            <label className="icon-btn" title="Insertar video aquí">
+                              🎥
+                              <input
+                                type="file"
+                                accept="video/*"
+                                style={{ display: 'none' }}
+                                onChange={e => { insertVideoBlockToPlantNote(e.target.files[0]); e.target.value = '' }}
+                              />
+                            </label>
+                            {plantNoteBlocks.length > 0 && (
+                              <button type="button" className="icon-btn-text" onClick={removeLastPlantNoteBlock}>Deshacer</button>
+                            )}
+                            <button type="button" className="save-note-btn-inline" onClick={savePlantNote} disabled={savingPlantNote}>
+                              {savingPlantNote ? 'Guardando...' : 'Guardar'}
+                            </button>
+                          </div>
+                        </div>
                       </div>
+                    </div>
+                  )}
+                </>
+              )}
+
+              {view === 'categorias' && (
+                <>
+                  <div className="admin-subtabs">
+                    <button className={catSubTab === 'categories' ? 'active' : ''} onClick={() => setCatSubTab('categories')}>Categorías</button>
+                    <button className={catSubTab === 'gallery' ? 'active' : ''} onClick={() => setCatSubTab('gallery')}>Galería</button>
+                  </div>
+
+                  {catSubTab === 'categories' && (
+                    <>
+                      <form className="admin-form" onSubmit={addCategory}>
+                        <h3>Agregar categoría nueva</h3>
+                        <input placeholder="Nombre de la categoría" value={newCatName} onChange={e => setNewCatName(e.target.value)} />
+                        <input placeholder="Emoji (ej: 🌷)" value={newCatEmoji} onChange={e => setNewCatEmoji(e.target.value)} />
+                        <button type="submit">Agregar categoría</button>
+                      </form>
+                      <div className="admin-list">
+                        {categories.map(c => (
+                          <div key={c.id} className="admin-item">
+                            {c.image_url ? <img src={c.image_url} alt={c.name} /> : <div className="no-img-sm">{c.emoji}</div>}
+                            <div className="admin-item-info">
+                              <input defaultValue={c.name} onBlur={e => updateCategoryName(c.id, e.target.value)} style={{ fontWeight: 'bold', fontSize: '1rem', width: '100%', boxSizing: 'border-box' }} />
+                              <label>Emoji: <input defaultValue={c.emoji} onBlur={e => updateCategoryEmoji(c.id, e.target.value)} style={{ width: 50 }} /></label>
+                              <input type="file" accept="image/*" onChange={e => uploadCategoryImage(c.id, e.target.files[0])} />
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </>
+                  )}
+
+                  {catSubTab === 'gallery' && (
+                    <>
+                      <select className="gallery-select" value={galleryFilter} onChange={e => setGalleryFilter(e.target.value)}>
+                        <option value="all">Todas las categorías</option>
+                        {categories.map(c => (
+                          <option key={c.id} value={c.id}>{c.emoji} {c.name}</option>
+                        ))}
+                      </select>
+
+                      {(() => {
+                        const galleryPlants = plants.filter(p => galleryFilter === 'all' || p.category_id === galleryFilter)
+                        return (
+                          <>
+                            <div className="label-select-bar">
+                              <button type="button" onClick={() => selectAllLabels(galleryPlants)}>Seleccionar todas</button>
+                              <button type="button" onClick={clearLabels}>Deseleccionar todas</button>
+                              {selectedLabels.size > 0 && (
+                                <button type="button" className="print-btn" onClick={printLabels}>
+                                  🏷️ Imprimir etiquetas ({selectedLabels.size})
+                                </button>
+                              )}
+                            </div>
+                            <div className="gallery-grid">
+                              {galleryPlants.map(p => (
+                                <div key={p.id} className="gallery-item">
+                                  <label className="gallery-checkbox">
+                                    <input
+                                      type="checkbox"
+                                      checked={selectedLabels.has(p.id)}
+                                      onChange={() => toggleLabelSelect(p.id)}
+                                    />
+                                  </label>
+                                  {p.image_url ? <img src={p.image_url} alt={p.name} /> : <div className="no-img-sm">Sin foto</div>}
+                                  <span>{p.name}</span>
+                                </div>
+                              ))}
+                            </div>
+                          </>
+                        )
+                      })()}
+                    </>
+                  )}
+                </>
+              )}
+
+              {view === 'pedidos' && (
+                <>
+                  <form className="admin-form" onSubmit={addDecremento}>
+                    <h3>Registrar decremento manual</h3>
+                    <select value={decForm.plant_id} onChange={e => setDecForm({ ...decForm, plant_id: e.target.value })}>
+                      <option value="">Selecciona planta</option>
+                      {plants.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                    </select>
+                    <input placeholder="Cantidad" type="number" value={decForm.quantity} onChange={e => setDecForm({ ...decForm, quantity: e.target.value })} />
+                    <select value={decForm.motivo} onChange={e => setDecForm({ ...decForm, motivo: e.target.value })}>
+                      <option value="">Selecciona motivo</option>
+                      <option value="Dañada / Muerta">Dañada / Muerta</option>
+                      <option value="Uso propio">Uso propio</option>
+                      <option value="Regalo">Regalo</option>
+                      <option value="Otro">Otro</option>
+                    </select>
+                    {decForm.motivo === 'Otro' && (
+                      <input placeholder="Describe el motivo" value={decForm.motivo_otro} onChange={e => setDecForm({ ...decForm, motivo_otro: e.target.value })} />
+                    )}
+                    <button type="submit" disabled={savingDec}>{savingDec ? 'Guardando...' : 'Registrar decremento'}</button>
+                  </form>
+
+                  <input
+                    className="order-search"
+                    placeholder="Buscar por cliente, planta o motivo..."
+                    value={movSearch}
+                    onChange={e => setMovSearch(e.target.value)}
+                  />
+                  <div className="mov-filters">
+                    <select className="gallery-select" value={movTypeFilter} onChange={e => setMovTypeFilter(e.target.value)}>
+                      <option value="all">Ventas y decrementos</option>
+                      <option value="venta">Solo ventas</option>
+                      <option value="decremento">Solo decrementos</option>
+                    </select>
+                    <select className="gallery-select" value={movStatusFilter} onChange={e => setMovStatusFilter(e.target.value)}>
+                      <option value="all">Todos los estados</option>
+                      <option value="pedido">Pedido</option>
+                      <option value="pagado">Pagado</option>
+                      <option value="entregado">Entregado</option>
+                    </select>
+                  </div>
+
+                  <div className="admin-list">
+                    {movimientosFiltrados.length === 0 && <p className="status-msg">No se encontraron movimientos.</p>}
+                    {movimientosFiltrados.map(m => (
+                      m._type === 'venta' ? (
+                        <div key={`o-${m.id}`} className="admin-item">
+                          <div className="admin-item-info">
+                            <strong>🛒 {m.customer_name}</strong>
+                            <span>{m.customer_phone}</span>
+                            <span className={`order-badge order-${m.status}`}>{m.status}</span>
+                            <span>Pedido: {new Date(m.created_at).toLocaleDateString()}</span>
+                            {m.fecha_pago && <span>Pagado: {new Date(m.fecha_pago).toLocaleDateString()}</span>}
+                            {m.fecha_entrega && <span>Entregado: {new Date(m.fecha_entrega).toLocaleDateString()}</span>}
+                            {(m.order_items || []).map(it => {
+                              const plant = plants.find(p => p.id === it.plant_id)
+                              return <span key={it.id}>{plant ? plant.name : 'Planta'} x{it.quantity}</span>
+                            })}
+                            <span>Total: ${Number(m.total).toFixed(2)}</span>
+                            <div className="admin-item-actions">
+                              {m.status === 'pedido' && (
+                                <button onClick={() => markAsPaid(m)} disabled={approvingIds.includes(m.id)}>
+                                  {approvingIds.includes(m.id) ? 'Procesando...' : 'Marcar como pagado'}
+                                </button>
+                              )}
+                              {m.status === 'pagado' && (
+                                <button onClick={() => markAsDelivered(m)} disabled={approvingIds.includes(m.id)}>
+                                  {approvingIds.includes(m.id) ? 'Procesando...' : 'Marcar como entregado'}
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      ) : (
+                        <div key={`d-${m.id}`} className="admin-item">
+                          <div className="admin-item-info">
+                            <strong>{m.motivo === 'Regalo' ? '🎁' : '🗑️'} {m.plant_name}</strong>
+                            <span>{m.motivo === 'Otro' ? m.motivo_otro : m.motivo}</span>
+                            <span>Registrado: {new Date(m.created_at).toLocaleDateString()}</span>
+                            <span>Cantidad: -{m.quantity}</span>
+                          </div>
+                        </div>
+                      )
                     ))}
                   </div>
                 </>
               )}
 
-              <div className="section-title">
-                <span className="section-script">Lo que dicen nuestros clientes</span>
-              </div>
-              <div className="carousel-row testimonial-row">
-                {TESTIMONIALS.map((t, i) => (
-                  <div key={i} className="testimonial-card">
-                    <p className="testimonial-stars">{'⭐'.repeat(t.stars)}</p>
-                    <p className="testimonial-text">"{t.text}"</p>
-                    <p className="testimonial-name">— {t.name}</p>
-                  </div>
-                ))}
-              </div>
-            </>
-          )}
-        </>
-      ) : (
-        <>
-          <button className="back-btn" onClick={backToCategories}>← Volver a categorías</button>
-          <h2 className="plants-title">
-            {selectedCategory
-              ? `${selectedCategory.emoji || ''} ${selectedCategory.name}`
-              : stockFilter === 'available' ? '✅ Plantas disponibles' : 'Todas las plantas'}
-          </h2>
-          {filteredPlants.length === 0 ? (
-            <p className="status-msg">Todavía no hay plantas en esta categoría.</p>
-          ) : (
-            <div className="grid">{filteredPlants.map(renderPlantCard)}</div>
-          )}
-        </>
-      )}
+              {view === 'ingresos' && (() => {
+                const comprasByLote = {}
+                const comprasSinLote = []
+                compras.forEach(c => {
+                  if (c.lote_id) {
+                    if (!comprasByLote[c.lote_id]) comprasByLote[c.lote_id] = []
+                    comprasByLote[c.lote_id].push(c)
+                  } else {
+                    comprasSinLote.push(c)
+                  }
+                })
+                return (
+                  <>
+                    {!loteBuilderOpen ? (
+                      <button type="button" className="full-form-btn" onClick={() => setLoteBuilderOpen(true)}>🧺 Nueva compra</button>
+                    ) : (
+                      <div className="admin-form">
+                        <h3>Nueva compra</h3>
+                        <input placeholder="Proveedor (opcional)" value={loteProveedor} onChange={e => setLoteProveedor(e.target.value)} />
+                        <input placeholder="Nota (ej: 'Iris julio')" value={loteNota} onChange={e => setLoteNota(e.target.value)} />
 
-      {showFavorites && (
-        <div className="cart-overlay" onClick={() => setShowFavorites(false)}>
-          <div className="cart-panel" onClick={e => e.stopPropagation()}>
-            <div className="cart-header">
-              <h2>Mi lista</h2>
-              <button onClick={() => setShowFavorites(false)}>✕</button>
-            </div>
-            {favorites.length === 0 ? (
-              <p className="status-msg">Todavía no has agregado plantas a tu lista</p>
-            ) : (
-              <>
-                {favorites.map(item => (
-                  <div key={item.id} className="cart-item">
-                    <span>{item.name}</span>
-                    <button onClick={() => toggleFavorite(item)}>✕</button>
-                  </div>
-                ))}
-                <button className="checkout-btn" onClick={sendFavorites}>
-                  💬 Enviar lista por WhatsApp
-                </button>
-              </>
-            )}
-          </div>
-        </div>
-      )}
+                        <h4>Agregar planta a esta compra</h4>
+                        <select value={lineForm.plant_id} onChange={e => setLineForm({ ...lineForm, plant_id: e.target.value, new_plant_name: '', new_plant_category: '' })}>
+                          <option value="">Selecciona planta existente</option>
+                          {plants.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                        </select>
+                        <p style={{ margin: '4px 0', fontSize: '0.8rem', color: '#6b6b5f' }}>— o registra una planta nueva —</p>
+                        <input placeholder="Nombre de planta nueva" value={lineForm.new_plant_name} onChange={e => setLineForm({ ...lineForm, plant_id: '', new_plant_name: e.target.value })} />
+                        <select value={lineForm.new_plant_category} onChange={e => setLineForm({ ...lineForm, new_plant_category: e.target.value })}>
+                          <option value="">Selecciona categoría (crea la categoría primero en Categorías si no existe)</option>
+                          {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                        </select>
+                        <input placeholder="Cantidad" type="number" value={lineForm.quantity} onChange={e => setLineForm({ ...lineForm, quantity: e.target.value })} />
+                        <input placeholder="Precio de compra (por unidad)" type="number" step="0.01" value={lineForm.unit_cost} onChange={e => setLineForm({ ...lineForm, unit_cost: e.target.value })} />
+                        <input placeholder="Precio de venta (opcional)" type="number" step="0.01" value={lineForm.sale_price} onChange={e => setLineForm({ ...lineForm, sale_price: e.target.value })} />
+                        <input type="file" accept="image/*" onChange={e => setLineForm({ ...lineForm, file: e.target.files[0] })} />
+                        <button type="button" onClick={addLineToLote}>➕ Agregar a la lista</button>
 
-      {showCart && (
-        <div className="cart-overlay" onClick={() => setShowCart(false)}>
-          <div className="cart-panel" onClick={e => e.stopPropagation()}>
-            <div className="cart-header">
-              <h2>Tu carrito</h2>
-              <button onClick={() => setShowCart(false)}>✕</button>
-            </div>
-            {cart.length === 0 ? (
-              <p className="status-msg">Tu carrito está vacío</p>
-            ) : (
-              <>
-                {cart.map(item => (
-                  <div key={item.id} className="cart-item">
-                    <span>{item.name}</span>
-                    <div className="qty-controls">
-                      <button onClick={() => changeQty(item.id, -1)}>-</button>
-                      <span>{item.quantity}</span>
-                      <button onClick={() => changeQty(item.id, 1)} disabled={item.quantity >= item.stock}>+</button>
+                        {loteLines.length > 0 && (
+                          <div className="admin-list">
+                            <h4>Plantas en esta compra ({loteLines.length})</h4>
+                            {loteLines.map((line, i) => (
+                              <div key={i} className="admin-item">
+                                <div className="admin-item-info">
+                                  <strong>{line.plant_name}</strong>
+                                  <span>Cantidad: {line.quantity} — Costo: ${Number(line.unit_cost).toFixed(2)}</span>
+                                  <div className="admin-item-actions">
+                                    <button onClick={() => removeLoteLine(i)} className="danger">Quitar</button>
+                                  </div>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
+                        <div className="admin-item-actions">
+                          <button
+                            type="button"
+                            onClick={saveLote}
+                            disabled={savingLote || loteLines.length === 0}
+                            style={{ background: '#4a5d3a', color: '#fff', padding: '10px 16px', borderRadius: 6, border: 'none' }}
+                          >
+                            {savingLote ? 'Guardando...' : 'Guardar compra'}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => { setLoteBuilderOpen(false); setLoteLines([]); setLoteNota(''); setLoteProveedor('') }}
+                            style={{ background: '#fff', color: '#b03434', padding: '10px 16px', borderRadius: 6, border: '1px solid #b03434' }}
+                          >
+                            Cancelar
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="admin-list">
+                      {lotes.length === 0 && comprasSinLote.length === 0 && <p className="status-msg">No hay ingresos registrados.</p>}
+                      {lotes.map(lote => {
+                        const lineas = comprasByLote[lote.id] || []
+                        if (lineas.length === 0) return null
+                        const totalLote = lineas.reduce((sum, c) => sum + Number(c.total), 0)
+                        return (
+                          <div key={lote.id} className="admin-item lote-group">
+                            <div className="admin-item-info">
+                              <strong>🧺 Compra #{lote.numero}{lote.nota ? ` — ${lote.nota}` : ''}</strong>
+                              {lote.proveedor && <span>Procedencia: {lote.proveedor}</span>}
+                              <span>Fecha: {new Date(lote.created_at).toLocaleDateString()}</span>
+                              <span>Total compra: ${totalLote.toFixed(2)}</span>
+                              <div className="admin-item-actions">
+                                {lineas.some(c => c.status === 'pedido') && (
+                                  <button onClick={() => markLotePagado(lote.id)} disabled={lineas.some(c => approvingIds.includes(c.id))}>
+                                    Marcar toda la compra como pagada
+                                  </button>
+                                )}
+                                {lineas.some(c => c.status === 'pagado') && (
+                                  <button onClick={() => markLoteRecibido(lote.id)} disabled={lineas.some(c => approvingIds.includes(c.id))}>
+                                    Marcar toda la compra como recibida
+                                  </button>
+                                )}
+                                <button onClick={() => openLoteNote(lote)}>
+                                  📝 {(lote.content_blocks && lote.content_blocks.length > 0) ? 'Editar nota de la compra' : 'Agregar nota de la compra'}
+                                </button>
+                              </div>
+                              {lote.content_blocks && lote.content_blocks.length > 0 && (
+                                <div className="note-blocks-view">
+                                  {lote.content_blocks.map((b, i) => (
+                                    <div key={i}>
+                                      {b.type === 'text' && <p className="task-note">{b.content}</p>}
+                                      {b.type === 'photo' && <img src={b.url} alt="" className="note-block-photo" />}
+                                      {b.type === 'video' && <video src={b.url} controls className="note-video" />}
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                              {lineas.map(c => (
+                                <div key={c.id} className="admin-item" style={{ marginLeft: 12 }}>
+                                  {c.image_url ? <img src={c.image_url} alt={c.plant_name} /> : <div className="no-img-sm">Sin foto</div>}
+                                  <div className="admin-item-info">
+                                    <strong>{c.plant_name}</strong>
+                                    <span className={`order-badge order-${c.status}`}>{c.status}</span>
+                                    <span>Cantidad: {c.quantity}</span>
+                                    <span>Subtotal: ${Number(c.total).toFixed(2)}</span>
+                                    <div className="admin-item-actions">
+                                      {c.status === 'pedido' && (
+                                        <button onClick={() => markCompraPagada(c)} disabled={approvingIds.includes(c.id)}>
+                                          {approvingIds.includes(c.id) ? 'Procesando...' : 'Marcar como pagado'}
+                                        </button>
+                                      )}
+                                      {c.status === 'pagado' && (
+                                        <button onClick={() => markCompraRecibida(c)} disabled={approvingIds.includes(c.id)}>
+                                          {approvingIds.includes(c.id) ? 'Procesando...' : 'Marcar como recibido'}
+                                        </button>
+                                      )}
+                                    </div>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )
+                      })}
+                      {comprasSinLote.map(c => (
+                        <div key={c.id} className="admin-item">
+                          {c.image_url ? <img src={c.image_url} alt={c.plant_name} /> : <div className="no-img-sm">Sin foto</div>}
+                          <div className="admin-item-info">
+                            <strong>{c.plant_name}</strong>
+                            <span>Procedencia: {c.proveedor || 'Sin especificar'}</span>
+                            <span className={`order-badge order-${c.status}`}>{c.status}</span>
+                            <span>Pedido: {new Date(c.created_at).toLocaleDateString()}</span>
+                            {c.fecha_pago && <span>Pagado: {new Date(c.fecha_pago).toLocaleDateString()}</span>}
+                            {c.fecha_recibido && <span>Recibido: {new Date(c.fecha_recibido).toLocaleDateString()}</span>}
+                            <span>Cantidad: {c.quantity}</span>
+                            <span>Total compra: ${Number(c.total).toFixed(2)}</span>
+                            <div className="admin-item-actions">
+                              {c.status === 'pedido' && (
+                                <button onClick={() => markCompraPagada(c)} disabled={approvingIds.includes(c.id)}>
+                                  {approvingIds.includes(c.id) ? 'Procesando...' : 'Marcar como pagado'}
+                                </button>
+                              )}
+                              {c.status === 'pagado' && (
+                                <button onClick={() => markCompraRecibida(c)} disabled={approvingIds.includes(c.id)}>
+                                  {approvingIds.includes(c.id) ? 'Procesando...' : 'Marcar como recibido'}
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      ))}
                     </div>
-                    <span>${(item.price * item.quantity).toFixed(2)}</span>
+
+                    {loteNoteModalOpen && (
+                      <div className="admin-sheet-overlay">
+                        <div className="free-note-modal" onClick={e => e.stopPropagation()}>
+                          <div className="free-note-modal-header">
+                            <h4>Nota de la compra #{lotes.find(l => l.id === currentNoteLoteId)?.numero || ''}</h4>
+                            <button
+                              type="button"
+                              className="modal-close-btn"
+                              onClick={() => {
+                                const hasUnsaved = loteNoteCurrentText.trim().length > 0
+                                if (hasUnsaved && !confirm('¿Cerrar sin guardar? Perderás lo que escribiste.')) return
+                                setLoteNoteModalOpen(false)
+                              }}
+                            >✕</button>
+                          </div>
+                          <div className="free-note-sheet">
+                            {loteNoteBlocks.map((b, i) => (
+                              <div key={i} className="note-sheet-block">
+                                {b.type === 'text' && <p>{b.content}</p>}
+                                {b.type === 'photo' && <img src={b.url || URL.createObjectURL(b.file)} alt="" className="note-sheet-photo" />}
+                                {b.type === 'video' && (
+                                  <video src={b.url || URL.createObjectURL(b.file)} controls className="note-video" />
+                                )}
+                              </div>
+                            ))}
+                            <textarea
+                              className="note-sheet-textarea"
+                              placeholder={loteNoteBlocks.length > 0 ? 'Sigue escribiendo...' : 'Escribe cómo fue esta compra...'}
+                              rows={loteNoteBlocks.length > 0 ? 2 : 4}
+                              value={loteNoteCurrentText}
+                              onChange={e => setLoteNoteCurrentText(e.target.value)}
+                              autoFocus
+                            />
+                            <div className="note-sheet-toolbar">
+                              <label className="icon-btn" title="Insertar foto aquí">
+                                📷
+                                <input
+                                  type="file"
+                                  accept="image/*"
+                                  style={{ display: 'none' }}
+                                  onChange={e => { insertPhotoBlockToLoteNote(e.target.files[0]); e.target.value = '' }}
+                                />
+                              </label>
+                              <label className="icon-btn" title="Insertar video aquí">
+                                🎥
+                                <input
+                                  type="file"
+                                  accept="video/*"
+                                  style={{ display: 'none' }}
+                                  onChange={e => { insertVideoBlockToLoteNote(e.target.files[0]); e.target.value = '' }}
+                                />
+                              </label>
+                              {loteNoteBlocks.length > 0 && (
+                                <button type="button" className="icon-btn-text" onClick={removeLastLoteNoteBlock}>Deshacer</button>
+                              )}
+                              <button type="button" className="save-note-btn-inline" onClick={saveLoteNote} disabled={savingLoteNote}>
+                                {savingLoteNote ? 'Guardando...' : 'Guardar'}
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </>
+                )
+              })()}
+
+              {view === 'calendario' && (
+                <>
+                  <div className="calendar-header">
+                    <button type="button" onClick={() => changeMonth(-1)}>←</button>
+                    <h3>{calMonthLabel}</h3>
+                    <button type="button" onClick={() => changeMonth(1)}>→</button>
                   </div>
-                ))}
-                <p className="cart-total">Total: ${total.toFixed(2)}</p>
-                <input placeholder="Tu nombre" value={customerName} onChange={e => setCustomerName(e.target.value)} />
-                <input placeholder="Tu teléfono" value={customerPhone} onChange={e => setCustomerPhone(e.target.value)} />
-                <button className="checkout-btn" onClick={sendOrder} disabled={sending}>
-                  {sending ? 'Enviando...' : 'Confirmar pedido por WhatsApp'}
-                </button>
-              </>
-            )}
+
+                  <div className="task-search-row">
+                    <input
+                      className="order-search"
+                      placeholder="Buscar tarea por palabra o etiqueta..."
+                      value={taskSearch}
+                      onChange={e => setTaskSearch(e.target.value)}
+                      onKeyDown={e => e.key === 'Enter' && (e.target.blur(), setTaskSearchSubmitted(taskSearch))}
+                    />
+                    <button
+                      type="button"
+                      className="task-search-btn"
+                      onClick={() => { document.activeElement && document.activeElement.blur(); setTaskSearchSubmitted(taskSearch) }}
+                    >
+                      🔍 Buscar
+                    </button>
+                  </div>
+
+                  {taskSearchSubmitted.trim() && (() => {
+                    const term = taskSearchSubmitted.trim().toLowerCase()
+                    const matches = gardenTasks
+                      .filter(t => {
+                        const tag = gardenTags.find(g => g.id === t.tag_id)
+                        const blocksText = (t.content_blocks || [])
+                          .filter(b => b.type === 'text')
+                          .map(b => b.content)
+                          .join(' ')
+                          .toLowerCase()
+                        return (t.note || '').toLowerCase().includes(term)
+                          || (tag?.name || '').toLowerCase().includes(term)
+                          || blocksText.includes(term)
+                      })
+                      .sort((a, b) => a.date.localeCompare(b.date))
+                    return (
+                      <div className="day-panel">
+                        <h4>Resultados de búsqueda ({matches.length})</h4>
+                        {matches.length === 0 && <p className="status-msg">No se encontraron tareas.</p>}
+                        <div className="day-task-list">
+                          {matches.map(t => {
+                            const tag = gardenTags.find(g => g.id === t.tag_id)
+                            const isPast = t.date < todayStr
+                            const hasBlocks = t.content_blocks && t.content_blocks.length > 0
+                            return (
+                              <div
+                                key={t.id}
+                                className="day-task-item"
+                                onClick={() => {
+                                  setTaskSearch('')
+                                  setTaskSearchSubmitted('')
+                                  setSelectedDay(t.date)
+                                  setDayModalOpen(true)
+                                  if (hasBlocks) {
+                                    setEditingTaskId(t.id)
+                                    setFreeNoteBlocks(t.content_blocks)
+                                    setFreeNoteCurrentText('')
+                                    setFreeNoteModalOpen(true)
+                                  }
+                                }}
+                              >
+                                <span className="task-tag-dot" style={{ background: tag?.color || '#a1665e' }} />
+                                <span className="task-tag-name">{new Date(t.date + 'T00:00:00').toLocaleDateString('es-EC', { day: 'numeric', month: 'short' })} — {tag?.name || (t.tag_id ? 'Etiqueta borrada' : '📝 Nota libre')}</span>
+                                {t.note && <span className="task-note">— {t.note}</span>}
+                              </div>
+                            )
+                          })}
+                        </div>
+                      </div>
+                    )
+                  })()}
+
+                  <div className="calendar-grid">
+                    {['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'].map(d => (
+                      <div key={d} className="calendar-weekday">{d}</div>
+                    ))}
+                    {calCells.map((cell, i) => {
+                      if (!cell) return <div key={`empty-${i}`} className="calendar-day outside" />
+                      const dateStr = formatDateStr(cell)
+                      const dayTasks = tasksByDay[dateStr] || []
+                      return (
+                        <div
+                          key={dateStr}
+                          className={`calendar-day ${dateStr === todayStr ? 'today' : ''} ${selectedDay === dateStr ? 'selected' : ''}`}
+                          onClick={() => setSelectedDay(dateStr)}
+                        >
+                          <span className="calendar-day-num">{cell.getDate()}</span>
+                          <div className="calendar-day-tasks">
+                            {dayTasks.slice(0, 3).map(t => {
+                              const tag = gardenTags.find(g => g.id === t.tag_id)
+                              const hasBlocks = t.content_blocks && t.content_blocks.length > 0
+                              return (
+                                <span
+                                  key={t.id}
+                                  className="calendar-task-label"
+                                  style={{ background: tag?.color || (t.tag_id ? '#a1665e' : '#B5A88F') }}
+                                  title={tag?.name || t.note}
+                                >
+                                  {tag?.name || (t.note ? `📝 ${t.note}` : '📝')}
+                                </span>
+                              )
+                            })}
+                            {dayTasks.length > 3 && (
+                              <span className="calendar-task-more">+{dayTasks.length - 3}</span>
+                            )}
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+
+                  <div className="garden-tags-section">
+                    {selectedDay && (
+                      <div className="day-selected-bar">
+                        <span>Día seleccionado: {new Date(selectedDay + 'T00:00:00').toLocaleDateString('es-EC', { day: 'numeric', month: 'long' })}</span>
+                        <button type="button" onClick={() => setDayModalOpen(true)}>👁️ Ver detalles del día</button>
+                      </div>
+                    )}
+                    <h3>Etiquetas de tareas</h3>
+                    <p style={{ fontSize: '0.8rem', color: '#6b6b5f', margin: '0 0 8px' }}>Selecciona un día en el calendario y toca ➕ en una etiqueta para asignarla directo.</p>
+                    <div className="garden-tags-list">
+                      {gardenTags.map(tag => (
+                        <div key={tag.id} className="garden-tag-chip">
+                          <button
+                            type="button"
+                            className="tag-quick-add-btn"
+                            onClick={() => quickAddTask(tag.id)}
+                            disabled={!selectedDay}
+                            title={selectedDay ? `Agregar "${tag.name}" al día seleccionado` : 'Selecciona un día primero'}
+                          >➕</button>
+                          <input
+                            type="color"
+                            className="tag-color-input"
+                            value={tag.color}
+                            onChange={e => updateTagColor(tag.id, e.target.value)}
+                          />
+                          <input
+                            className="tag-name-input"
+                            defaultValue={tag.name}
+                            onBlur={e => updateTagName(tag.id, e.target.value)}
+                          />
+                          <button type="button" className="tag-delete-btn" onClick={() => deleteTag(tag.id)}>✕</button>
+                        </div>
+                      ))}
+                    </div>
+                    <form className="admin-form garden-tag-form" onSubmit={addTag}>
+                      <input
+                        placeholder="Nueva etiqueta (ej: Riego delantero)"
+                        value={newTagForm.name}
+                        onChange={e => setNewTagForm({ ...newTagForm, name: e.target.value })}
+                      />
+                      <input
+                        type="color"
+                        value={newTagForm.color}
+                        onChange={e => setNewTagForm({ ...newTagForm, color: e.target.value })}
+                      />
+                      <button type="submit">Agregar etiqueta</button>
+                    </form>
+                  </div>
+
+                  {selectedDay && dayModalOpen && (
+                    <div className="admin-sheet-overlay" onClick={() => setDayModalOpen(false)}>
+                      <div className="day-panel day-panel-modal" onClick={e => e.stopPropagation()}>
+                        <div className="free-note-modal-header">
+                          <h4>{new Date(selectedDay + 'T00:00:00').toLocaleDateString('es-EC', { weekday: 'long', day: 'numeric', month: 'long' })}</h4>
+                          <button type="button" className="modal-close-btn" onClick={() => setDayModalOpen(false)}>✕</button>
+                        </div>
+
+                      {gardenTags.length === 0 ? (
+                        <p className="status-msg">Agrega una etiqueta arriba para poder añadir tareas.</p>
+                      ) : (
+                        <button type="button" className="full-form-btn" onClick={() => setTagMenuOpen(true)}>
+                          🏷️ Elegir etiqueta para este día
+                        </button>
+                      )}
+
+                      {tagMenuOpen && (
+                        <div className="tag-menu-overlay" onClick={() => setTagMenuOpen(false)}>
+                          <div className="tag-menu-panel" onClick={e => e.stopPropagation()}>
+                            <div className="tag-menu-header">
+                              <h4>Elegir etiqueta</h4>
+                              <button type="button" className="modal-close-btn" onClick={() => setTagMenuOpen(false)}>✕</button>
+                            </div>
+                            <div className="tag-menu-list">
+                              {gardenTags.map(tag => (
+                                <button
+                                  key={tag.id}
+                                  type="button"
+                                  className="tag-menu-item"
+                                  onClick={() => { quickAddTask(tag.id); setTagMenuOpen(false) }}
+                                >
+                                  <span className="tag-menu-dot" style={{ background: tag.color }} />
+                                  {tag.name}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      <button
+                        type="button"
+                        className="full-form-btn"
+                        onClick={() => { setEditingTaskId(null); setFreeNoteBlocks([]); setFreeNoteCurrentText(''); setFreeNoteModalOpen(true) }}
+                      >
+                        📝 Escribir nota libre
+                      </button>
+
+                      {freeNoteModalOpen && (
+                        <div className="admin-sheet-overlay">
+                          <div className="free-note-modal" onClick={e => e.stopPropagation()}>
+                            <div className="free-note-modal-header">
+                              <h4>{editingTaskId ? 'Editar nota' : 'Nota libre'} — {new Date(selectedDay + 'T00:00:00').toLocaleDateString('es-EC', { day: 'numeric', month: 'long' })}</h4>
+                              <button
+                                type="button"
+                                className="modal-close-btn"
+                                onClick={() => {
+                                  const hasUnsaved = freeNoteCurrentText.trim().length > 0
+                                  if (hasUnsaved && !confirm('¿Cerrar sin guardar? Perderás lo que escribiste.')) return
+                                  setFreeNoteModalOpen(false)
+                                  setEditingTaskId(null)
+                                }}
+                              >✕</button>
+                            </div>
+                            <div className="free-note-sheet">
+                              {freeNoteBlocks.map((b, i) => (
+                                <div key={i} className="note-sheet-block">
+                                  {b.type === 'text' && <p>{b.content}</p>}
+                                  {b.type === 'photo' && <img src={b.url || URL.createObjectURL(b.file)} alt="" className="note-sheet-photo" />}
+                                  {b.type === 'video' && (
+                                    <video src={b.url || URL.createObjectURL(b.file)} controls className="note-video" />
+                                  )}
+                                </div>
+                              ))}
+                              <textarea
+                                className="note-sheet-textarea"
+                                placeholder={freeNoteBlocks.length > 0 ? 'Sigue escribiendo...' : 'Escribe una nota libre para este día...'}
+                                rows={freeNoteBlocks.length > 0 ? 2 : 4}
+                                value={freeNoteCurrentText}
+                                onChange={e => setFreeNoteCurrentText(e.target.value)}
+                                autoFocus
+                              />
+                              <div className="note-sheet-toolbar">
+                                <label className="icon-btn" title="Insertar foto aquí">
+                                  📷
+                                  <input
+                                    type="file"
+                                    accept="image/*"
+                                    style={{ display: 'none' }}
+                                    onChange={e => { insertPhotoBlockToNote(e.target.files[0]); e.target.value = '' }}
+                                  />
+                                </label>
+                                <label className="icon-btn" title="Insertar video aquí">
+                                  🎥
+                                  <input
+                                    type="file"
+                                    accept="video/*"
+                                    style={{ display: 'none' }}
+                                    onChange={e => { insertVideoBlockToNote(e.target.files[0]); e.target.value = '' }}
+                                  />
+                                </label>
+                                {freeNoteBlocks.length > 0 && (
+                                  <button type="button" className="icon-btn-text" onClick={removeLastNoteBlock}>Deshacer</button>
+                                )}
+                                <button type="button" className="save-note-btn-inline" onClick={quickAddFreeNote} disabled={savingFreeNote}>
+                                  {savingFreeNote ? 'Guardando...' : 'Guardar'}
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      <button
+                        type="button"
+                        className="full-form-btn"
+                        onClick={() => { setTaskForm({ tag_id: '', date: selectedDay, note: '', repeat: 'none' }); setTaskFormOpen(true) }}
+                      >
+                        📋 Tarea con nota o repetición
+                      </button>
+
+                      <div className="day-task-list">
+                        {(tasksByDay[selectedDay] || []).length === 0 && (
+                          <p className="status-msg">No hay tareas este día.</p>
+                        )}
+                        {(tasksByDay[selectedDay] || []).map(t => {
+                          const tag = gardenTags.find(g => g.id === t.tag_id)
+                          const isPast = selectedDay < todayStr
+                          const hasMedia = (t.photo_urls && t.photo_urls.length > 0) || t.video_url
+                          const hasBlocks = t.content_blocks && t.content_blocks.length > 0
+                          return (
+                            <div key={t.id} className={`day-task-item ${(hasMedia || hasBlocks) ? 'has-media' : ''}`}>
+                              <div className="day-task-row">
+                                <span className="task-tag-dot" style={{ background: tag?.color || (t.tag_id ? '#a1665e' : '#B5A88F') }} />
+                                {!hasBlocks && <span className="task-tag-name">{tag?.name || (t.tag_id ? 'Etiqueta borrada' : '📝 Nota libre')}</span>}
+                                {!hasBlocks && t.note && <span className="task-note">— {t.note}</span>}
+                                {hasBlocks && <span className="task-tag-name">📝 Nota libre</span>}
+                                {hasBlocks && <button type="button" className="task-edit-btn" onClick={() => openEditNote(t)}>✏️</button>}
+                                {hasBlocks && <button type="button" className="task-edit-btn" onClick={() => shareCalendarNote(t)} disabled={sharingNotes} title="Compartir por WhatsApp">📲</button>}
+                                <button type="button" className="task-delete-btn" onClick={() => deleteTask(t.id)}>✕</button>
+                              </div>
+                              {hasBlocks && (
+                                <div className="note-blocks-view">
+                                  {t.content_blocks.map((b, i) => (
+                                    <div key={i}>
+                                      {b.type === 'text' && <p className="task-note">{b.content}</p>}
+                                      {b.type === 'photo' && <img src={b.url} alt="" className="note-block-photo" />}
+                                      {b.type === 'video' && <video src={b.url} controls className="note-video" />}
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                              {!hasBlocks && t.photo_urls && t.photo_urls.length > 0 && (
+                                <div className="note-photos">
+                                  {t.photo_urls.map((url, i) => <img key={i} src={url} alt="" />)}
+                                </div>
+                              )}
+                              {!hasBlocks && t.video_url && <video src={t.video_url} controls className="note-video" />}
+                            </div>
+                          )
+                        })}
+                      </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {taskFormOpen && (
+                    <div className="admin-sheet-overlay" onClick={() => setTaskFormOpen(false)}>
+                      <div className="task-form-modal" onClick={e => e.stopPropagation()}>
+                        <form className="admin-form" onSubmit={addTaskFull}>
+                          <h3>Nueva tarea</h3>
+                          <select value={taskForm.tag_id} onChange={e => setTaskForm({ ...taskForm, tag_id: e.target.value })}>
+                            <option value="">Selecciona etiqueta</option>
+                            {gardenTags.map(tag => <option key={tag.id} value={tag.id}>{tag.name}</option>)}
+                          </select>
+                          <input
+                            type="date"
+                            value={taskForm.date}
+                            onChange={e => setTaskForm({ ...taskForm, date: e.target.value })}
+                          />
+                          <input
+                            placeholder="Nota (opcional)"
+                            value={taskForm.note}
+                            onChange={e => setTaskForm({ ...taskForm, note: e.target.value })}
+                          />
+                          <select value={taskForm.repeat} onChange={e => setTaskForm({ ...taskForm, repeat: e.target.value })}>
+                            <option value="none">No se repite</option>
+                            <option value="weekly">Cada semana</option>
+                            <option value="biweekly">Cada 2 semanas</option>
+                            <option value="monthly">Cada mes</option>
+                          </select>
+                          <button type="submit">Guardar tarea</button>
+                          <button type="button" onClick={() => setTaskFormOpen(false)}>Cancelar</button>
+                        </form>
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
           </div>
         </div>
       )}
 
-      <footer className="site-footer">
-        <span className="footer-script">Diamantev</span>
-        <p className="footer-tagline">Vivero de plantas ornamentales · Joyas Vivas</p>
-        <p className="footer-whatsapp">
-          WhatsApp: <a href={`https://wa.me/${WHATSAPP_NUMBER}`} target="_blank" rel="noreferrer">0992734743</a>
-        </p>
-        <p className="footer-copy">© 2026 Diamantev</p>
-      </footer>
+      {/* ---------- HOJA IMPRIMIBLE DE ETIQUETAS (solo visible al imprimir) ---------- */}
+      <div className="print-labels-sheet">
+        <div className="label-grid">
+          {plants.filter(p => selectedLabels.has(p.id)).map(p => (
+            <div key={p.id} className="label-card">
+              <span className="label-name">{p.name}</span>
+              {p.image_url
+                ? <img src={p.image_url} alt={p.name} className="label-photo" />
+                : <div className="label-photo label-no-img">Sin foto</div>}
+            </div>
+          ))}
+        </div>
+      </div>
     </div>
   )
 }
