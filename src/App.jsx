@@ -83,6 +83,7 @@ export default function App() {
         .filter(p => stockFilter === 'available' ? p.stock > 0 : true)
 
   const newPlants = plants.filter(p => p.is_new)
+  const salePlants = plants.filter(p => p.on_sale)
 
   function addToCart(plant) {
     setCart(prev => {
@@ -170,6 +171,7 @@ export default function App() {
           {plant.image_url ? <img src={plant.image_url} alt={plant.name} /> : <div className="no-img">Sin foto</div>}
           <img src="/1784460904562.png" alt="" className="watermark" />
           {plant.is_new && <span className="new-badge">Nueva</span>}
+          {plant.on_sale && <span className="sale-badge">Descuento</span>}
           <button
             className={`fav-toggle-btn ${isFavorite(plant.id) ? 'active' : ''}`}
             onClick={() => toggleFavorite(plant)}
@@ -198,7 +200,7 @@ export default function App() {
       {/* ---------- FRANJA SUPERIOR ---------- */}
       <div className="site-header">
         <button className="header-icon-btn" onClick={() => setMenuOpen(true)} aria-label="Menú">☰</button>
-        <img src="/1784570963668.png" alt="Diamantev" className="header-logo" />
+        <span className="header-logo-text">Diamantev</span>
         <div className="header-icons">
           <button className="header-icon-btn" onClick={() => setSearchOpen(v => !v)} aria-label="Buscar">🔍</button>
           <button className="header-icon-btn" onClick={() => setShowCart(true)} aria-label="Carrito">
@@ -206,6 +208,8 @@ export default function App() {
           </button>
         </div>
       </div>
+
+      <div className="brand-banner" />
 
       {searchOpen && (
         <div className="search-bar">
@@ -223,6 +227,13 @@ export default function App() {
         <p>🚚 Coordinamos entrega directo por WhatsApp</p>
         <p>💎 Cada planta es una joya viva</p>
       </div>
+
+      {salePlants.length > 0 && (
+        <div className="promo-banner sale-banner">
+          <span>🏷️ ¡{salePlants.length === 1 ? 'Planta en descuento' : `${salePlants.length} plantas en descuento`}! Escríbenos para conocer los precios</span>
+          <a href={`https://wa.me/${WHATSAPP_NUMBER}`} target="_blank" rel="noreferrer" className="promo-btn">Ver ofertas</a>
+        </div>
+      )}
 
       <div className="promo-banner">
         <span>🌸 Escríbenos por WhatsApp y recibe asesoría gratis para tu jardín</span>
