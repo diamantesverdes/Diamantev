@@ -164,6 +164,25 @@ export default function Admin() {
     loadData()
   }
 
+  async function markLotePagado(loteId) {
+    const lineas = compras.filter(c => c.lote_id === loteId && c.status === 'pedido')
+    if (lineas.length === 0) return
+    setApprovingIds(prev => [...prev, ...lineas.map(c => c.id)])
+    await supabase.from('compras').update({ status: 'pagado', fecha_pago: new Date().toISOString() }).eq('lote_id', loteId).eq('status', 'pedido')
+    await loadData()
+    setApprovingIds(prev => prev.filter(id => !lineas.some(c => c.id === id)))
+  }
+
+  async function markLoteRecibido(loteId) {
+    const lineas = compras.filter(c => c.lote_id === loteId && c.status === 'pagado')
+    if (lineas.length === 0) return
+    setApprovingIds(prev => [...prev, ...lineas.map(c => c.id)])
+    for (const compra of lineas) {
+      await markCompraRecibida(compra)
+    }
+    setApprovingIds(prev => prev.filter(id => !lineas.some(c => c.id === id)))
+  }
+
   async function markCompraPagada(compra) {
     if (compra.status !== 'pedido' || approvingIds.includes(compra.id)) return
     setApprovingIds(prev => [...prev, compra.id])
@@ -1110,10 +1129,21 @@ export default function Admin() {
                         )}
 
                         <div className="admin-item-actions">
-                          <button type="button" onClick={saveLote} disabled={savingLote || loteLines.length === 0}>
+                          <button
+                            type="button"
+                            onClick={saveLote}
+                            disabled={savingLote || loteLines.length === 0}
+                            style={{ background: '#4a5d3a', color: '#fff', padding: '10px 16px', borderRadius: 6, border: 'none' }}
+                          >
                             {savingLote ? 'Guardando...' : 'Guardar compra'}
                           </button>
-                          <button type="button" onClick={() => { setLoteBuilderOpen(false); setLoteLines([]); setLoteNota(''); setLoteProveedor('') }}>Cancelar</button>
+                          <button
+                            type="button"
+                            onClick={() => { setLoteBuilderOpen(false); setLoteLines([]); setLoteNota(''); setLoteProveedor('') }}
+                            style={{ background: '#fff', color: '#b03434', padding: '10px 16px', borderRadius: 6, border: '1px solid #b03434' }}
+                          >
+                            Cancelar
+                          </button>
                         </div>
                       </div>
                     )}
@@ -1131,6 +1161,18 @@ export default function Admin() {
                               {lote.proveedor && <span>Procedencia: {lote.proveedor}</span>}
                               <span>Fecha: {new Date(lote.created_at).toLocaleDateString()}</span>
                               <span>Total compra: ${totalLote.toFixed(2)}</span>
+                              <div className="admin-item-actions">
+                                {lineas.some(c => c.status === 'pedido') && (
+                                  <button onClick={() => markLotePagado(lote.id)} disabled={lineas.some(c => approvingIds.includes(c.id))}>
+                                    Marcar toda la compra como pagada
+                                  </button>
+                                )}
+                                {lineas.some(c => c.status === 'pagado') && (
+                                  <button onClick={() => markLoteRecibido(lote.id)} disabled={lineas.some(c => approvingIds.includes(c.id))}>
+                                    Marcar toda la compra como recibida
+                                  </button>
+                                )}
+                              </div>
                               {lineas.map(c => (
                                 <div key={c.id} className="admin-item" style={{ marginLeft: 12 }}>
                                   {c.image_url ? <img src={c.image_url} alt={c.plant_name} /> : <div className="no-img-sm">Sin foto</div>}
