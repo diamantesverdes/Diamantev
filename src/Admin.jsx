@@ -388,6 +388,11 @@ export default function Admin() {
     loadData()
   }
 
+  async function toggleIsNew(id, current) {
+    await supabase.from('plants').update({ is_new: !current }).eq('id', id)
+    loadData()
+  }
+
   async function updatePlantImage(id, file) {
     if (!file) return
     const url = await uploadImage(file)
@@ -913,6 +918,7 @@ export default function Admin() {
                                 />
                               </label>
                               <button onClick={() => toggleActive(p.id, p.active)}>{p.active ? 'Ocultar' : 'Mostrar'}</button>
+                              <button onClick={() => toggleIsNew(p.id, p.is_new)}>{p.is_new ? '🌱 Nueva ✓' : 'Marcar como nueva'}</button>
                               <button onClick={() => deletePlant(p.id)} className="danger">Borrar</button>
                               <button onClick={() => setOpenPlantNotesListId(notesOpen ? null : p.id)}>📝 Notas ({notesForPlant.length})</button>
                             </div>
