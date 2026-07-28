@@ -1606,3 +1606,47 @@ body::before {
   font-weight: bold;
   margin: 0;
 }
+
+/* ==========================================================
+   BANNER DE MARCA, LOGO EN TEXTO, DESCUENTOS
+   ========================================================== */
+
+.header-logo-text {
+  font-family: 'Playfair Display', serif;
+  font-style: italic;
+  font-size: 1.5rem;
+  color: var(--pink);
+}
+
+.brand-banner {
+  height: 130px;
+  background-image: url('/1784460904562.png');
+  background-size: cover;
+  background-position: center;
+  border-bottom: 2px solid var(--sage);
+}
+
+.sale-banner {
+  background: #b03434;
+}
+.sale-banner .promo-btn {
+  color: #b03434;
+}
+
+.sale-badge {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  background: #b03434;
+  color: #fff;
+  font-size: 0.65rem;
+  font-weight: bold;
+  padding: 2px 8px;
+  border-radius: 10px;
+  z-index: 2;
+}
+.new-badge + .sale-badge,
+.sale-badge + .new-badge {
+  top: 32px;
+}
+
