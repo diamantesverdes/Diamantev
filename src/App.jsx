@@ -296,7 +296,7 @@ export default function App() {
 
       <div className="site-summary">
         <p>🌿 Vivero de plantas ornamentales en Ecuador - Quito </p>
-        <p>🚚 Coordinamos entrega directo por WhatsApp</p>
+        <p>🚚 Hacemos envios a todo el pais</p>
         <p>💎 Cada planta es una joya viva</p>
       </div>
 
@@ -327,7 +327,7 @@ export default function App() {
       )}
 
       <div className="promo-banner">
-        <span>🌸 Escríbenos por WhatsApp y recibe asesoría gratis para tu jardín</span>
+        <span>🌸 Cultivar un jardin es creer en el mañana</span>
         <a href={`https://wa.me/${WHATSAPP_NUMBER}`} target="_blank" rel="noreferrer" className="promo-btn">Escribir ahora</a>
       </div>
 
