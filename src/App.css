@@ -1390,16 +1390,15 @@ body::before {
   position: absolute;
   bottom: 8px;
   right: 8px;
-  background: rgba(255,255,255,0.85);
+  background: none;
   border: none;
-  border-radius: 50%;
   width: 34px;
   height: 34px;
-  font-size: 1.1rem;
+  font-size: 1.5rem;
   cursor: pointer;
   z-index: 2;
+  filter: drop-shadow(0 1px 3px rgba(0,0,0,0.5));
 }
-
 .site-footer {
   text-align: center;
   padding: 30px 16px 90px;
