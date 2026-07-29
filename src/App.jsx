@@ -328,8 +328,7 @@ export default function App() {
 
       <div className="promo-banner">
         <span>🌸 Cultivar un jardin es creer en el mañana</span>
-        <a href={`https://wa.me/${WHATSAPP_NUMBER}`} target="_blank" rel="noreferrer" className="promo-btn">Escribir ahora</a>
-      </div>
+        
 
       {menuOpen && (
         <div className="cart-overlay" onClick={() => setMenuOpen(false)}>
