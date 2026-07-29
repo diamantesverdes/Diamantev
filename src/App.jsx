@@ -201,13 +201,20 @@ export default function App() {
   function renderPlantCard(plant) {
     return (
       <div key={plant.id} className="card">
-       <div className="card-img" onClick={() => openDetail(plant)}>
+       <div className="card-img">
           {plant.image_url ? <img src={plant.image_url} alt={plant.name} /> : <div className="no-img">Sin foto</div>}
           {plant.is_new && <span className="new-badge">Nueva</span>}
           {plant.on_sale && <span className="sale-badge">Descuento</span>}
+          <button
+            className="detail-trigger-btn"
+            onClick={() => openDetail(plant)}
+            aria-label="Ver más detalles"
+          >
+            ⋯
+          </button>
         </div>
         <div className="card-body">
-          <h3 onClick={() => openDetail(plant)}>{plant.name}</h3>
+          <h3>{plant.name}</h3>
           <p className="price">${Number(plant.price).toFixed(2)}</p>
           <p className={plant.stock > 0 ? 'stock' : 'stock out'}>
             {plant.stock > 0 ? `${plant.stock} disponibles` : 'Agotado'}
