@@ -168,17 +168,10 @@ export default function App() {
   function renderPlantCard(plant) {
     return (
       <div key={plant.id} className="card">
-        <div className="card-img">
-         {plant.image_url ? <img src={plant.image_url} alt={plant.name} /> : <div className="no-img">Sin foto</div>}
+       <div className="card-img">
+          {plant.image_url ? <img src={plant.image_url} alt={plant.name} /> : <div className="no-img">Sin foto</div>}
           {plant.is_new && <span className="new-badge">Nueva</span>}
           {plant.on_sale && <span className="sale-badge">Descuento</span>}
-          <button
-            className={`fav-toggle-btn ${isFavorite(plant.id) ? 'active' : ''}`}
-            onClick={() => toggleFavorite(plant)}
-            aria-label="Agregar a mi lista"
-          >
-            {isFavorite(plant.id) ? '❤️' : '🤍'}
-          </button>
         </div>
         <div className="card-body">
           <h3>{plant.name}</h3>
@@ -186,9 +179,18 @@ export default function App() {
           <p className={plant.stock > 0 ? 'stock' : 'stock out'}>
             {plant.stock > 0 ? `${plant.stock} disponibles` : 'Agotado'}
           </p>
-          <button className="add-btn" disabled={plant.stock <= 0} onClick={() => addToCart(plant)}>
-            Agregar al carrito
-          </button>
+          <div className="card-actions">
+            <button className="cart-icon-btn" disabled={plant.stock <= 0} onClick={() => addToCart(plant)} aria-label="Agregar al carrito">
+              🛒
+            </button>
+            <button
+              className={`heart-icon-btn ${isFavorite(plant.id) ? 'active' : ''}`}
+              onClick={() => toggleFavorite(plant)}
+              aria-label="Agregar a mi lista"
+            >
+              {isFavorite(plant.id) ? '❤️' : '🤍'}
+            </button>
+          </div>
         </div>
       </div>
     )
