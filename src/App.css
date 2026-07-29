@@ -1393,9 +1393,9 @@ body::before {
 }
 .cart-icon-btn, .heart-icon-btn {
   flex: 1;
-  height: 40px;
-  border-radius: 8px;
-  font-size: 1.2rem;
+  height: 30px;
+  border-radius: 6px;
+  font-size: 0.85rem;
   cursor: pointer;
   display: flex;
   align-items: center;
