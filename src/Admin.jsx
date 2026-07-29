@@ -170,58 +170,6 @@ export default function Admin() {
   }
 
   async function markLotePagado(loteId) {
-    const lineas = compras.filter(c => c.lote_id === loteId && c.status === 'pedido')
-    if (lineas.length === 0) return
-    setApprovingIds(prev => [...prev, ...lineas.map(c => c.id)])
-    await supabase.from('compras').update({ status: 'pagado', fecha_pago: new Date().toISOString() }).eq('lote_id', loteId).eq('status', 'pedido')
-    await loadData()
-    setApprovingIds(prev => prev.filter(id => !lineas.some(c => c.id === id)))
-  }
-
-  async function markLoteRecibido(loteId) {
-    const lineas = compras.filter(c => c.lote_id === loteId && c.status === 'pagado')
-    if (lineas.length === 0) return
-    setApprovingIds(prev => [...prev, ...lineas.map(c => c.id)])
-    for (const compra of lineas) {
-      await markCompraRecibida(compra)
-    }
-    setApprovingIds(prev => prev.filter(id => !lineas.some(c => c.id === id)))
-  }
-
-  async function markCompraPagada(compra) {
-    if (compra.status !== 'pedido' || approvingIds.includes(compra.id)) return
-    setApprovingIds(prev => [...prev, compra.id])
-    await supabase.from('compras').update({ status: 'pagado', fecha_pago: new Date().toISOString() }).eq('id', compra.id)
-    await loadData()
-    setApprovingIds(prev => prev.filter(id => id !== compra.id))
-  }
-
-  async function markCompraRecibida(compra) {
-    if (compra.status !== 'pagado' || approvingIds.includes(compra.id)) return
-    setApprovingIds(prev => [...prev, compra.id])
-    await supabase.from('compras').update({ status: 'recibido', fecha_recibido: new Date().toISOString() }).eq('id', compra.id)
-
-    if (compra.plant_id) {
-      const plant = plants.find(p => p.id === compra.plant_id)
-      if (plant) {
-        const updates = { stock: plant.stock + compra.quantity }
-        if (compra.image_url) updates.image_url = compra.image_url
-        await supabase.from('plants').update(updates).eq('id', plant.id)
-      }
-    } else if (compra.new_plant_category) {
-      await supabase.from('plants').insert({
-        name: compra.plant_name,
-        category_id: compra.new_plant_category,
-        price: compra.sale_price || 0,
-        stock: compra.quantity,
-        image_url: compra.image_url || null,
-      })
-    }
-    await loadData()
-    setApprovingIds(prev => prev.filter(id => id !== compra.id))
-  }
-
-  async function markLotePagado(loteId) {
     if (approvingIds.includes(loteId)) return
     const lineas = compras.filter(c => c.lote_id === loteId && c.status === 'pedido')
     if (lineas.length === 0) return
@@ -259,6 +207,39 @@ export default function Admin() {
     }
     await loadData()
     setApprovingIds(prev => prev.filter(id => id !== loteId))
+  }
+
+  async function markCompraPagada(compra) {
+    if (compra.status !== 'pedido' || approvingIds.includes(compra.id)) return
+    setApprovingIds(prev => [...prev, compra.id])
+    await supabase.from('compras').update({ status: 'pagado', fecha_pago: new Date().toISOString() }).eq('id', compra.id)
+    await loadData()
+    setApprovingIds(prev => prev.filter(id => id !== compra.id))
+  }
+
+  async function markCompraRecibida(compra) {
+    if (compra.status !== 'pagado' || approvingIds.includes(compra.id)) return
+    setApprovingIds(prev => [...prev, compra.id])
+    await supabase.from('compras').update({ status: 'recibido', fecha_recibido: new Date().toISOString() }).eq('id', compra.id)
+
+    if (compra.plant_id) {
+      const plant = plants.find(p => p.id === compra.plant_id)
+      if (plant) {
+        const updates = { stock: plant.stock + compra.quantity }
+        if (compra.image_url) updates.image_url = compra.image_url
+        await supabase.from('plants').update(updates).eq('id', plant.id)
+      }
+    } else if (compra.new_plant_category) {
+      await supabase.from('plants').insert({
+        name: compra.plant_name,
+        category_id: compra.new_plant_category,
+        price: compra.sale_price || 0,
+        stock: compra.quantity,
+        image_url: compra.image_url || null,
+      })
+    }
+    await loadData()
+    setApprovingIds(prev => prev.filter(id => id !== compra.id))
   }
 
   // ---------- Nota libre por compra ----------
@@ -405,6 +386,29 @@ export default function Admin() {
       await supabase.from('plants').update({ image_url: url }).eq('id', id)
       loadData()
     }
+  }
+
+  async function updatePlantExtraImage(id, field, file) {
+    if (!file) return
+    const url = await uploadImage(file)
+    if (url) {
+      await supabase.from('plants').update({ [field]: url }).eq('id', id)
+      loadData()
+    }
+  }
+
+  async function updatePlantVideo(id, file) {
+    if (!file) return
+    const url = await uploadImage(file, 'plant-photos')
+    if (url) {
+      await supabase.from('plants').update({ video_url: url }).eq('id', id)
+      loadData()
+    }
+  }
+
+  async function updatePlantDescription(id, description) {
+    await supabase.from('plants').update({ description }).eq('id', id)
+    loadData()
   }
 
   async function deletePlant(id) {
@@ -928,6 +932,44 @@ export default function Admin() {
                               <button onClick={() => deletePlant(p.id)} className="danger">Borrar</button>
                               <button onClick={() => setOpenPlantNotesListId(notesOpen ? null : p.id)}>📝 Notas ({notesForPlant.length})</button>
                             </div>
+
+                            <div className="admin-item-actions">
+                              <label className="file-label" title="Subir foto adicional 1" style={{ background: 'transparent', color: 'inherit', border: '1px solid #ccc' }}>
+                                🖼️ Foto extra 1 {p.extra_image_1 ? '✓' : ''}
+                                <input
+                                  type="file"
+                                  accept="image/*"
+                                  style={{ display: 'none' }}
+                                  onChange={e => { updatePlantExtraImage(p.id, 'extra_image_1', e.target.files[0]); e.target.value = '' }}
+                                />
+                              </label>
+                              <label className="file-label" title="Subir foto adicional 2" style={{ background: 'transparent', color: 'inherit', border: '1px solid #ccc' }}>
+                                🖼️ Foto extra 2 {p.extra_image_2 ? '✓' : ''}
+                                <input
+                                  type="file"
+                                  accept="image/*"
+                                  style={{ display: 'none' }}
+                                  onChange={e => { updatePlantExtraImage(p.id, 'extra_image_2', e.target.files[0]); e.target.value = '' }}
+                                />
+                              </label>
+                              <label className="file-label" title="Subir video" style={{ background: 'transparent', color: 'inherit', border: '1px solid #ccc' }}>
+                                🎥 Video {p.video_url ? '✓' : ''}
+                                <input
+                                  type="file"
+                                  accept="video/*"
+                                  style={{ display: 'none' }}
+                                  onChange={e => { updatePlantVideo(p.id, e.target.files[0]); e.target.value = '' }}
+                                />
+                              </label>
+                            </div>
+                            <textarea
+                              className="plant-description-input"
+                              placeholder="Descripción de la planta (opcional)"
+                              defaultValue={p.description || ''}
+                              rows={2}
+                              onBlur={e => updatePlantDescription(p.id, e.target.value)}
+                            />
+
                             {notesOpen && (
                               <div className="plant-notes-panel">
                                 <button type="button" className="full-form-btn" onClick={() => openNewPlantNote(p.id)}>📝 Nueva nota</button>
@@ -1810,4 +1852,3 @@ export default function Admin() {
       </div>
     </div>
   )
-}
