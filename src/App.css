@@ -1371,7 +1371,7 @@ body::before {
 
 .whatsapp-fab {
   position: fixed;
-  bottom: 84px;
+  bottom: 20px;
   right: 20px;
   width: 56px;
   height: 56px;
@@ -1388,7 +1388,7 @@ body::before {
 
 .fav-toggle-btn {
   position: absolute;
-  top: 8px;
+  bottom: 8px;
   right: 8px;
   background: rgba(255,255,255,0.85);
   border: none;
@@ -1471,8 +1471,8 @@ body::before {
 .site-summary p { margin: 2px 0; }
 
 .promo-banner {
-  background: var(--sage-dark);
-  color: #fff;
+  background: #cfe8e4;
+  color: var(--dark);
   text-align: center;
   padding: 12px 14px;
   display: flex;
@@ -1482,8 +1482,8 @@ body::before {
   font-size: 0.85rem;
 }
 .promo-btn {
-  background: #fff;
-  color: var(--sage-dark);
+  background: var(--dark);
+  color: #fff;
   padding: 6px 18px;
   border-radius: 20px;
   text-decoration: none;
