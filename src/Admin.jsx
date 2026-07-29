@@ -1,12 +1,13 @@
 import { useState, useEffect } from 'react'
 import { supabase } from './supabaseClient'
 
-const ADMIN_KEY = import.meta.env.VITE_ADMIN_KEY
-
 export default function Admin() {
   const [authed, setAuthed] = useState(false)
-  const [pass, setPass] = useState('')
+  const [checkingSession, setCheckingSession] = useState(true)
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
   const [failed, setFailed] = useState(false)
+  const [loggingIn, setLoggingIn] = useState(false)
 
   // 'home' | 'plantas' | 'categorias' | 'pedidos' | 'ingresos'
   const [view, setView] = useState('home')
@@ -76,6 +77,17 @@ export default function Admin() {
   const [newCatName, setNewCatName] = useState('')
   const [newCatEmoji, setNewCatEmoji] = useState('🌿')
 
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data }) => {
+      setAuthed(!!data.session)
+      setCheckingSession(false)
+    })
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
+      setAuthed(!!session)
+    })
+    return () => listener.subscription.unsubscribe()
+  }, [])
+
   useEffect(() => { if (authed) loadData() }, [authed])
 
   async function loadData() {
@@ -99,6 +111,21 @@ export default function Admin() {
     setGardenTags(tags || [])
     setGardenTasks(tasks || [])
     setLoading(false)
+  }
+
+  async function handleLogin(e) {
+    e.preventDefault()
+    setLoggingIn(true)
+    setFailed(false)
+    const { error } = await supabase.auth.signInWithPassword({ email, password })
+    if (error) {
+      setFailed(true)
+    }
+    setLoggingIn(false)
+  }
+
+  async function handleLogout() {
+    await supabase.auth.signOut()
   }
 
   async function uploadImage(file, bucket = 'plant-photos') {
@@ -763,21 +790,34 @@ export default function Admin() {
     loadData()
   }
 
+  if (checkingSession) {
+    return <p className="status-msg">Cargando...</p>
+  }
+
   if (!authed) {
     return (
       <div className="admin-login">
         <h2>Panel de administrador</h2>
-        <input
-          type="text"
-          placeholder="Clave de acceso"
-          value={pass}
-          onChange={e => setPass(e.target.value)}
-          onKeyDown={e => e.key === 'Enter' && (pass === ADMIN_KEY ? setAuthed(true) : setFailed(true))}
-        />
-        <button onClick={() => pass === ADMIN_KEY ? setAuthed(true) : setFailed(true)}>Entrar</button>
+        <form onSubmit={handleLogin}>
+          <input
+            type="email"
+            placeholder="Correo electrónico"
+            value={email}
+            onChange={e => setEmail(e.target.value)}
+            autoComplete="username"
+          />
+          <input
+            type="password"
+            placeholder="Contraseña"
+            value={password}
+            onChange={e => setPassword(e.target.value)}
+            autoComplete="current-password"
+          />
+          <button type="submit" disabled={loggingIn}>{loggingIn ? 'Entrando...' : 'Entrar'}</button>
+        </form>
         {failed && (
           <p style={{ color: '#b03434', fontSize: '0.85rem', marginTop: 10 }}>
-            Clave incorrecta. Si la olvidaste, revísala en Vercel → Settings → Environment Variables → VITE_ADMIN_KEY.
+            Correo o contraseña incorrectos.
           </p>
         )}
       </div>
@@ -844,6 +884,9 @@ export default function Admin() {
       <div className="admin-header">
         <h1>Panel de administrador — Diamantev</h1>
         <a href="/" className="back-to-store">🌿 Ver tienda</a>
+        <button onClick={handleLogout} className="back-to-store" style={{ background: 'transparent', border: '1px solid #b03434', color: '#b03434' }}>
+          Cerrar sesión
+        </button>
       </div>
 
       <hr className="admin-divider" />
@@ -1852,3 +1895,4 @@ export default function Admin() {
       </div>
     </div>
   )
+}
