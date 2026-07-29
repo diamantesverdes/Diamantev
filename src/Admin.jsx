@@ -8,6 +8,13 @@ export default function Admin() {
   const [password, setPassword] = useState('')
   const [failed, setFailed] = useState(false)
   const [loggingIn, setLoggingIn] = useState(false)
+  const [resetMode, setResetMode] = useState(false)
+  const [resetEmail, setResetEmail] = useState('')
+  const [resetSent, setResetSent] = useState(false)
+  const [sendingReset, setSendingReset] = useState(false)
+  const [recoveryMode, setRecoveryMode] = useState(false)
+  const [newPassword, setNewPassword] = useState('')
+  const [updatingPassword, setUpdatingPassword] = useState(false)
 
   // 'home' | 'plantas' | 'categorias' | 'pedidos' | 'ingresos'
   const [view, setView] = useState('home')
@@ -82,8 +89,9 @@ export default function Admin() {
       setAuthed(!!data.session)
       setCheckingSession(false)
     })
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: listener } = supabase.auth.onAuthStateChange((event, session) => {
       setAuthed(!!session)
+      if (event === 'PASSWORD_RECOVERY') setRecoveryMode(true)
     })
     return () => listener.subscription.unsubscribe()
   }, [])
@@ -122,6 +130,36 @@ export default function Admin() {
       setFailed(true)
     }
     setLoggingIn(false)
+  }
+
+  async function handleForgotPassword(e) {
+    e.preventDefault()
+    if (!resetEmail.trim()) return
+    setSendingReset(true)
+    const { error } = await supabase.auth.resetPasswordForEmail(resetEmail, {
+      redirectTo: window.location.origin + window.location.pathname,
+    })
+    setSendingReset(false)
+    if (error) {
+      alert('Error al enviar el correo: ' + error.message)
+      return
+    }
+    setResetSent(true)
+  }
+
+  async function handleUpdatePassword(e) {
+    e.preventDefault()
+    if (!newPassword.trim()) return
+    setUpdatingPassword(true)
+    const { error } = await supabase.auth.updateUser({ password: newPassword })
+    setUpdatingPassword(false)
+    if (error) {
+      alert('Error al actualizar la contraseña: ' + error.message)
+      return
+    }
+    setNewPassword('')
+    setRecoveryMode(false)
+    alert('Contraseña actualizada. Ya puedes usarla la próxima vez que entres.')
   }
 
   async function handleLogout() {
@@ -794,7 +832,55 @@ export default function Admin() {
     return <p className="status-msg">Cargando...</p>
   }
 
+  if (recoveryMode) {
+    return (
+      <div className="admin-login">
+        <h2>Crear nueva contraseña</h2>
+        <form onSubmit={handleUpdatePassword}>
+          <input
+            type="password"
+            placeholder="Nueva contraseña"
+            value={newPassword}
+            onChange={e => setNewPassword(e.target.value)}
+            autoComplete="new-password"
+          />
+          <button type="submit" disabled={updatingPassword}>{updatingPassword ? 'Guardando...' : 'Guardar contraseña'}</button>
+        </form>
+      </div>
+    )
+  }
+
   if (!authed) {
+    if (resetMode) {
+      return (
+        <div className="admin-login">
+          <h2>Recuperar contraseña</h2>
+          {resetSent ? (
+            <p style={{ fontSize: '0.9rem', marginTop: 10 }}>
+              Te enviamos un correo a <strong>{resetEmail}</strong> con un enlace para crear una nueva contraseña. Revisa también la carpeta de spam.
+            </p>
+          ) : (
+            <form onSubmit={handleForgotPassword}>
+              <input
+                type="email"
+                placeholder="Tu correo electrónico"
+                value={resetEmail}
+                onChange={e => setResetEmail(e.target.value)}
+                autoComplete="username"
+              />
+              <button type="submit" disabled={sendingReset}>{sendingReset ? 'Enviando...' : 'Enviar enlace de recuperación'}</button>
+            </form>
+          )}
+          <button
+            type="button"
+            onClick={() => { setResetMode(false); setResetSent(false) }}
+            style={{ background: 'none', border: 'none', color: 'var(--dark)', textDecoration: 'underline', marginTop: 14, cursor: 'pointer' }}
+          >
+            ← Volver a iniciar sesión
+          </button>
+        </div>
+      )
+    }
     return (
       <div className="admin-login">
         <h2>Panel de administrador</h2>
@@ -815,6 +901,13 @@ export default function Admin() {
           />
           <button type="submit" disabled={loggingIn}>{loggingIn ? 'Entrando...' : 'Entrar'}</button>
         </form>
+        <button
+          type="button"
+          onClick={() => setResetMode(true)}
+          style={{ background: 'none', border: 'none', color: 'var(--dark)', textDecoration: 'underline', marginTop: 14, cursor: 'pointer' }}
+        >
+          ¿Olvidaste tu contraseña?
+        </button>
         {failed && (
           <p style={{ color: '#b03434', fontSize: '0.85rem', marginTop: 10 }}>
             Correo o contraseña incorrectos.
