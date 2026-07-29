@@ -1402,9 +1402,9 @@ body::before {
   justify-content: center;
 }
 .cart-icon-btn {
-  background: var(--sage);
+  background: var(--dark);
   border: none;
-  color: var(--dark);
+  color: #fff;
 }
 .cart-icon-btn:disabled {
   background: #ccc;
@@ -1412,12 +1412,12 @@ body::before {
 }
 .heart-icon-btn {
   background: #fff;
-  border: 1px solid var(--sage);
-  color: var(--sage-dark);
+  border: 1px solid #3aa0a0;
+  color: #3aa0a0;
 }
 .heart-icon-btn.active {
-  background: #fce4ea;
-  border-color: #E39FB6;
+  background: #e0f4f4;
+  border-color: #3aa0a0;
 }
 .site-footer {
   text-align: center;
