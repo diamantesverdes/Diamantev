@@ -30,6 +30,7 @@ export default function App() {
   const [menuOpen, setMenuOpen] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
+  const [detailPlant, setDetailPlant] = useState(null)
 
   useEffect(() => { loadData() }, [])
 
@@ -82,6 +83,14 @@ export default function App() {
     setSelectedCategory(null)
     setStockFilter('all')
     setSearchQuery('')
+  }
+
+  function openDetail(plant) {
+    setDetailPlant(plant)
+  }
+
+  function closeDetail() {
+    setDetailPlant(null)
   }
 
   function toggleCategoryFilter(id) {
@@ -192,13 +201,13 @@ export default function App() {
   function renderPlantCard(plant) {
     return (
       <div key={plant.id} className="card">
-       <div className="card-img">
+       <div className="card-img" onClick={() => openDetail(plant)}>
           {plant.image_url ? <img src={plant.image_url} alt={plant.name} /> : <div className="no-img">Sin foto</div>}
           {plant.is_new && <span className="new-badge">Nueva</span>}
           {plant.on_sale && <span className="sale-badge">Descuento</span>}
         </div>
         <div className="card-body">
-          <h3>{plant.name}</h3>
+          <h3 onClick={() => openDetail(plant)}>{plant.name}</h3>
           <p className="price">${Number(plant.price).toFixed(2)}</p>
           <p className={plant.stock > 0 ? 'stock' : 'stock out'}>
             {plant.stock > 0 ? `${plant.stock} disponibles` : 'Agotado'}
@@ -455,9 +464,26 @@ export default function App() {
             ) : (
               <>
                 {favorites.map(item => (
-                  <div key={item.id} className="cart-item">
-                    <span>{item.name}</span>
-                    <button onClick={() => toggleFavorite(item)}>✕</button>
+                  <div key={item.id} className="cart-item favorite-item">
+                    <div className="favorite-thumb">
+                      {item.image_url ? <img src={item.image_url} alt={item.name} /> : <div className="no-img">Sin foto</div>}
+                    </div>
+                    <span className="favorite-name">{item.name}</span>
+                    <div className="favorite-actions">
+                      <button
+                        className="cart-icon-btn"
+                        disabled={item.stock <= 0}
+                        onClick={() => addToCart(item)}
+                        aria-label="Agregar al carrito"
+                      >
+                        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2">
+                          <circle cx="9" cy="21" r="1"/>
+                          <circle cx="20" cy="21" r="1"/>
+                          <path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/>
+                        </svg>
+                      </button>
+                      <button onClick={() => toggleFavorite(item)} aria-label="Quitar de mi lista">✕</button>
+                    </div>
                   </div>
                 ))}
                 <button className="checkout-btn" onClick={sendFavorites}>
@@ -499,6 +525,44 @@ export default function App() {
                 </button>
               </>
             )}
+          </div>
+        </div>
+      )}
+
+      {detailPlant && (
+        <div className="cart-overlay" onClick={closeDetail}>
+          <div className="cart-panel detail-panel" onClick={e => e.stopPropagation()}>
+            <div className="cart-header">
+              <h2>{detailPlant.name}</h2>
+              <button onClick={closeDetail}>✕</button>
+            </div>
+
+            <div className="detail-gallery">
+              {detailPlant.image_url && <img src={detailPlant.image_url} alt={detailPlant.name} />}
+              {detailPlant.extra_image_1 && <img src={detailPlant.extra_image_1} alt={`${detailPlant.name} - foto adicional 1`} />}
+              {detailPlant.extra_image_2 && <img src={detailPlant.extra_image_2} alt={`${detailPlant.name} - foto adicional 2`} />}
+            </div>
+
+            {detailPlant.video_url && (
+              <video className="detail-video" src={detailPlant.video_url} controls playsInline />
+            )}
+
+            {detailPlant.description && (
+              <p className="detail-description">{detailPlant.description}</p>
+            )}
+
+            <p className="price">${Number(detailPlant.price).toFixed(2)}</p>
+            <p className={detailPlant.stock > 0 ? 'stock' : 'stock out'}>
+              {detailPlant.stock > 0 ? `${detailPlant.stock} disponibles` : 'Agotado'}
+            </p>
+
+            <button
+              className="checkout-btn"
+              disabled={detailPlant.stock <= 0}
+              onClick={() => { addToCart(detailPlant); closeDetail() }}
+            >
+              🛒 Agregar al carrito
+            </button>
           </div>
         </div>
       )}
