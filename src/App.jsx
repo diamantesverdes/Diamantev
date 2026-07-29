@@ -80,7 +80,7 @@ export default function App() {
     ? plants.filter(p => p.name.toLowerCase().includes(searchQuery.trim().toLowerCase()))
     : plants
         .filter(p => !selectedCategory || p.category_id === selectedCategory.id)
-        .filter(p => stockFilter === 'available' ? p.stock > 0 : true)
+        .filter(p => stockFilter === 'available' ? p.stock > 0 : stockFilter === 'sale' ? p.on_sale : true)
 
   const newPlants = plants.filter(p => p.is_new)
   const salePlants = plants.filter(p => p.on_sale)
@@ -346,12 +346,17 @@ export default function App() {
         </>
       ) : (
         <>
-          <button className="back-btn" onClick={backToCategories}>← Volver a categorías</button>
+        <button className="back-btn" onClick={backToCategories}>← Volver a categorías</button>
           <h2 className="plants-title">
             {selectedCategory
               ? `${selectedCategory.emoji || ''} ${selectedCategory.name}`
               : stockFilter === 'available' ? '✅ Plantas disponibles' : 'Todas las plantas'}
           </h2>
+          <div className="stock-filter-row">
+            <button className={stockFilter === 'all' ? 'active' : ''} onClick={() => setStockFilter('all')}>Todas</button>
+            <button className={stockFilter === 'available' ? 'active' : ''} onClick={() => setStockFilter('available')}>✅ Disponibles</button>
+            <button className={stockFilter === 'sale' ? 'active' : ''} onClick={() => setStockFilter('sale')}>🏷️ En oferta</button>
+          </div>
           {filteredPlants.length === 0 ? (
             <p className="status-msg">Todavía no hay plantas en esta categoría.</p>
           ) : (
