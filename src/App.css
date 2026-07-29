@@ -1688,3 +1688,79 @@ body::before {
   background: var(--sage);
   font-weight: bold;
 }
+/* ---------- Pantalla de inicio: dos caminos ---------- */
+.home-options-row {
+  display: flex;
+  gap: 14px;
+  padding: 16px;
+  flex-wrap: wrap;
+}
+
+.home-option-card {
+  flex: 1 1 260px;
+  border-radius: 18px;
+  padding: 22px 18px;
+  cursor: pointer;
+  text-align: center;
+  border: 1px solid rgba(0,0,0,0.06);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.home-option-card:hover,
+.home-option-card:active {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 14px rgba(0,0,0,0.10);
+}
+
+.home-option-card h3 {
+  margin: 8px 0 6px;
+  font-size: 1.05rem;
+  color: #4a4a3d;
+}
+
+.home-option-card p {
+  margin: 0;
+  font-size: 0.85rem;
+  color: #6b6b5c;
+  line-height: 1.35;
+}
+
+.home-option-icon {
+  font-size: 2rem;
+}
+
+.home-option-all {
+  background: #f8d7d3; /* rosa suave */
+}
+
+.home-option-cat {
+  background: #d6e8d0; /* verde salvia */
+}
+
+/* ---------- Filtro de categorías (vista "Comprar todas") ---------- */
+.category-chip-row {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding: 4px 16px 12px;
+  -webkit-overflow-scrolling: touch;
+}
+
+.category-chip-row button {
+  flex: 0 0 auto;
+  padding: 6px 14px;
+  border-radius: 999px;
+  border: 1px solid #cfcabb;
+  background: #fdfbf5; /* crema */
+  color: #6b6b5c;
+  font-size: 0.82rem;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.category-chip-row button.active {
+  background: #a1c99a; /* verde salvia acentuado */
+  border-color: #a1c99a;
+  color: #fff;
+}
