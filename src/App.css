@@ -1386,18 +1386,38 @@ body::before {
   text-decoration: none;
 }
 
-.fav-toggle-btn {
-  position: absolute;
-  bottom: 8px;
-  right: 8px;
-  background: none;
-  border: none;
-  width: 34px;
-  height: 34px;
-  font-size: 1.5rem;
+.card-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+.cart-icon-btn, .heart-icon-btn {
+  flex: 1;
+  height: 40px;
+  border-radius: 8px;
+  font-size: 1.2rem;
   cursor: pointer;
-  z-index: 2;
-  filter: drop-shadow(0 1px 3px rgba(0,0,0,0.5));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.cart-icon-btn {
+  background: var(--sage);
+  border: none;
+  color: var(--dark);
+}
+.cart-icon-btn:disabled {
+  background: #ccc;
+  cursor: not-allowed;
+}
+.heart-icon-btn {
+  background: #fff;
+  border: 1px solid var(--sage);
+  color: var(--sage-dark);
+}
+.heart-icon-btn.active {
+  background: #fce4ea;
+  border-color: #E39FB6;
 }
 .site-footer {
   text-align: center;
