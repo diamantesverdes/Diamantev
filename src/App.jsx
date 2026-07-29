@@ -120,7 +120,7 @@ export default function App() {
   function sendFavorites() {
     if (favorites.length === 0) return
     const lines = favorites.map(f => `- ${f.name}`).join('%0A')
-    const message = `Hola, me interesan estas plantas de Jardín Diamantev:%0A%0A${lines}`
+    const message = `Hola, me interesan estas plantas de Diamantev:%0A%0A${lines}`
     window.open(`https://wa.me/${WHATSAPP_NUMBER}?text=${message}`, '_blank')
   }
 
@@ -154,7 +154,8 @@ export default function App() {
         .eq('id', item.id)
     }
     const lines = cart.map(i => `- ${i.name} x${i.quantity} ($${(i.price * i.quantity).toFixed(2)})`).join('%0A')
-    const message = `Hola, quiero confirmar mi pedido en Jardín Diamantev:%0A%0A${lines}%0A%0ATotal: $${total.toFixed(2)}%0ANombre: ${customerName}%0ATeléfono: ${customerPhone}`
+    const message = `Hola, quiero confirmar mi pedido en 
+  Diamantev:%0A%0A${lines}%0A%0ATotal: $${total.toFixed(2)}%0ANombre: ${customerName}%0ATeléfono: ${customerPhone}`
     window.open(`https://wa.me/${WHATSAPP_NUMBER}?text=${message}`, '_blank')
     setCart([])
     setCustomerName('')
@@ -223,7 +224,7 @@ export default function App() {
       )}
 
       <div className="site-summary">
-        <p>🌿 Vivero de plantas ornamentales en Santo Domingo</p>
+        <p>🌿 Vivero de plantas ornamentales en Ecuador - Quito </p>
         <p>🚚 Coordinamos entrega directo por WhatsApp</p>
         <p>💎 Cada planta es una joya viva</p>
       </div>
@@ -421,8 +422,8 @@ export default function App() {
       )}
 
       <footer className="site-footer">
-        <span className="footer-script">Diamantev</span>
-        <p className="footer-tagline">Vivero de plantas ornamentales · Joyas Vivas</p>
+        <span className="footer-script">_______________________</span>
+        <p className="footer-tagline">Vivero de plantas ornamentales </p>
         <p className="footer-whatsapp">
           WhatsApp: <a href={`https://wa.me/${WHATSAPP_NUMBER}`} target="_blank" rel="noreferrer">0992734743</a>
         </p>
