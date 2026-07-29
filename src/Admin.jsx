@@ -976,7 +976,7 @@ export default function Admin() {
     <div className="admin">
       <div className="admin-header">
         <h1>Panel de administrador — Diamantev</h1>
-        <a href="/" className="back-to-store">🌿 Ver tienda</a>
+        <a href="/" target="_blank" rel="noreferrer" className="back-to-store">🌿 Ver tienda</a>
         <button onClick={handleLogout} className="back-to-store" style={{ background: 'transparent', border: '1px solid #b03434', color: '#b03434' }}>
           Cerrar sesión
         </button>
