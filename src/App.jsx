@@ -31,6 +31,8 @@ export default function App() {
   const [searchOpen, setSearchOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [detailPlant, setDetailPlant] = useState(null)
+  const [carouselIndex, setCarouselIndex] = useState(0)
+  const [heroIndex, setHeroIndex] = useState(0)
 
   useEffect(() => { loadData() }, [])
 
@@ -87,11 +89,22 @@ export default function App() {
 
   function openDetail(plant) {
     setDetailPlant(plant)
+    setCarouselIndex(0)
   }
 
   function closeDetail() {
     setDetailPlant(null)
   }
+
+  useEffect(() => {
+    if (!detailPlant) return
+    const images = [detailPlant.image_url, detailPlant.extra_image_1, detailPlant.extra_image_2].filter(Boolean)
+    if (images.length <= 1) return
+    const timer = setInterval(() => {
+      setCarouselIndex(i => (i + 1) % images.length)
+    }, 3000)
+    return () => clearInterval(timer)
+  }, [detailPlant])
 
   function toggleCategoryFilter(id) {
     setSelectedCategoryIds(prev =>
@@ -117,6 +130,15 @@ export default function App() {
 
   const newPlants = plants.filter(p => p.is_new)
   const salePlants = plants.filter(p => p.on_sale)
+  const heroPlants = plants.filter(p => p.image_url).slice(0, 8)
+
+  useEffect(() => {
+    if (heroPlants.length <= 1) return
+    const timer = setInterval(() => {
+      setHeroIndex(i => (i + 1) % heroPlants.length)
+    }, 4000)
+    return () => clearInterval(timer)
+  }, [heroPlants.length])
 
   function addToCart(plant) {
     setCart(prev => {
@@ -277,6 +299,25 @@ export default function App() {
         <p>🚚 Coordinamos entrega directo por WhatsApp</p>
         <p>💎 Cada planta es una joya viva</p>
       </div>
+
+      {heroPlants.length > 0 && (
+        <div className="hero-carousel">
+          <img src={heroPlants[heroIndex].image_url} alt={heroPlants[heroIndex].name} />
+          <div className="hero-carousel-caption">{heroPlants[heroIndex].name}</div>
+          {heroPlants.length > 1 && (
+            <div className="hero-carousel-dots">
+              {heroPlants.map((_, i) => (
+                <button
+                  key={i}
+                  className={`hero-carousel-dot ${i === heroIndex ? 'active' : ''}`}
+                  onClick={() => setHeroIndex(i)}
+                  aria-label={`Ver planta ${i + 1}`}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {salePlants.length > 0 && (
         <div className="promo-banner sale-banner">
@@ -544,11 +585,27 @@ export default function App() {
               <button onClick={closeDetail}>✕</button>
             </div>
 
-            <div className="detail-gallery">
-              {detailPlant.image_url && <img src={detailPlant.image_url} alt={detailPlant.name} />}
-              {detailPlant.extra_image_1 && <img src={detailPlant.extra_image_1} alt={`${detailPlant.name} - foto adicional 1`} />}
-              {detailPlant.extra_image_2 && <img src={detailPlant.extra_image_2} alt={`${detailPlant.name} - foto adicional 2`} />}
-            </div>
+            {(() => {
+              const images = [detailPlant.image_url, detailPlant.extra_image_1, detailPlant.extra_image_2].filter(Boolean)
+              if (images.length === 0) return null
+              return (
+                <div className="detail-carousel">
+                  <img src={images[carouselIndex]} alt={detailPlant.name} />
+                  {images.length > 1 && (
+                    <div className="detail-carousel-dots">
+                      {images.map((_, i) => (
+                        <button
+                          key={i}
+                          className={`detail-carousel-dot ${i === carouselIndex ? 'active' : ''}`}
+                          onClick={() => setCarouselIndex(i)}
+                          aria-label={`Ver foto ${i + 1}`}
+                        />
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )
+            })()}
 
             {detailPlant.video_url && (
               <video className="detail-video" src={detailPlant.video_url} controls playsInline />
