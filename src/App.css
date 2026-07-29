@@ -1649,4 +1649,23 @@ body::before {
 .sale-badge + .new-badge {
   top: 32px;
 }
-
+.stock-filter-row {
+  display: flex;
+  gap: 8px;
+  padding: 0 12px 12px;
+  flex-wrap: wrap;
+}
+.stock-filter-row button {
+  padding: 6px 14px;
+  border-radius: 16px;
+  border: 1px solid var(--sage);
+  background: transparent;
+  color: var(--dark);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.82rem;
+}
+.stock-filter-row button.active {
+  background: var(--sage);
+  font-weight: bold;
+}
