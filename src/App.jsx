@@ -11,11 +11,13 @@ const TESTIMONIALS = [
 ]
 
 export default function App() {
-  const [view, setView] = useState('categories')
+  // view: 'home' | 'all' | 'categories' | 'plants'
+  const [view, setView] = useState('home')
   const [plants, setPlants] = useState([])
   const [categories, setCategories] = useState([])
-  const [selectedCategory, setSelectedCategory] = useState(null)
-  const [stockFilter, setStockFilter] = useState('all') // 'all' | 'available'
+  const [selectedCategory, setSelectedCategory] = useState(null)       // usado en la vista 'plants'
+  const [selectedCategoryIds, setSelectedCategoryIds] = useState([])   // usado en la vista 'all' (multi-selección)
+  const [stockFilter, setStockFilter] = useState('all') // 'all' | 'available' | 'sale'
   const [cart, setCart] = useState([])
   const [showCart, setShowCart] = useState(false)
   const [favorites, setFavorites] = useState([])
@@ -40,6 +42,24 @@ export default function App() {
     setLoading(false)
   }
 
+  // ---------- Navegación ----------
+
+  function openAllVarieties(initialStockFilter = 'all') {
+    setSelectedCategoryIds([])
+    setStockFilter(initialStockFilter)
+    setSearchQuery('')
+    setSearchOpen(false)
+    setMenuOpen(false)
+    setView('all')
+  }
+
+  function openCategoriesGrid() {
+    setSearchQuery('')
+    setSearchOpen(false)
+    setMenuOpen(false)
+    setView('categories')
+  }
+
   function openCategory(cat) {
     setSelectedCategory(cat)
     setStockFilter('all')
@@ -49,22 +69,12 @@ export default function App() {
     setView('plants')
   }
 
-  function openAllPlants() {
+  function backToHome() {
+    setView('home')
     setSelectedCategory(null)
+    setSelectedCategoryIds([])
     setStockFilter('all')
     setSearchQuery('')
-    setSearchOpen(false)
-    setMenuOpen(false)
-    setView('plants')
-  }
-
-  function openAvailablePlants() {
-    setSelectedCategory(null)
-    setStockFilter('available')
-    setSearchQuery('')
-    setSearchOpen(false)
-    setMenuOpen(false)
-    setView('plants')
   }
 
   function backToCategories() {
@@ -74,13 +84,27 @@ export default function App() {
     setSearchQuery('')
   }
 
+  function toggleCategoryFilter(id) {
+    setSelectedCategoryIds(prev =>
+      prev.includes(id) ? prev.filter(c => c !== id) : [...prev, id]
+    )
+  }
+
   const isSearching = searchQuery.trim().length > 0
 
-  const filteredPlants = isSearching
+  // Plantas para la vista "Comprar todas las variedades"
+  const filteredAllPlants = plants
+    .filter(p => selectedCategoryIds.length === 0 || selectedCategoryIds.includes(p.category_id))
+    .filter(p => stockFilter === 'available' ? p.stock > 0 : stockFilter === 'sale' ? p.on_sale : true)
+
+  // Plantas para la vista de una categoría específica ("Comprar por categoría")
+  const filteredCategoryPlants = plants
+    .filter(p => !selectedCategory || p.category_id === selectedCategory.id)
+    .filter(p => stockFilter === 'available' ? p.stock > 0 : stockFilter === 'sale' ? p.on_sale : true)
+
+  const searchResults = isSearching
     ? plants.filter(p => p.name.toLowerCase().includes(searchQuery.trim().toLowerCase()))
-    : plants
-        .filter(p => !selectedCategory || p.category_id === selectedCategory.id)
-        .filter(p => stockFilter === 'available' ? p.stock > 0 : stockFilter === 'sale' ? p.on_sale : true)
+    : []
 
   const newPlants = plants.filter(p => p.is_new)
   const salePlants = plants.filter(p => p.on_sale)
@@ -258,8 +282,9 @@ export default function App() {
               <button onClick={() => setMenuOpen(false)}>✕</button>
             </div>
             <div className="menu-list">
-              <button className="menu-item" onClick={openAllPlants}>🪴 Ver todas las plantas</button>
-              <button className="menu-item" onClick={openAvailablePlants}>✅ Solo disponibles</button>
+              <button className="menu-item" onClick={() => openAllVarieties('all')}>🌿 Comprar todas las variedades</button>
+              <button className="menu-item" onClick={() => openAllVarieties('available')}>✅ Solo disponibles</button>
+              <button className="menu-item" onClick={openCategoriesGrid}>📂 Comprar por categoría</button>
               {categories.map(cat => (
                 <button key={cat.id} className="menu-item" onClick={() => openCategory(cat)}>
                   {cat.emoji || '🌿'} {cat.name}
@@ -286,38 +311,30 @@ export default function App() {
       {isSearching ? (
         <>
           <h2 className="plants-title">Resultados para "{searchQuery}"</h2>
-          {filteredPlants.length === 0 ? (
+          {searchResults.length === 0 ? (
             <p className="status-msg">No encontramos plantas con ese nombre.</p>
           ) : (
-            <div className="grid">{filteredPlants.map(renderPlantCard)}</div>
+            <div className="grid">{searchResults.map(renderPlantCard)}</div>
           )}
         </>
-      ) : view === 'categories' ? (
+
+      ) : view === 'home' ? (
         <>
           {loading ? (
             <p className="status-msg">Cargando...</p>
           ) : (
             <>
-              <div className="section-title">
-                <span className="section-script">Comprar por categoría</span>
-              </div>
-              <div className="shop-category-grid">
-                <div className="shop-cat-card" onClick={openAllPlants}>
-                  <div className="shop-cat-circle shop-cat-circle-all">🪴</div>
-                  <span>Todas</span>
+              <div className="home-options-row">
+                <div className="home-option-card home-option-all" onClick={() => openAllVarieties('all')}>
+                  <div className="home-option-icon">🌿</div>
+                  <h3>Comprar todas las variedades</h3>
+                  <p>Ve todo el catálogo junto y filtra por categoría, disponibilidad u oferta</p>
                 </div>
-                <div className="shop-cat-card" onClick={openAvailablePlants}>
-                  <div className="shop-cat-circle shop-cat-circle-all">✅</div>
-                  <span>Disponibles</span>
+                <div className="home-option-card home-option-cat" onClick={openCategoriesGrid}>
+                  <div className="home-option-icon">📂</div>
+                  <h3>Comprar por categoría</h3>
+                  <p>Explora una categoría a la vez, como Amarilis, Iris, Cactus y más</p>
                 </div>
-                {categories.map(cat => (
-                  <div key={cat.id} className="shop-cat-card" onClick={() => openCategory(cat)}>
-                    <div className="shop-cat-circle">
-                      {cat.image_url ? <img src={cat.image_url} alt={cat.name} /> : <span>{cat.emoji || '🌿'}</span>}
-                    </div>
-                    <span>{cat.name}</span>
-                  </div>
-                ))}
               </div>
 
               {newPlants.length > 0 && (
@@ -352,23 +369,76 @@ export default function App() {
             </>
           )}
         </>
+
+      ) : view === 'all' ? (
+        <>
+          <button className="back-btn" onClick={backToHome}>← Volver al inicio</button>
+          <h2 className="plants-title">🌿 Comprar todas las variedades</h2>
+
+          <div className="category-chip-row">
+            <button
+              className={selectedCategoryIds.length === 0 ? 'active' : ''}
+              onClick={() => setSelectedCategoryIds([])}
+            >
+              Todas las categorías
+            </button>
+            {categories.map(cat => (
+              <button
+                key={cat.id}
+                className={selectedCategoryIds.includes(cat.id) ? 'active' : ''}
+                onClick={() => toggleCategoryFilter(cat.id)}
+              >
+                {cat.emoji || '🌿'} {cat.name}
+              </button>
+            ))}
+          </div>
+
+          <div className="stock-filter-row">
+            <button className={stockFilter === 'all' ? 'active' : ''} onClick={() => setStockFilter('all')}>Todas</button>
+            <button className={stockFilter === 'available' ? 'active' : ''} onClick={() => setStockFilter('available')}>✅ Disponibles</button>
+            <button className={stockFilter === 'sale' ? 'active' : ''} onClick={() => setStockFilter('sale')}>🏷️ En oferta</button>
+          </div>
+
+          {filteredAllPlants.length === 0 ? (
+            <p className="status-msg">No hay plantas con esos filtros.</p>
+          ) : (
+            <div className="grid">{filteredAllPlants.map(renderPlantCard)}</div>
+          )}
+        </>
+
+      ) : view === 'categories' ? (
+        <>
+          <button className="back-btn" onClick={backToHome}>← Volver al inicio</button>
+          <div className="section-title">
+            <span className="section-script">Comprar por categoría</span>
+          </div>
+          <div className="shop-category-grid">
+            {categories.map(cat => (
+              <div key={cat.id} className="shop-cat-card" onClick={() => openCategory(cat)}>
+                <div className="shop-cat-circle">
+                  {cat.image_url ? <img src={cat.image_url} alt={cat.name} /> : <span>{cat.emoji || '🌿'}</span>}
+                </div>
+                <span>{cat.name}</span>
+              </div>
+            ))}
+          </div>
+        </>
+
       ) : (
         <>
         <button className="back-btn" onClick={backToCategories}>← Volver a categorías</button>
           <h2 className="plants-title">
-            {selectedCategory
-              ? `${selectedCategory.emoji || ''} ${selectedCategory.name}`
-              : stockFilter === 'available' ? '✅ Plantas disponibles' : 'Todas las plantas'}
+            {selectedCategory.emoji || ''} {selectedCategory.name}
           </h2>
           <div className="stock-filter-row">
             <button className={stockFilter === 'all' ? 'active' : ''} onClick={() => setStockFilter('all')}>Todas</button>
             <button className={stockFilter === 'available' ? 'active' : ''} onClick={() => setStockFilter('available')}>✅ Disponibles</button>
             <button className={stockFilter === 'sale' ? 'active' : ''} onClick={() => setStockFilter('sale')}>🏷️ En oferta</button>
           </div>
-          {filteredPlants.length === 0 ? (
+          {filteredCategoryPlants.length === 0 ? (
             <p className="status-msg">Todavía no hay plantas en esta categoría.</p>
           ) : (
-            <div className="grid">{filteredPlants.map(renderPlantCard)}</div>
+            <div className="grid">{filteredCategoryPlants.map(renderPlantCard)}</div>
           )}
         </>
       )}
