@@ -21,6 +21,8 @@ export default function Admin() {
   const [catSubTab, setCatSubTab] = useState('categories')
 
   const [galleryFilter, setGalleryFilter] = useState('all')
+  const [gallerySearch, setGallerySearch] = useState('')
+  const [categoriesSearch, setCategoriesSearch] = useState('')
   const [plantsFilter, setPlantsFilter] = useState('all')
   const [plantsSearch, setPlantsSearch] = useState('')
   const [selectedLabels, setSelectedLabels] = useState(new Set())
@@ -956,7 +958,7 @@ export default function Admin() {
 
   const cards = [
     { key: 'plantas', label: 'Plantas', icon: '🪴', count: plants.length },
-    { key: 'categorias', label: 'Categorías', icon: '🏷️', count: categories.length },
+    { key: 'categorias', label: 'Categorías, Galería y Etiquetas', icon: '🏷️', count: categories.length },
     { key: 'pedidos', label: 'Ventas y Decrementos', icon: '🧾', count: pedidosPendientes },
     { key: 'ingresos', label: 'Ingresos', icon: '📦', count: ingresosEnCurso },
     { key: 'calendario', label: 'Calendario', icon: '🌿', count: gardenTasks.filter(t => t.date >= formatDateStr(new Date())).length },
@@ -964,7 +966,7 @@ export default function Admin() {
 
   const sheetTitles = {
     plantas: '🪴 Plantas',
-    categorias: '🏷️ Categorías',
+    categorias: '🏷️ Categorías, Galería y Etiquetas',
     pedidos: '🧾 Ventas y Decrementos',
     ingresos: '📦 Ingresos',
     calendario: '🌿 Calendario de Jardín',
@@ -1249,8 +1251,16 @@ export default function Admin() {
                         <input placeholder="Emoji (ej: 🌷)" value={newCatEmoji} onChange={e => setNewCatEmoji(e.target.value)} />
                         <button type="submit">Agregar categoría</button>
                       </form>
+                      <input
+                        className="order-search"
+                        placeholder="Buscar categoría por nombre..."
+                        value={categoriesSearch}
+                        onChange={e => setCategoriesSearch(e.target.value)}
+                      />
                       <div className="admin-list">
-                        {categories.map(c => (
+                        {categories
+                          .filter(c => c.name.toLowerCase().includes(categoriesSearch.trim().toLowerCase()))
+                          .map(c => (
                           <div key={c.id} className="admin-item">
                             {c.image_url ? <img src={c.image_url} alt={c.name} /> : <div className="no-img-sm">{c.emoji}</div>}
                             <div className="admin-item-info">
@@ -1280,9 +1290,17 @@ export default function Admin() {
                           <option key={c.id} value={c.id}>{c.emoji} {c.name}</option>
                         ))}
                       </select>
+                      <input
+                        className="order-search"
+                        placeholder="Buscar planta por nombre..."
+                        value={gallerySearch}
+                        onChange={e => setGallerySearch(e.target.value)}
+                      />
 
                       {(() => {
-                        const galleryPlants = plants.filter(p => galleryFilter === 'all' || p.category_id === galleryFilter)
+                        const galleryPlants = plants
+                          .filter(p => galleryFilter === 'all' || p.category_id === galleryFilter)
+                          .filter(p => p.name.toLowerCase().includes(gallerySearch.trim().toLowerCase()))
                         return (
                           <>
                             <div className="label-select-bar">
