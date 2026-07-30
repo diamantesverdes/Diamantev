@@ -296,7 +296,7 @@ export default function App() {
 
       <div className="site-summary">
         <p>🌿 Vivero de plantas ornamentales en Ecuador - Quito </p>
-        <p>🚚 Hacemos envios a todo el pais</p>
+        <p>🚚 Hacemos envíos a todo el país</p>
         <p>💎 Cada planta es una joya viva</p>
       </div>
 
@@ -327,8 +327,9 @@ export default function App() {
       )}
 
       <div className="promo-banner">
-        <span>🌸 Cultivar un jardin es creer en el mañana</span>
-        
+        <span>🌸 Escríbenos por WhatsApp y recibe asesoría gratis para tu jardín</span>
+        <a href={`https://wa.me/${WHATSAPP_NUMBER}`} target="_blank" rel="noreferrer" className="promo-btn">Contáctanos</a>
+      </div>
 
       {menuOpen && (
         <div className="cart-overlay" onClick={() => setMenuOpen(false)}>
