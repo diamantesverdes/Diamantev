@@ -947,6 +947,13 @@ export default function Admin() {
   const pedidosPendientes = orders.filter(o => o.status === 'pedido').length
   const ingresosEnCurso = compras.filter(c => c.status !== 'recibido').length
 
+  const CLIENT_URL = 'https://diamantev.vercel.app'
+
+  function shareClientLink() {
+    const message = encodeURIComponent(`🌿 Visita nuestro catálogo de plantas Diamantev: ${CLIENT_URL}`)
+    window.open(`https://wa.me/?text=${message}`, '_blank')
+  }
+
   const cards = [
     { key: 'plantas', label: 'Plantas', icon: '🪴', count: plants.length },
     { key: 'categorias', label: 'Categorías', icon: '🏷️', count: categories.length },
@@ -1012,6 +1019,10 @@ export default function Admin() {
                 <span className="admin-card-label">{c.label}</span>
               </button>
             ))}
+            <button className="admin-card admin-card-share" onClick={shareClientLink}>
+              <span className="admin-card-icon">💬</span>
+              <span className="admin-card-label">Compartir catálogo<br />por WhatsApp</span>
+            </button>
           </div>
         )}
       </div>
@@ -1072,15 +1083,6 @@ export default function Admin() {
                               <label>Stock: <input type="number" defaultValue={p.stock} onBlur={e => updateStock(p.id, Number(e.target.value))} /></label>
                             </div>
                             <div className="admin-item-actions">
-                              <label className="file-label" title="Subir imagen" style={{ background: 'transparent', color: 'inherit', border: '1px solid #ccc' }}>
-                                📷 Imagen
-                                <input
-                                  type="file"
-                                  accept="image/*"
-                                  style={{ display: 'none' }}
-                                  onChange={e => { updatePlantImage(p.id, e.target.files[0]); e.target.value = '' }}
-                                />
-                              </label>
                               <button onClick={() => toggleActive(p.id, p.active)}>{p.active ? 'Ocultar' : 'Mostrar'}</button>
                               <button onClick={() => toggleIsNew(p.id, p.is_new)}>{p.is_new ? '🌱 Nueva ✓' : 'Marcar como nueva'}</button>
                               <button onClick={() => toggleOnSale(p.id, p.on_sale)}>{p.on_sale ? '🏷️ En descuento ✓' : 'Marcar en descuento'}</button>
@@ -1089,8 +1091,17 @@ export default function Admin() {
                             </div>
 
                             <div className="admin-item-actions">
-                              <label className="file-label" title="Subir foto adicional 1" style={{ background: 'transparent', color: 'inherit', border: '1px solid #ccc' }}>
-                                🖼️ Foto extra 1 {p.extra_image_1 ? '✓' : ''}
+                              <label className="file-label" title="Subir foto 1" style={{ background: 'transparent', color: 'inherit', border: '1px solid #ccc' }}>
+                                📷 Foto 1 {p.image_url ? '✓' : ''}
+                                <input
+                                  type="file"
+                                  accept="image/*"
+                                  style={{ display: 'none' }}
+                                  onChange={e => { updatePlantImage(p.id, e.target.files[0]); e.target.value = '' }}
+                                />
+                              </label>
+                              <label className="file-label" title="Subir foto 2" style={{ background: 'transparent', color: 'inherit', border: '1px solid #ccc' }}>
+                                📷 Foto 2 {p.extra_image_1 ? '✓' : ''}
                                 <input
                                   type="file"
                                   accept="image/*"
@@ -1098,8 +1109,8 @@ export default function Admin() {
                                   onChange={e => { updatePlantExtraImage(p.id, 'extra_image_1', e.target.files[0]); e.target.value = '' }}
                                 />
                               </label>
-                              <label className="file-label" title="Subir foto adicional 2" style={{ background: 'transparent', color: 'inherit', border: '1px solid #ccc' }}>
-                                🖼️ Foto extra 2 {p.extra_image_2 ? '✓' : ''}
+                              <label className="file-label" title="Subir foto 3" style={{ background: 'transparent', color: 'inherit', border: '1px solid #ccc' }}>
+                                📷 Foto 3 {p.extra_image_2 ? '✓' : ''}
                                 <input
                                   type="file"
                                   accept="image/*"
@@ -1119,7 +1130,7 @@ export default function Admin() {
                             </div>
                             <textarea
                               className="plant-description-input"
-                              placeholder="Descripción de la planta (opcional)"
+                              placeholder="Descripción"
                               defaultValue={p.description || ''}
                               rows={2}
                               onBlur={e => updatePlantDescription(p.id, e.target.value)}
@@ -1245,7 +1256,15 @@ export default function Admin() {
                             <div className="admin-item-info">
                               <input defaultValue={c.name} onBlur={e => updateCategoryName(c.id, e.target.value)} style={{ fontWeight: 'bold', fontSize: '1rem', width: '100%', boxSizing: 'border-box' }} />
                               <label>Emoji: <input defaultValue={c.emoji} onBlur={e => updateCategoryEmoji(c.id, e.target.value)} style={{ width: 50 }} /></label>
-                              <input type="file" accept="image/*" onChange={e => uploadCategoryImage(c.id, e.target.files[0])} />
+                              <label className="file-label" title="Subir imagen de categoría" style={{ background: 'transparent', color: 'inherit', border: '1px solid #ccc', display: 'inline-block' }}>
+                                📷 Imagen
+                                <input
+                                  type="file"
+                                  accept="image/*"
+                                  style={{ display: 'none' }}
+                                  onChange={e => { uploadCategoryImage(c.id, e.target.files[0]); e.target.value = '' }}
+                                />
+                              </label>
                             </div>
                           </div>
                         ))}
