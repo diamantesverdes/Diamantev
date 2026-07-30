@@ -63,6 +63,11 @@ export default function Admin() {
   const [movStatusFilter, setMovStatusFilter] = useState('all')
   const [movTypeFilter, setMovTypeFilter] = useState('all')
 
+  const [ingresosSearch, setIngresosSearch] = useState('')
+  const [ingresosDate, setIngresosDate] = useState('')
+  const [ingresosCategoria, setIngresosCategoria] = useState('all')
+  const [ingresosStatus, setIngresosStatus] = useState('all')
+
   const [plants, setPlants] = useState([])
   const [categories, setCategories] = useState([])
   const [loading, setLoading] = useState(true)
@@ -436,6 +441,11 @@ export default function Admin() {
 
   async function toggleIsNew(id, current) {
     await supabase.from('plants').update({ is_new: !current }).eq('id', id)
+    loadData()
+  }
+
+  async function updatePlantCategory(id, categoryId) {
+    await supabase.from('plants').update({ category_id: categoryId || null }).eq('id', id)
     loadData()
   }
 
@@ -1047,7 +1057,16 @@ export default function Admin() {
                           {p.image_url ? <img src={p.image_url} alt={p.name} /> : <div className="no-img-sm">Sin foto</div>}
                           <div className="admin-item-info">
                             <strong>{p.name}</strong>
-                            <span>{categories.find(c => c.id === p.category_id)?.name || 'Sin categoría'}</span>
+                            <select
+                              value={p.category_id || ''}
+                              onChange={e => updatePlantCategory(p.id, e.target.value)}
+                              style={{ maxWidth: 220 }}
+                            >
+                              <option value="">Sin categoría</option>
+                              {categories.map(cat => (
+                                <option key={cat.id} value={cat.id}>{cat.emoji} {cat.name}</option>
+                              ))}
+                            </select>
                             <div className="admin-item-controls">
                               <label>$<input type="number" step="0.01" defaultValue={p.price} onBlur={e => updatePrice(p.id, Number(e.target.value))} /></label>
                               <label>Stock: <input type="number" defaultValue={p.stock} onBlur={e => updateStock(p.id, Number(e.target.value))} /></label>
@@ -1368,9 +1387,25 @@ export default function Admin() {
               )}
 
               {view === 'ingresos' && (() => {
+                function compraCategoryId(c) {
+                  if (c.new_plant_category) return c.new_plant_category
+                  const plant = plants.find(p => p.id === c.plant_id)
+                  return plant ? plant.category_id : null
+                }
+
+                const filteredCompras = compras
+                  .filter(c => {
+                    const term = ingresosSearch.trim().toLowerCase()
+                    if (!term) return true
+                    return (c.proveedor || '').toLowerCase().includes(term) || (c.plant_name || '').toLowerCase().includes(term)
+                  })
+                  .filter(c => !ingresosDate || (c.created_at || '').slice(0, 10) === ingresosDate)
+                  .filter(c => ingresosCategoria === 'all' || compraCategoryId(c) === ingresosCategoria)
+                  .filter(c => ingresosStatus === 'all' || c.status === ingresosStatus)
+
                 const comprasByLote = {}
                 const comprasSinLote = []
-                compras.forEach(c => {
+                filteredCompras.forEach(c => {
                   if (c.lote_id) {
                     if (!comprasByLote[c.lote_id]) comprasByLote[c.lote_id] = []
                     comprasByLote[c.lote_id].push(c)
@@ -1380,6 +1415,39 @@ export default function Admin() {
                 })
                 return (
                   <>
+                    <input
+                      className="order-search"
+                      placeholder="Buscar por proveedor o planta..."
+                      value={ingresosSearch}
+                      onChange={e => setIngresosSearch(e.target.value)}
+                    />
+                    <div className="mov-filters">
+                      <input
+                        type="date"
+                        className="gallery-select"
+                        value={ingresosDate}
+                        onChange={e => setIngresosDate(e.target.value)}
+                      />
+                      <select className="gallery-select" value={ingresosCategoria} onChange={e => setIngresosCategoria(e.target.value)}>
+                        <option value="all">Todas las categorías</option>
+                        {categories.map(c => <option key={c.id} value={c.id}>{c.emoji} {c.name}</option>)}
+                      </select>
+                      <select className="gallery-select" value={ingresosStatus} onChange={e => setIngresosStatus(e.target.value)}>
+                        <option value="all">Todos los estados</option>
+                        <option value="pedido">Pedido</option>
+                        <option value="pagado">Pagado</option>
+                        <option value="recibido">Recibido</option>
+                      </select>
+                      {(ingresosSearch || ingresosDate || ingresosCategoria !== 'all' || ingresosStatus !== 'all') && (
+                        <button
+                          type="button"
+                          onClick={() => { setIngresosSearch(''); setIngresosDate(''); setIngresosCategoria('all'); setIngresosStatus('all') }}
+                        >
+                          Limpiar filtros
+                        </button>
+                      )}
+                    </div>
+
                     {!loteBuilderOpen ? (
                       <button type="button" className="full-form-btn" onClick={() => setLoteBuilderOpen(true)}>🧺 Nueva compra</button>
                     ) : (
@@ -1653,6 +1721,11 @@ export default function Admin() {
                             const tag = gardenTags.find(g => g.id === t.tag_id)
                             const isPast = t.date < todayStr
                             const hasBlocks = t.content_blocks && t.content_blocks.length > 0
+                            const previewText = hasBlocks
+                              ? (t.content_blocks || []).filter(b => b.type === 'text').map(b => b.content).join(' ')
+                              : ''
+                            const hasPhoto = hasBlocks && (t.content_blocks || []).some(b => b.type === 'photo')
+                            const hasVideo = hasBlocks && (t.content_blocks || []).some(b => b.type === 'video')
                             return (
                               <div
                                 key={t.id}
@@ -1670,9 +1743,17 @@ export default function Admin() {
                                   }
                                 }}
                               >
-                                <span className="task-tag-dot" style={{ background: tag?.color || '#a1665e' }} />
-                                <span className="task-tag-name">{new Date(t.date + 'T00:00:00').toLocaleDateString('es-EC', { day: 'numeric', month: 'short' })} — {tag?.name || (t.tag_id ? 'Etiqueta borrada' : '📝 Nota libre')}</span>
+                                <div className="day-task-row">
+                                  <span className="task-tag-dot" style={{ background: tag?.color || '#a1665e' }} />
+                                  <span className="task-tag-name">{new Date(t.date + 'T00:00:00').toLocaleDateString('es-EC', { day: 'numeric', month: 'short' })} — {tag?.name || (t.tag_id ? 'Etiqueta borrada' : '📝 Nota libre')}</span>
+                                </div>
                                 {t.note && <span className="task-note">— {t.note}</span>}
+                                {previewText && (
+                                  <p className="task-note" style={{ margin: '2px 0 0 20px' }}>
+                                    {previewText.length > 90 ? previewText.slice(0, 90) + '…' : previewText}
+                                    {(hasPhoto || hasVideo) && <span> {hasPhoto ? '📷' : ''}{hasVideo ? '🎥' : ''}</span>}
+                                  </p>
+                                )}
                               </div>
                             )
                           })}
@@ -1693,7 +1774,20 @@ export default function Admin() {
                         <div
                           key={dateStr}
                           className={`calendar-day ${dateStr === todayStr ? 'today' : ''} ${selectedDay === dateStr ? 'selected' : ''}`}
-                          onClick={() => setSelectedDay(dateStr)}
+                          onClick={() => {
+                            setSelectedDay(dateStr)
+                            setDayModalOpen(true)
+                            const existingNote = dayTasks.find(t => t.content_blocks && t.content_blocks.length > 0)
+                            if (existingNote) {
+                              setEditingTaskId(existingNote.id)
+                              setFreeNoteBlocks(existingNote.content_blocks)
+                            } else {
+                              setEditingTaskId(null)
+                              setFreeNoteBlocks([])
+                            }
+                            setFreeNoteCurrentText('')
+                            setFreeNoteModalOpen(true)
+                          }}
                         >
                           <span className="calendar-day-num">{cell.getDate()}</span>
                           <div className="calendar-day-tasks">
