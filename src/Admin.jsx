@@ -631,6 +631,29 @@ export default function Admin() {
     window.print()
   }
 
+  async function shareSelectedPhotos(plantsList) {
+    const selected = plantsList.filter(p => selectedLabels.has(p.id))
+    if (selected.length === 0) return
+    setSharingNotes(true)
+    try {
+      const names = selected.map(p => `- ${p.name}`).join('\n')
+      const shareText = `🌿 Plantas Diamantev:\n${names}`
+      const fileUrls = selected.filter(p => p.image_url).map(p => p.image_url)
+      const files = (await Promise.all(fileUrls.map(urlToFile))).filter(Boolean)
+
+      if (navigator.share && files.length > 0 && navigator.canShare && navigator.canShare({ files })) {
+        await navigator.share({ title: 'Plantas Diamantev', text: shareText, files })
+      } else if (navigator.share) {
+        await navigator.share({ title: 'Plantas Diamantev', text: shareText })
+      } else {
+        window.open(`https://wa.me/?text=${encodeURIComponent(shareText)}`, '_blank')
+      }
+    } catch (err) {
+      if (err.name !== 'AbortError') alert('No se pudo compartir. Intenta de nuevo.')
+    }
+    setSharingNotes(false)
+  }
+
   async function urlToFile(url) {
     try {
       const res = await fetch(url)
@@ -1307,9 +1330,14 @@ export default function Admin() {
                               <button type="button" onClick={() => selectAllLabels(galleryPlants)}>Seleccionar todas</button>
                               <button type="button" onClick={clearLabels}>Deseleccionar todas</button>
                               {selectedLabels.size > 0 && (
-                                <button type="button" className="print-btn" onClick={printLabels}>
-                                  🏷️ Imprimir etiquetas ({selectedLabels.size})
-                                </button>
+                                <>
+                                  <button type="button" className="print-btn" onClick={printLabels}>
+                                    🏷️ Imprimir etiquetas ({selectedLabels.size})
+                                  </button>
+                                  <button type="button" className="print-btn" onClick={() => shareSelectedPhotos(galleryPlants)} disabled={sharingNotes}>
+                                    {sharingNotes ? 'Preparando...' : `📲 Enviar por WhatsApp (${selectedLabels.size})`}
+                                  </button>
+                                </>
                               )}
                             </div>
                             <div className="gallery-grid">
