@@ -40,6 +40,9 @@ export default function Admin() {
   const [loteLines, setLoteLines] = useState([])
   const [lineForm, setLineForm] = useState({ plant_id: '', new_plant_name: '', new_plant_category: '', quantity: '', unit_cost: '', sale_price: '', file: null })
   const [savingLote, setSavingLote] = useState(false)
+  const [addToLoteId, setAddToLoteId] = useState(null)
+  const [addToLoteForm, setAddToLoteForm] = useState({ plant_id: '', new_plant_name: '', new_plant_category: '', quantity: '', unit_cost: '', sale_price: '', file: null })
+  const [savingAddToLote, setSavingAddToLote] = useState(false)
 
   const [decrementos, setDecrementos] = useState([])
   const [decForm, setDecForm] = useState({ plant_id: '', quantity: '', motivo: '', motivo_otro: '' })
@@ -166,8 +169,8 @@ export default function Admin() {
   function addLineToLote(e) {
     e.preventDefault()
     const usingNew = !lineForm.plant_id && lineForm.new_plant_name
-    if ((!lineForm.plant_id && !usingNew) || !lineForm.quantity || !lineForm.unit_cost) {
-      alert('Selecciona una planta o escribe el nombre de una nueva, y completa cantidad y costo')
+    if ((!lineForm.plant_id && !usingNew) || !lineForm.quantity) {
+      alert('Selecciona una planta o escribe el nombre de una nueva, y completa la cantidad')
       return
     }
     if (usingNew && !lineForm.new_plant_category) {
@@ -218,6 +221,65 @@ export default function Admin() {
     setLoteLines([])
     setLoteBuilderOpen(false)
     setSavingLote(false)
+    loadData()
+  }
+
+  async function saveAddToLote(lote) {
+    const usingNew = !addToLoteForm.plant_id && addToLoteForm.new_plant_name
+    if ((!addToLoteForm.plant_id && !usingNew) || !addToLoteForm.quantity) {
+      alert('Selecciona una planta o escribe el nombre de una nueva, y completa la cantidad')
+      return
+    }
+    if (usingNew && !addToLoteForm.new_plant_category) {
+      alert('Selecciona una categoría para la planta nueva')
+      return
+    }
+    setSavingAddToLote(true)
+    const plant = addToLoteForm.plant_id ? plants.find(p => p.id === addToLoteForm.plant_id) : null
+    const quantity = Number(addToLoteForm.quantity)
+    const unit_cost = Number(addToLoteForm.unit_cost) || 0
+    const sale_price = addToLoteForm.sale_price ? Number(addToLoteForm.sale_price) : null
+    let image_url = null
+    if (addToLoteForm.file) image_url = await uploadImage(addToLoteForm.file)
+
+    // Toma el mismo estado que ya tienen las demás líneas de esta compra
+    const lineasDeEsteLote = compras.filter(c => c.lote_id === lote.id)
+    const status = lineasDeEsteLote.some(c => c.status === 'recibido')
+      ? 'recibido'
+      : lineasDeEsteLote.some(c => c.status === 'pagado')
+        ? 'pagado'
+        : 'pedido'
+
+    const row = usingNew
+      ? { plant_id: null, plant_name: addToLoteForm.new_plant_name, new_plant_category: addToLoteForm.new_plant_category, quantity, unit_cost, sale_price, image_url, total: quantity * unit_cost, proveedor: lote.proveedor, status, lote_id: lote.id }
+      : { plant_id: addToLoteForm.plant_id, plant_name: plant ? plant.name : '', quantity, unit_cost, sale_price, image_url, total: quantity * unit_cost, proveedor: lote.proveedor, status, lote_id: lote.id }
+
+    if (status === 'pagado' || status === 'recibido') row.fecha_pago = new Date().toISOString()
+    if (status === 'recibido') row.fecha_recibido = new Date().toISOString()
+
+    const { error } = await supabase.from('compras').insert(row)
+    if (error) { alert('Error al agregar la planta: ' + error.message); setSavingAddToLote(false); return }
+
+    // Si la compra ya estaba recibida, actualiza el stock de inmediato
+    if (status === 'recibido') {
+      if (!usingNew && plant) {
+        const updates = { stock: plant.stock + quantity }
+        if (image_url) updates.image_url = image_url
+        await supabase.from('plants').update(updates).eq('id', plant.id)
+      } else if (usingNew) {
+        await supabase.from('plants').insert({
+          name: addToLoteForm.new_plant_name,
+          category_id: addToLoteForm.new_plant_category,
+          price: sale_price || 0,
+          stock: quantity,
+          image_url: image_url || null,
+        })
+      }
+    }
+
+    setAddToLoteForm({ plant_id: '', new_plant_name: '', new_plant_category: '', quantity: '', unit_cost: '', sale_price: '', file: null })
+    setAddToLoteId(null)
+    setSavingAddToLote(false)
     loadData()
   }
 
@@ -1386,7 +1448,35 @@ export default function Admin() {
                                 <button onClick={() => openLoteNote(lote)}>
                                   📝 {(lote.content_blocks && lote.content_blocks.length > 0) ? 'Editar nota de la compra' : 'Agregar nota de la compra'}
                                 </button>
+                                <button onClick={() => setAddToLoteId(addToLoteId === lote.id ? null : lote.id)}>
+                                  ➕ Agregar planta
+                                </button>
                               </div>
+                              {addToLoteId === lote.id && (
+                                <div className="admin-form" style={{ marginTop: 8 }}>
+                                  <h4>Agregar planta olvidada a esta compra</h4>
+                                  <select value={addToLoteForm.plant_id} onChange={e => setAddToLoteForm({ ...addToLoteForm, plant_id: e.target.value, new_plant_name: '', new_plant_category: '' })}>
+                                    <option value="">Selecciona planta existente</option>
+                                    {plants.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                                  </select>
+                                  <p style={{ margin: '4px 0', fontSize: '0.8rem', color: '#6b6b5f' }}>— o registra una planta nueva —</p>
+                                  <input placeholder="Nombre de planta nueva" value={addToLoteForm.new_plant_name} onChange={e => setAddToLoteForm({ ...addToLoteForm, plant_id: '', new_plant_name: e.target.value })} />
+                                  <select value={addToLoteForm.new_plant_category} onChange={e => setAddToLoteForm({ ...addToLoteForm, new_plant_category: e.target.value })}>
+                                    <option value="">Selecciona categoría</option>
+                                    {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                                  </select>
+                                  <input placeholder="Cantidad" type="number" value={addToLoteForm.quantity} onChange={e => setAddToLoteForm({ ...addToLoteForm, quantity: e.target.value })} />
+                                  <input placeholder="Precio de compra (opcional)" type="number" step="0.01" value={addToLoteForm.unit_cost} onChange={e => setAddToLoteForm({ ...addToLoteForm, unit_cost: e.target.value })} />
+                                  <input placeholder="Precio de venta (opcional)" type="number" step="0.01" value={addToLoteForm.sale_price} onChange={e => setAddToLoteForm({ ...addToLoteForm, sale_price: e.target.value })} />
+                                  <input type="file" accept="image/*" onChange={e => setAddToLoteForm({ ...addToLoteForm, file: e.target.files[0] })} />
+                                  <div className="admin-item-actions">
+                                    <button type="button" onClick={() => saveAddToLote(lote)} disabled={savingAddToLote}>
+                                      {savingAddToLote ? 'Guardando...' : 'Guardar planta'}
+                                    </button>
+                                    <button type="button" onClick={() => setAddToLoteId(null)}>Cancelar</button>
+                                  </div>
+                                </div>
+                              )}
                               {lote.content_blocks && lote.content_blocks.length > 0 && (
                                 <div className="note-blocks-view">
                                   {lote.content_blocks.map((b, i) => (
