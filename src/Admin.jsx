@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { supabase } from './supabaseClient'
+import { supabase, supabaseStorage } from './supabaseClient'
 
 export default function Admin() {
   const [authed, setAuthed] = useState(false)
@@ -27,22 +27,6 @@ export default function Admin() {
   const [plantsSearch, setPlantsSearch] = useState('')
   const [selectedLabels, setSelectedLabels] = useState(new Set())
 
-  const [gardenTags, setGardenTags] = useState([])
-  const [gardenTasks, setGardenTasks] = useState([])
-  const [calendarMonth, setCalendarMonth] = useState(() => { const d = new Date(); d.setDate(1); return d })
-  const [selectedDay, setSelectedDay] = useState(null)
-  const [dayModalOpen, setDayModalOpen] = useState(false)
-  const [newTagForm, setNewTagForm] = useState({ name: '', color: '#a1665e' })
-  const [taskFormOpen, setTaskFormOpen] = useState(false)
-  const [taskSearch, setTaskSearch] = useState('')
-  const [taskSearchSubmitted, setTaskSearchSubmitted] = useState('')
-  const [freeNoteModalOpen, setFreeNoteModalOpen] = useState(false)
-  const [editingTaskId, setEditingTaskId] = useState(null)
-  const [tagMenuOpen, setTagMenuOpen] = useState(false)
-  const [freeNoteBlocks, setFreeNoteBlocks] = useState([])
-  const [freeNoteCurrentText, setFreeNoteCurrentText] = useState('')
-  const [savingFreeNote, setSavingFreeNote] = useState(false)
-  const [taskForm, setTaskForm] = useState({ tag_id: '', date: '', note: '', repeat: 'none' })
   const [sharingNotes, setSharingNotes] = useState(false)
 
   const [orders, setOrders] = useState([])
@@ -114,8 +98,6 @@ export default function Admin() {
     const { data: lts } = await supabase.from('compra_lotes').select('*').order('numero', { ascending: false })
     const { data: decs } = await supabase.from('decrementos').select('*').order('created_at', { ascending: false })
     const { data: pnts } = await supabase.from('plant_notes').select('*').order('created_at', { ascending: false })
-    const { data: tags } = await supabase.from('garden_tags').select('*').order('created_at')
-    const { data: tasks } = await supabase.from('garden_tasks').select('*').order('date')
     setCategories(cats || [])
     setPlants(pls || [])
     setOrders(ords || [])
@@ -123,8 +105,6 @@ export default function Admin() {
     setLotes(lts || [])
     setDecrementos(decs || [])
     setPlantNotes(pnts || [])
-    setGardenTags(tags || [])
-    setGardenTasks(tasks || [])
     setLoading(false)
   }
 
@@ -176,9 +156,9 @@ export default function Admin() {
   async function uploadImage(file, bucket = 'plant-photos') {
     const ext = file.name.split('.').pop()
     const fileName = `${Date.now()}.${ext}`
-    const { error } = await supabase.storage.from(bucket).upload(fileName, file)
+    const { error } = await supabaseStorage.storage.from(bucket).upload(fileName, file)
     if (error) { alert('Error al subir el archivo'); return null }
-    const { data } = supabase.storage.from(bucket).getPublicUrl(fileName)
+    const { data } = supabaseStorage.storage.from(bucket).getPublicUrl(fileName)
     return data.publicUrl
   }
 
@@ -665,28 +645,6 @@ export default function Admin() {
     }
   }
 
-  async function shareCalendarNote(t) {
-    setSharingNotes(true)
-    try {
-      const header = `🌿 Calendario (${new Date(t.date + 'T00:00:00').toLocaleDateString()})`
-      const textBlocks = (t.content_blocks || []).filter(b => b.type === 'text').map(b => b.content).join('\n')
-      const shareText = textBlocks ? `${header}:\n${textBlocks}` : header
-      const fileUrls = (t.content_blocks || []).filter(b => (b.type === 'photo' || b.type === 'video') && b.url).map(b => b.url)
-      const files = (await Promise.all(fileUrls.map(urlToFile))).filter(Boolean)
-
-      if (navigator.share && files.length > 0 && navigator.canShare && navigator.canShare({ files })) {
-        await navigator.share({ title: 'Nota del calendario Diamantev', text: shareText, files })
-      } else if (navigator.share) {
-        await navigator.share({ title: 'Nota del calendario Diamantev', text: shareText })
-      } else {
-        window.open(`https://wa.me/?text=${encodeURIComponent(shareText)}`, '_blank')
-      }
-    } catch (err) {
-      if (err.name !== 'AbortError') alert('No se pudo compartir. Intenta de nuevo.')
-    }
-    setSharingNotes(false)
-  }
-
   async function sharePlantNote(n) {
     setSharingNotes(true)
     try {
@@ -708,159 +666,6 @@ export default function Admin() {
       if (err.name !== 'AbortError') alert('No se pudo compartir. Intenta de nuevo.')
     }
     setSharingNotes(false)
-  }
-
-  // ---------- Calendario de Jardín ----------
-  function formatDateStr(d) {
-    const y = d.getFullYear()
-    const m = String(d.getMonth() + 1).padStart(2, '0')
-    const day = String(d.getDate()).padStart(2, '0')
-    return `${y}-${m}-${day}`
-  }
-
-  function changeMonth(delta) {
-    setCalendarMonth(prev => {
-      const d = new Date(prev)
-      d.setMonth(d.getMonth() + delta)
-      return d
-    })
-    setSelectedDay(null)
-  }
-
-  async function addTag(e) {
-    e.preventDefault()
-    if (!newTagForm.name.trim()) return
-    const { error } = await supabase.from('garden_tags').insert({ name: newTagForm.name, color: newTagForm.color })
-    if (error) { alert('Error al agregar etiqueta: ' + error.message); return }
-    setNewTagForm({ name: '', color: '#a1665e' })
-    loadData()
-  }
-
-  async function updateTagName(id, name) {
-    if (!name.trim()) return
-    await supabase.from('garden_tags').update({ name }).eq('id', id)
-    loadData()
-  }
-
-  async function updateTagColor(id, color) {
-    await supabase.from('garden_tags').update({ color }).eq('id', id)
-    loadData()
-  }
-
-  async function deleteTag(id) {
-    if (!confirm('¿Borrar esta etiqueta? También se borrarán todas sus tareas.')) return
-    await supabase.from('garden_tags').delete().eq('id', id)
-    loadData()
-  }
-
-  async function quickAddTask(tagId) {
-    if (!selectedDay) return
-    const { error } = await supabase.from('garden_tasks').insert({ tag_id: tagId, date: selectedDay, note: '', repeat: 'none' })
-    if (error) { alert('Error al agregar tarea: ' + error.message); return }
-    loadData()
-  }
-
-  function insertPhotoBlockToNote(file) {
-    if (!file) return
-    setFreeNoteBlocks(prev => {
-      const next = [...prev]
-      if (freeNoteCurrentText.trim()) next.push({ type: 'text', content: freeNoteCurrentText })
-      next.push({ type: 'photo', file })
-      return next
-    })
-    setFreeNoteCurrentText('')
-  }
-
-  function insertVideoBlockToNote(file) {
-    if (!file) return
-    setFreeNoteBlocks(prev => {
-      const next = [...prev]
-      if (freeNoteCurrentText.trim()) next.push({ type: 'text', content: freeNoteCurrentText })
-      next.push({ type: 'video', file })
-      return next
-    })
-    setFreeNoteCurrentText('')
-  }
-
-  function removeLastNoteBlock() {
-    setFreeNoteBlocks(prev => prev.slice(0, -1))
-  }
-
-  function openEditNote(t) {
-    setEditingTaskId(t.id)
-    setFreeNoteBlocks(t.content_blocks || [])
-    setFreeNoteCurrentText('')
-    setFreeNoteModalOpen(true)
-  }
-
-  async function quickAddFreeNote() {
-    if (!selectedDay) return
-    const blocks = [...freeNoteBlocks]
-    if (freeNoteCurrentText.trim()) blocks.push({ type: 'text', content: freeNoteCurrentText })
-    if (blocks.length === 0) return
-    setSavingFreeNote(true)
-    const finalBlocks = []
-    for (const b of blocks) {
-      if (b.type === 'text') {
-        finalBlocks.push(b)
-      } else if (b.url) {
-        finalBlocks.push(b)
-      } else {
-        const url = await uploadImage(b.file, 'category-notes')
-        if (url) finalBlocks.push({ type: b.type, url })
-      }
-    }
-    const { error } = editingTaskId
-      ? await supabase.from('garden_tasks').update({ content_blocks: finalBlocks }).eq('id', editingTaskId)
-      : await supabase.from('garden_tasks').insert({
-          tag_id: null,
-          date: selectedDay,
-          note: '',
-          repeat: 'none',
-          content_blocks: finalBlocks,
-        })
-    if (error) { alert('Error al guardar la nota: ' + error.message); setSavingFreeNote(false); return }
-    setFreeNoteBlocks([])
-    setFreeNoteCurrentText('')
-    setEditingTaskId(null)
-    setSavingFreeNote(false)
-    setFreeNoteModalOpen(false)
-    loadData()
-  }
-
-  async function deleteTask(id) {
-    await supabase.from('garden_tasks').delete().eq('id', id)
-    loadData()
-  }
-
-  function buildRepeatDates(startDateStr, repeat) {
-    const dates = [startDateStr]
-    if (repeat === 'none') return dates
-    const [y, m, d] = startDateStr.split('-').map(Number)
-    const count = repeat === 'monthly' ? 6 : 8
-    for (let i = 1; i < count; i++) {
-      const next = new Date(y, m - 1, d)
-      if (repeat === 'weekly') next.setDate(next.getDate() + 7 * i)
-      else if (repeat === 'biweekly') next.setDate(next.getDate() + 14 * i)
-      else if (repeat === 'monthly') next.setMonth(next.getMonth() + i)
-      dates.push(formatDateStr(next))
-    }
-    return dates
-  }
-
-  async function addTaskFull(e) {
-    e.preventDefault()
-    if (!taskForm.tag_id || !taskForm.date) {
-      alert('Selecciona una etiqueta y una fecha')
-      return
-    }
-    const dates = buildRepeatDates(taskForm.date, taskForm.repeat)
-    const rows = dates.map(date => ({ tag_id: taskForm.tag_id, date, note: taskForm.note, repeat: taskForm.repeat }))
-    const { error } = await supabase.from('garden_tasks').insert(rows)
-    if (error) { alert('Error al guardar la tarea: ' + error.message); return }
-    setTaskForm({ tag_id: '', date: '', note: '', repeat: 'none' })
-    setTaskFormOpen(false)
-    loadData()
   }
 
   if (checkingSession) {
@@ -984,7 +789,6 @@ export default function Admin() {
     { key: 'categorias', label: 'Categorías, Galería y Etiquetas', icon: '🏷️', count: categories.length },
     { key: 'pedidos', label: 'Ventas y Decrementos', icon: '🧾', count: pedidosPendientes },
     { key: 'ingresos', label: 'Ingresos', icon: '📦', count: ingresosEnCurso },
-    { key: 'calendario', label: 'Calendario', icon: '🌿', count: gardenTasks.filter(t => t.date >= formatDateStr(new Date())).length },
   ]
 
   const sheetTitles = {
@@ -992,27 +796,7 @@ export default function Admin() {
     categorias: '🏷️ Categorías, Galería y Etiquetas',
     pedidos: '🧾 Ventas y Decrementos',
     ingresos: '📦 Ingresos',
-    calendario: '🌿 Calendario de Jardín',
   }
-
-  // Datos del mes visible en el calendario
-  const calYear = calendarMonth.getFullYear()
-  const calMonth = calendarMonth.getMonth()
-  const calFirstDay = new Date(calYear, calMonth, 1)
-  const calStartOffset = calFirstDay.getDay()
-  const calDaysInMonth = new Date(calYear, calMonth + 1, 0).getDate()
-  const calMonthLabel = calendarMonth.toLocaleDateString('es-EC', { month: 'long', year: 'numeric' })
-  const todayStr = formatDateStr(new Date())
-
-  const calCells = []
-  for (let i = 0; i < calStartOffset; i++) calCells.push(null)
-  for (let d = 1; d <= calDaysInMonth; d++) calCells.push(new Date(calYear, calMonth, d))
-
-  const tasksByDay = {}
-  gardenTasks.forEach(t => {
-    if (!tasksByDay[t.date]) tasksByDay[t.date] = []
-    tasksByDay[t.date].push(t)
-  })
 
   return (
     <div className="admin">
@@ -1737,396 +1521,6 @@ export default function Admin() {
                 )
               })()}
 
-              {view === 'calendario' && (
-                <>
-                  <div className="calendar-header">
-                    <button type="button" onClick={() => changeMonth(-1)}>←</button>
-                    <h3>{calMonthLabel}</h3>
-                    <button type="button" onClick={() => changeMonth(1)}>→</button>
-                  </div>
-
-                  <div className="task-search-row">
-                    <input
-                      className="order-search"
-                      placeholder="Buscar tarea por palabra o etiqueta..."
-                      value={taskSearch}
-                      onChange={e => setTaskSearch(e.target.value)}
-                      onKeyDown={e => e.key === 'Enter' && (e.target.blur(), setTaskSearchSubmitted(taskSearch))}
-                    />
-                    <button
-                      type="button"
-                      className="task-search-btn"
-                      onClick={() => { document.activeElement && document.activeElement.blur(); setTaskSearchSubmitted(taskSearch) }}
-                    >
-                      🔍 Buscar
-                    </button>
-                  </div>
-
-                  {taskSearchSubmitted.trim() && (() => {
-                    const term = taskSearchSubmitted.trim().toLowerCase()
-                    const matches = gardenTasks
-                      .filter(t => {
-                        const tag = gardenTags.find(g => g.id === t.tag_id)
-                        const blocksText = (t.content_blocks || [])
-                          .filter(b => b.type === 'text')
-                          .map(b => b.content)
-                          .join(' ')
-                          .toLowerCase()
-                        return (t.note || '').toLowerCase().includes(term)
-                          || (tag?.name || '').toLowerCase().includes(term)
-                          || blocksText.includes(term)
-                      })
-                      .sort((a, b) => a.date.localeCompare(b.date))
-                    return (
-                      <div className="day-panel">
-                        <h4>Resultados de búsqueda ({matches.length})</h4>
-                        {matches.length === 0 && <p className="status-msg">No se encontraron tareas.</p>}
-                        <div className="day-task-list">
-                          {matches.map(t => {
-                            const tag = gardenTags.find(g => g.id === t.tag_id)
-                            const isPast = t.date < todayStr
-                            const hasBlocks = t.content_blocks && t.content_blocks.length > 0
-                            const previewText = hasBlocks
-                              ? (t.content_blocks || []).filter(b => b.type === 'text').map(b => b.content).join(' ')
-                              : ''
-                            const hasPhoto = hasBlocks && (t.content_blocks || []).some(b => b.type === 'photo')
-                            const hasVideo = hasBlocks && (t.content_blocks || []).some(b => b.type === 'video')
-                            return (
-                              <div
-                                key={t.id}
-                                className="day-task-item"
-                                onClick={() => {
-                                  setTaskSearch('')
-                                  setTaskSearchSubmitted('')
-                                  setSelectedDay(t.date)
-                                  setDayModalOpen(true)
-                                  if (hasBlocks) {
-                                    setEditingTaskId(t.id)
-                                    setFreeNoteBlocks(t.content_blocks)
-                                    setFreeNoteCurrentText('')
-                                    setFreeNoteModalOpen(true)
-                                  }
-                                }}
-                              >
-                                <div className="day-task-row">
-                                  <span className="task-tag-dot" style={{ background: tag?.color || '#a1665e' }} />
-                                  <span className="task-tag-name">{new Date(t.date + 'T00:00:00').toLocaleDateString('es-EC', { day: 'numeric', month: 'short' })} — {tag?.name || (t.tag_id ? 'Etiqueta borrada' : '📝 Nota libre')}</span>
-                                </div>
-                                {t.note && <span className="task-note">— {t.note}</span>}
-                                {previewText && (
-                                  <p className="task-note" style={{ margin: '2px 0 0 20px' }}>
-                                    {previewText.length > 90 ? previewText.slice(0, 90) + '…' : previewText}
-                                    {(hasPhoto || hasVideo) && <span> {hasPhoto ? '📷' : ''}{hasVideo ? '🎥' : ''}</span>}
-                                  </p>
-                                )}
-                              </div>
-                            )
-                          })}
-                        </div>
-                      </div>
-                    )
-                  })()}
-
-                  <div className="calendar-grid">
-                    {['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'].map(d => (
-                      <div key={d} className="calendar-weekday">{d}</div>
-                    ))}
-                    {calCells.map((cell, i) => {
-                      if (!cell) return <div key={`empty-${i}`} className="calendar-day outside" />
-                      const dateStr = formatDateStr(cell)
-                      const dayTasks = tasksByDay[dateStr] || []
-                      return (
-                        <div
-                          key={dateStr}
-                          className={`calendar-day ${dateStr === todayStr ? 'today' : ''} ${selectedDay === dateStr ? 'selected' : ''}`}
-                          onClick={() => {
-                            setSelectedDay(dateStr)
-                            setDayModalOpen(true)
-                            const existingNote = dayTasks.find(t => t.content_blocks && t.content_blocks.length > 0)
-                            if (existingNote) {
-                              setEditingTaskId(existingNote.id)
-                              setFreeNoteBlocks(existingNote.content_blocks)
-                            } else {
-                              setEditingTaskId(null)
-                              setFreeNoteBlocks([])
-                            }
-                            setFreeNoteCurrentText('')
-                            setFreeNoteModalOpen(true)
-                          }}
-                        >
-                          <span className="calendar-day-num">{cell.getDate()}</span>
-                          <div className="calendar-day-tasks">
-                            {dayTasks.slice(0, 3).map(t => {
-                              const tag = gardenTags.find(g => g.id === t.tag_id)
-                              const hasBlocks = t.content_blocks && t.content_blocks.length > 0
-                              return (
-                                <span
-                                  key={t.id}
-                                  className="calendar-task-label"
-                                  style={{ background: tag?.color || (t.tag_id ? '#a1665e' : '#B5A88F') }}
-                                  title={tag?.name || t.note}
-                                >
-                                  {tag?.name || (t.note ? `📝 ${t.note}` : '📝')}
-                                </span>
-                              )
-                            })}
-                            {dayTasks.length > 3 && (
-                              <span className="calendar-task-more">+{dayTasks.length - 3}</span>
-                            )}
-                          </div>
-                        </div>
-                      )
-                    })}
-                  </div>
-
-                  <div className="garden-tags-section">
-                    {selectedDay && (
-                      <div className="day-selected-bar">
-                        <span>Día seleccionado: {new Date(selectedDay + 'T00:00:00').toLocaleDateString('es-EC', { day: 'numeric', month: 'long' })}</span>
-                        <button type="button" onClick={() => setDayModalOpen(true)}>👁️ Ver detalles del día</button>
-                      </div>
-                    )}
-                    <h3>Etiquetas de tareas</h3>
-                    <p style={{ fontSize: '0.8rem', color: '#6b6b5f', margin: '0 0 8px' }}>Selecciona un día en el calendario y toca ➕ en una etiqueta para asignarla directo.</p>
-                    <div className="garden-tags-list">
-                      {gardenTags.map(tag => (
-                        <div key={tag.id} className="garden-tag-chip">
-                          <button
-                            type="button"
-                            className="tag-quick-add-btn"
-                            onClick={() => quickAddTask(tag.id)}
-                            disabled={!selectedDay}
-                            title={selectedDay ? `Agregar "${tag.name}" al día seleccionado` : 'Selecciona un día primero'}
-                          >➕</button>
-                          <input
-                            type="color"
-                            className="tag-color-input"
-                            value={tag.color}
-                            onChange={e => updateTagColor(tag.id, e.target.value)}
-                          />
-                          <input
-                            className="tag-name-input"
-                            defaultValue={tag.name}
-                            onBlur={e => updateTagName(tag.id, e.target.value)}
-                          />
-                          <button type="button" className="tag-delete-btn" onClick={() => deleteTag(tag.id)}>✕</button>
-                        </div>
-                      ))}
-                    </div>
-                    <form className="admin-form garden-tag-form" onSubmit={addTag}>
-                      <input
-                        placeholder="Nueva etiqueta (ej: Riego delantero)"
-                        value={newTagForm.name}
-                        onChange={e => setNewTagForm({ ...newTagForm, name: e.target.value })}
-                      />
-                      <input
-                        type="color"
-                        value={newTagForm.color}
-                        onChange={e => setNewTagForm({ ...newTagForm, color: e.target.value })}
-                      />
-                      <button type="submit">Agregar etiqueta</button>
-                    </form>
-                  </div>
-
-                  {selectedDay && dayModalOpen && (
-                    <div className="admin-sheet-overlay" onClick={() => setDayModalOpen(false)}>
-                      <div className="day-panel day-panel-modal" onClick={e => e.stopPropagation()}>
-                        <div className="free-note-modal-header">
-                          <h4>{new Date(selectedDay + 'T00:00:00').toLocaleDateString('es-EC', { weekday: 'long', day: 'numeric', month: 'long' })}</h4>
-                          <button type="button" className="modal-close-btn" onClick={() => setDayModalOpen(false)}>✕</button>
-                        </div>
-
-                      {gardenTags.length === 0 ? (
-                        <p className="status-msg">Agrega una etiqueta arriba para poder añadir tareas.</p>
-                      ) : (
-                        <button type="button" className="full-form-btn" onClick={() => setTagMenuOpen(true)}>
-                          🏷️ Elegir etiqueta para este día
-                        </button>
-                      )}
-
-                      {tagMenuOpen && (
-                        <div className="tag-menu-overlay" onClick={() => setTagMenuOpen(false)}>
-                          <div className="tag-menu-panel" onClick={e => e.stopPropagation()}>
-                            <div className="tag-menu-header">
-                              <h4>Elegir etiqueta</h4>
-                              <button type="button" className="modal-close-btn" onClick={() => setTagMenuOpen(false)}>✕</button>
-                            </div>
-                            <div className="tag-menu-list">
-                              {gardenTags.map(tag => (
-                                <button
-                                  key={tag.id}
-                                  type="button"
-                                  className="tag-menu-item"
-                                  onClick={() => { quickAddTask(tag.id); setTagMenuOpen(false) }}
-                                >
-                                  <span className="tag-menu-dot" style={{ background: tag.color }} />
-                                  {tag.name}
-                                </button>
-                              ))}
-                            </div>
-                          </div>
-                        </div>
-                      )}
-
-                      <button
-                        type="button"
-                        className="full-form-btn"
-                        onClick={() => { setEditingTaskId(null); setFreeNoteBlocks([]); setFreeNoteCurrentText(''); setFreeNoteModalOpen(true) }}
-                      >
-                        📝 Escribir nota libre
-                      </button>
-
-                      {freeNoteModalOpen && (
-                        <div className="admin-sheet-overlay">
-                          <div className="free-note-modal" onClick={e => e.stopPropagation()}>
-                            <div className="free-note-modal-header">
-                              <h4>{editingTaskId ? 'Editar nota' : 'Nota libre'} — {new Date(selectedDay + 'T00:00:00').toLocaleDateString('es-EC', { day: 'numeric', month: 'long' })}</h4>
-                              <button
-                                type="button"
-                                className="modal-close-btn"
-                                onClick={() => {
-                                  const hasUnsaved = freeNoteCurrentText.trim().length > 0
-                                  if (hasUnsaved && !confirm('¿Cerrar sin guardar? Perderás lo que escribiste.')) return
-                                  setFreeNoteModalOpen(false)
-                                  setEditingTaskId(null)
-                                }}
-                              >✕</button>
-                            </div>
-                            <div className="free-note-sheet">
-                              {freeNoteBlocks.map((b, i) => (
-                                <div key={i} className="note-sheet-block">
-                                  {b.type === 'text' && <p>{b.content}</p>}
-                                  {b.type === 'photo' && <img src={b.url || URL.createObjectURL(b.file)} alt="" className="note-sheet-photo" />}
-                                  {b.type === 'video' && (
-                                    <video src={b.url || URL.createObjectURL(b.file)} controls className="note-video" />
-                                  )}
-                                </div>
-                              ))}
-                              <textarea
-                                className="note-sheet-textarea"
-                                placeholder={freeNoteBlocks.length > 0 ? 'Sigue escribiendo...' : 'Escribe una nota libre para este día...'}
-                                rows={freeNoteBlocks.length > 0 ? 2 : 4}
-                                value={freeNoteCurrentText}
-                                onChange={e => setFreeNoteCurrentText(e.target.value)}
-                                autoFocus
-                              />
-                              <div className="note-sheet-toolbar">
-                                <label className="icon-btn" title="Insertar foto aquí">
-                                  📷
-                                  <input
-                                    type="file"
-                                    accept="image/*"
-                                    style={{ display: 'none' }}
-                                    onChange={e => { insertPhotoBlockToNote(e.target.files[0]); e.target.value = '' }}
-                                  />
-                                </label>
-                                <label className="icon-btn" title="Insertar video aquí">
-                                  🎥
-                                  <input
-                                    type="file"
-                                    accept="video/*"
-                                    style={{ display: 'none' }}
-                                    onChange={e => { insertVideoBlockToNote(e.target.files[0]); e.target.value = '' }}
-                                  />
-                                </label>
-                                {freeNoteBlocks.length > 0 && (
-                                  <button type="button" className="icon-btn-text" onClick={removeLastNoteBlock}>Deshacer</button>
-                                )}
-                                <button type="button" className="save-note-btn-inline" onClick={quickAddFreeNote} disabled={savingFreeNote}>
-                                  {savingFreeNote ? 'Guardando...' : 'Guardar'}
-                                </button>
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                      )}
-
-                      <button
-                        type="button"
-                        className="full-form-btn"
-                        onClick={() => { setTaskForm({ tag_id: '', date: selectedDay, note: '', repeat: 'none' }); setTaskFormOpen(true) }}
-                      >
-                        📋 Tarea con nota o repetición
-                      </button>
-
-                      <div className="day-task-list">
-                        {(tasksByDay[selectedDay] || []).length === 0 && (
-                          <p className="status-msg">No hay tareas este día.</p>
-                        )}
-                        {(tasksByDay[selectedDay] || []).map(t => {
-                          const tag = gardenTags.find(g => g.id === t.tag_id)
-                          const isPast = selectedDay < todayStr
-                          const hasMedia = (t.photo_urls && t.photo_urls.length > 0) || t.video_url
-                          const hasBlocks = t.content_blocks && t.content_blocks.length > 0
-                          return (
-                            <div key={t.id} className={`day-task-item ${(hasMedia || hasBlocks) ? 'has-media' : ''}`}>
-                              <div className="day-task-row">
-                                <span className="task-tag-dot" style={{ background: tag?.color || (t.tag_id ? '#a1665e' : '#B5A88F') }} />
-                                {!hasBlocks && <span className="task-tag-name">{tag?.name || (t.tag_id ? 'Etiqueta borrada' : '📝 Nota libre')}</span>}
-                                {!hasBlocks && t.note && <span className="task-note">— {t.note}</span>}
-                                {hasBlocks && <span className="task-tag-name">📝 Nota libre</span>}
-                                {hasBlocks && <button type="button" className="task-edit-btn" onClick={() => openEditNote(t)}>✏️</button>}
-                                {hasBlocks && <button type="button" className="task-edit-btn" onClick={() => shareCalendarNote(t)} disabled={sharingNotes} title="Compartir por WhatsApp">📲</button>}
-                                <button type="button" className="task-delete-btn" onClick={() => deleteTask(t.id)}>✕</button>
-                              </div>
-                              {hasBlocks && (
-                                <div className="note-blocks-view">
-                                  {t.content_blocks.map((b, i) => (
-                                    <div key={i}>
-                                      {b.type === 'text' && <p className="task-note">{b.content}</p>}
-                                      {b.type === 'photo' && <img src={b.url} alt="" className="note-block-photo" />}
-                                      {b.type === 'video' && <video src={b.url} controls className="note-video" />}
-                                    </div>
-                                  ))}
-                                </div>
-                              )}
-                              {!hasBlocks && t.photo_urls && t.photo_urls.length > 0 && (
-                                <div className="note-photos">
-                                  {t.photo_urls.map((url, i) => <img key={i} src={url} alt="" />)}
-                                </div>
-                              )}
-                              {!hasBlocks && t.video_url && <video src={t.video_url} controls className="note-video" />}
-                            </div>
-                          )
-                        })}
-                      </div>
-                      </div>
-                    </div>
-                  )}
-
-                  {taskFormOpen && (
-                    <div className="admin-sheet-overlay" onClick={() => setTaskFormOpen(false)}>
-                      <div className="task-form-modal" onClick={e => e.stopPropagation()}>
-                        <form className="admin-form" onSubmit={addTaskFull}>
-                          <h3>Nueva tarea</h3>
-                          <select value={taskForm.tag_id} onChange={e => setTaskForm({ ...taskForm, tag_id: e.target.value })}>
-                            <option value="">Selecciona etiqueta</option>
-                            {gardenTags.map(tag => <option key={tag.id} value={tag.id}>{tag.name}</option>)}
-                          </select>
-                          <input
-                            type="date"
-                            value={taskForm.date}
-                            onChange={e => setTaskForm({ ...taskForm, date: e.target.value })}
-                          />
-                          <input
-                            placeholder="Nota (opcional)"
-                            value={taskForm.note}
-                            onChange={e => setTaskForm({ ...taskForm, note: e.target.value })}
-                          />
-                          <select value={taskForm.repeat} onChange={e => setTaskForm({ ...taskForm, repeat: e.target.value })}>
-                            <option value="none">No se repite</option>
-                            <option value="weekly">Cada semana</option>
-                            <option value="biweekly">Cada 2 semanas</option>
-                            <option value="monthly">Cada mes</option>
-                          </select>
-                          <button type="submit">Guardar tarea</button>
-                          <button type="button" onClick={() => setTaskFormOpen(false)}>Cancelar</button>
-                        </form>
-                      </div>
-                    </div>
-                  )}
-                </>
-              )}
             </div>
           </div>
         </div>
