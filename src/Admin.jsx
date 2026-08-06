@@ -323,6 +323,36 @@ export default function Admin() {
     setApprovingIds(prev => prev.filter(id => id !== loteId))
   }
 
+  async function updateLoteProveedor(lote, value) {
+    const { error } = await supabase.from('compra_lotes').update({ proveedor: value }).eq('id', lote.id)
+    if (error) { alert('Error al guardar el cambio: ' + error.message); return }
+    // Actualiza también el proveedor de todas las líneas de esta compra, para mantenerlo consistente
+    await supabase.from('compras').update({ proveedor: value }).eq('lote_id', lote.id)
+    loadData()
+  }
+
+  async function updateCompraField(compra, field, rawValue) {
+    let updates = {}
+    if (field === 'plant_name') {
+      updates.plant_name = rawValue
+    } else if (field === 'quantity') {
+      const quantity = Number(rawValue) || 0
+      updates.quantity = quantity
+      updates.total = quantity * Number(compra.unit_cost)
+    } else if (field === 'unit_cost') {
+      const unit_cost = Number(rawValue) || 0
+      updates.unit_cost = unit_cost
+      updates.total = Number(compra.quantity) * unit_cost
+    } else if (field === 'sale_price') {
+      updates.sale_price = rawValue === '' ? null : Number(rawValue)
+    } else if (field === 'proveedor') {
+      updates.proveedor = rawValue
+    }
+    const { error } = await supabase.from('compras').update(updates).eq('id', compra.id)
+    if (error) { alert('Error al guardar el cambio: ' + error.message); return }
+    loadData()
+  }
+
   async function markCompraPagada(compra) {
     if (compra.status !== 'pedido' || approvingIds.includes(compra.id)) return
     setApprovingIds(prev => [...prev, compra.id])
@@ -1431,7 +1461,7 @@ export default function Admin() {
                           <div key={lote.id} className="admin-item lote-group">
                             <div className="admin-item-info">
                               <strong>🧺 Compra #{lote.numero}{lote.nota ? ` — ${lote.nota}` : ''}</strong>
-                              {lote.proveedor && <span>Procedencia: {lote.proveedor}</span>}
+                              <label>Procedencia: <input defaultValue={lote.proveedor || ''} onBlur={e => updateLoteProveedor(lote, e.target.value)} /></label>
                               <span>Fecha: {new Date(lote.created_at).toLocaleDateString()}</span>
                               <span>Total compra: ${totalLote.toFixed(2)}</span>
                               <div className="admin-item-actions">
@@ -1492,9 +1522,18 @@ export default function Admin() {
                                 <div key={c.id} className="admin-item" style={{ marginLeft: 12 }}>
                                   {c.image_url ? <img src={c.image_url} alt={c.plant_name} /> : <div className="no-img-sm">Sin foto</div>}
                                   <div className="admin-item-info">
-                                    <strong>{c.plant_name}</strong>
+                                    <input
+                                      defaultValue={c.plant_name}
+                                      onBlur={e => updateCompraField(c, 'plant_name', e.target.value)}
+                                      style={{ fontWeight: 'bold', fontSize: '1rem', width: '100%', boxSizing: 'border-box' }}
+                                    />
                                     <span className={`order-badge order-${c.status}`}>{c.status}</span>
-                                    <span>Cantidad: {c.quantity}</span>
+                                    <label>Procedencia: <input defaultValue={c.proveedor || ''} onBlur={e => updateCompraField(c, 'proveedor', e.target.value)} /></label>
+                                    <div className="admin-item-controls">
+                                      <label>Cant.: <input type="number" defaultValue={c.quantity} onBlur={e => updateCompraField(c, 'quantity', e.target.value)} /></label>
+                                      <label>Costo: $<input type="number" step="0.01" defaultValue={c.unit_cost} onBlur={e => updateCompraField(c, 'unit_cost', e.target.value)} /></label>
+                                      <label>Venta: $<input type="number" step="0.01" defaultValue={c.sale_price ?? ''} onBlur={e => updateCompraField(c, 'sale_price', e.target.value)} /></label>
+                                    </div>
                                     <span>Subtotal: ${Number(c.total).toFixed(2)}</span>
                                     <div className="admin-item-actions">
                                       {c.status === 'pedido' && (
@@ -1519,13 +1558,21 @@ export default function Admin() {
                         <div key={c.id} className="admin-item">
                           {c.image_url ? <img src={c.image_url} alt={c.plant_name} /> : <div className="no-img-sm">Sin foto</div>}
                           <div className="admin-item-info">
-                            <strong>{c.plant_name}</strong>
-                            <span>Procedencia: {c.proveedor || 'Sin especificar'}</span>
+                            <input
+                              defaultValue={c.plant_name}
+                              onBlur={e => updateCompraField(c, 'plant_name', e.target.value)}
+                              style={{ fontWeight: 'bold', fontSize: '1rem', width: '100%', boxSizing: 'border-box' }}
+                            />
+                            <label>Procedencia: <input defaultValue={c.proveedor || ''} onBlur={e => updateCompraField(c, 'proveedor', e.target.value)} /></label>
                             <span className={`order-badge order-${c.status}`}>{c.status}</span>
                             <span>Pedido: {new Date(c.created_at).toLocaleDateString()}</span>
                             {c.fecha_pago && <span>Pagado: {new Date(c.fecha_pago).toLocaleDateString()}</span>}
                             {c.fecha_recibido && <span>Recibido: {new Date(c.fecha_recibido).toLocaleDateString()}</span>}
-                            <span>Cantidad: {c.quantity}</span>
+                            <div className="admin-item-controls">
+                              <label>Cant.: <input type="number" defaultValue={c.quantity} onBlur={e => updateCompraField(c, 'quantity', e.target.value)} /></label>
+                              <label>Costo: $<input type="number" step="0.01" defaultValue={c.unit_cost} onBlur={e => updateCompraField(c, 'unit_cost', e.target.value)} /></label>
+                              <label>Venta: $<input type="number" step="0.01" defaultValue={c.sale_price ?? ''} onBlur={e => updateCompraField(c, 'sale_price', e.target.value)} /></label>
+                            </div>
                             <span>Total compra: ${Number(c.total).toFixed(2)}</span>
                             <div className="admin-item-actions">
                               {c.status === 'pedido' && (
