@@ -1,6 +1,13 @@
 import { createClient } from '@supabase/supabase-js'
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
-const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY
+// Proyecto 1: datos (tablas) + login del admin
+export const supabase = createClient(
+  import.meta.env.VITE_SUPABASE_URL,
+  import.meta.env.VITE_SUPABASE_ANON_KEY
+)
 
-export const supabase = createClient(supabaseUrl, supabaseKey)
+// Proyecto 2: solo almacenamiento de fotos y videos
+export const supabaseStorage = createClient(
+  import.meta.env.VITE_SUPABASE_STORAGE_URL,
+  import.meta.env.VITE_SUPABASE_STORAGE_ANON_KEY
+)
