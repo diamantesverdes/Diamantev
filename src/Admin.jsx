@@ -465,6 +465,22 @@ export default function Admin() {
     setApprovingIds(prev => prev.filter(id => id !== loteId))
   }
 
+  async function deleteLote(loteId) {
+    if (!confirm('¿Eliminar esta compra completa? Se borrarán todas las plantas registradas en ella. Esta acción no se puede deshacer.')) return
+    const lineas = compras.filter(c => c.lote_id === loteId)
+    for (const c of lineas) {
+      if (c.status === 'recibido' && c.plant_id) {
+        const { data: current } = await supabase.from('plants').select('stock').eq('id', c.plant_id).single()
+        if (current) {
+          await supabase.from('plants').update({ stock: Math.max(0, current.stock - c.quantity) }).eq('id', c.plant_id)
+        }
+      }
+    }
+    await supabase.from('compras').delete().eq('lote_id', loteId)
+    await supabase.from('compra_lotes').delete().eq('id', loteId)
+    loadData()
+  }
+
   async function updateLoteProveedor(lote, value) {
     const { error } = await supabase.from('compra_lotes').update({ proveedor: value }).eq('id', lote.id)
     if (error) { alert('Error al guardar el cambio: ' + error.message); return }
@@ -1667,6 +1683,9 @@ export default function Admin() {
                                 </button>
                                 <button onClick={() => setAddToLoteId(addToLoteId === lote.id ? null : lote.id)}>
                                   ➕ Agregar planta
+                                </button>
+                                <button onClick={() => deleteLote(lote.id)} className="danger">
+                                  🗑️ Eliminar compra
                                 </button>
                               </div>
                               {addToLoteId === lote.id && (
