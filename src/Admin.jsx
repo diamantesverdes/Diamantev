@@ -476,8 +476,16 @@ export default function Admin() {
         }
       }
     }
-    await supabase.from('compras').delete().eq('lote_id', loteId)
-    await supabase.from('compra_lotes').delete().eq('id', loteId)
+    const { error: comprasError } = await supabase.from('compras').delete().eq('lote_id', loteId)
+    if (comprasError) {
+      alert('Error al borrar las plantas de la compra: ' + comprasError.message)
+      return
+    }
+    const { error: loteError } = await supabase.from('compra_lotes').delete().eq('id', loteId)
+    if (loteError) {
+      alert('Error al borrar la compra: ' + loteError.message)
+      return
+    }
     loadData()
   }
 
