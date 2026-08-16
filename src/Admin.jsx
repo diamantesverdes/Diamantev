@@ -166,6 +166,34 @@ export default function Admin() {
           }
         }
       },
+      lote_note: async (payload) => {
+        const finalBlocks = []
+        for (const b of payload.blocks) {
+          if (b.type === 'text') finalBlocks.push(b)
+          else if (b.url) finalBlocks.push(b)
+          else {
+            const url = await uploadImage(b.file, 'category-notes')
+            if (url) finalBlocks.push({ type: b.type, url })
+          }
+        }
+        const { error } = await supabase.from('compra_lotes').update({ content_blocks: finalBlocks }).eq('id', payload.loteId)
+        if (error) throw error
+      },
+      plant_note: async (payload) => {
+        const finalBlocks = []
+        for (const b of payload.blocks) {
+          if (b.type === 'text') finalBlocks.push(b)
+          else if (b.url) finalBlocks.push(b)
+          else {
+            const url = await uploadImage(b.file, 'category-notes')
+            if (url) finalBlocks.push({ type: b.type, url })
+          }
+        }
+        const { error } = payload.editingNoteId
+          ? await supabase.from('plant_notes').update({ content_blocks: finalBlocks }).eq('id', payload.editingNoteId)
+          : await supabase.from('plant_notes').insert({ plant_id: payload.plantId, content_blocks: finalBlocks })
+        if (error) throw error
+      },
     })
     setPendingCount(await queueLength())
     setSyncing(false)
@@ -539,6 +567,18 @@ export default function Admin() {
     const blocks = [...loteNoteBlocks]
     if (loteNoteCurrentText.trim()) blocks.push({ type: 'text', content: loteNoteCurrentText })
     setSavingLoteNote(true)
+
+    if (!isOnline()) {
+      await addToQueue('lote_note', { loteId: currentNoteLoteId, blocks })
+      setLoteNoteBlocks([])
+      setLoteNoteCurrentText('')
+      setSavingLoteNote(false)
+      setLoteNoteModalOpen(false)
+      setPendingCount(await queueLength())
+      alert('Sin conexión: la nota se guardó en el celular y se subirá sola cuando vuelva la señal.')
+      return
+    }
+
     const finalBlocks = []
     for (const b of blocks) {
       if (b.type === 'text') {
@@ -751,6 +791,19 @@ export default function Admin() {
     if (plantNoteCurrentText.trim()) blocks.push({ type: 'text', content: plantNoteCurrentText })
     if (blocks.length === 0) return
     setSavingPlantNote(true)
+
+    if (!isOnline()) {
+      await addToQueue('plant_note', { plantId: currentNotePlantId, editingNoteId: editingPlantNoteId, blocks })
+      setPlantNoteBlocks([])
+      setPlantNoteCurrentText('')
+      setEditingPlantNoteId(null)
+      setSavingPlantNote(false)
+      setPlantNoteModalOpen(false)
+      setPendingCount(await queueLength())
+      alert('Sin conexión: la nota se guardó en el celular y se subirá sola cuando vuelva la señal.')
+      return
+    }
+
     const finalBlocks = []
     for (const b of blocks) {
       if (b.type === 'text') {
