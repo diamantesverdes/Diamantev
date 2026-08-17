@@ -24,11 +24,15 @@ export default function Admin() {
   const [galleryFilter, setGalleryFilter] = useState('all')
   const [gallerySearch, setGallerySearch] = useState('')
   const [categoriesSearch, setCategoriesSearch] = useState('')
-  const [plantsFilter, setPlantsFilter] = useState('all')
-  const [plantsSearch, setPlantsSearch] = useState('')
   const [selectedLabels, setSelectedLabels] = useState(new Set())
   const [photoModalPlantId, setPhotoModalPlantId] = useState(null)
-  const [openActionMenuId, setOpenActionMenuId] = useState(null)
+  const [photoModalIndex, setPhotoModalIndex] = useState(0)
+  const [photoModalMenuOpen, setPhotoModalMenuOpen] = useState(false)
+  const [shareModalOpen, setShareModalOpen] = useState(false)
+  const [shareIncludePrice, setShareIncludePrice] = useState(true)
+  const [shareIncludeDiscount, setShareIncludeDiscount] = useState(true)
+  const [shareIncludeDescription, setShareIncludeDescription] = useState(false)
+  const [shareOnlyStock, setShareOnlyStock] = useState(false)
 
   const [sharingNotes, setSharingNotes] = useState(false)
 
@@ -924,11 +928,18 @@ export default function Admin() {
   }
 
   async function shareSelectedPhotos(plantsList) {
-    const selected = plantsList.filter(p => selectedLabels.has(p.id))
+    let selected = plantsList.filter(p => selectedLabels.has(p.id))
+    if (shareOnlyStock) selected = selected.filter(p => p.stock > 0)
     if (selected.length === 0) return
     setSharingNotes(true)
     try {
-      const names = selected.map(p => `- ${p.name}`).join('\n')
+      const names = selected.map(p => {
+        let line = `- ${p.name}`
+        if (shareIncludePrice) line += ` — $${Number(p.price).toFixed(2)}`
+        if (shareIncludeDiscount && p.on_sale) line += ` 🏷️ En descuento`
+        if (shareIncludeDescription && p.description) line += `\n  ${p.description}`
+        return line
+      }).join('\n')
       const shareText = `🌿 Plantas Diamantev:\n${names}`
       const fileUrls = selected.filter(p => p.image_url).map(p => p.image_url)
       const files = (await Promise.all(fileUrls.map(urlToFile))).filter(Boolean)
@@ -940,6 +951,7 @@ export default function Admin() {
       } else {
         window.open(`https://wa.me/?text=${encodeURIComponent(shareText)}`, '_blank')
       }
+      setShareModalOpen(false)
     } catch (err) {
       if (err.name !== 'AbortError') alert('No se pudo compartir. Intenta de nuevo.')
     }
@@ -1097,14 +1109,12 @@ export default function Admin() {
   }
 
   const cards = [
-    { key: 'plantas', label: 'Plantas', icon: '🪴', count: plants.length },
     { key: 'categorias', label: 'Categorías, Galería y Etiquetas', icon: '🏷️', count: categories.length },
     { key: 'pedidos', label: 'Ventas y Decrementos', icon: '🧾', count: pedidosPendientes },
     { key: 'ingresos', label: 'Ingresos', icon: '📦', count: ingresosEnCurso },
   ]
 
   const sheetTitles = {
-    plantas: '🪴 Plantas',
     categorias: '🏷️ Categorías, Galería y Etiquetas',
     pedidos: '🧾 Ventas y Decrementos',
     ingresos: '📦 Ingresos',
@@ -1164,57 +1174,6 @@ export default function Admin() {
             </div>
 
             <div className="admin-sheet-body">
-              {view === 'plantas' && (
-                <>
-                  <h3>Plantas existentes ({plants.length})</h3>
-
-                  <select className="gallery-select" value={plantsFilter} onChange={e => setPlantsFilter(e.target.value)}>
-                    <option value="all">Todas las categorías</option>
-                    {categories.map(c => <option key={c.id} value={c.id}>{c.emoji} {c.name}</option>)}
-                  </select>
-
-                  <input
-                    className="order-search"
-                    placeholder="Buscar planta por nombre..."
-                    value={plantsSearch}
-                    onChange={e => setPlantsSearch(e.target.value)}
-                  />
-
-                  {loading ? <p>Cargando...</p> : (() => {
-                    const filteredPlants = plants
-                      .filter(p => plantsFilter === 'all' || p.category_id === plantsFilter)
-                      .filter(p => p.name.toLowerCase().includes(plantsSearch.trim().toLowerCase()))
-                    return (
-                    <div className="admin-list">
-                      {filteredPlants.length === 0 && <p className="status-msg">No se encontraron plantas.</p>}
-                      {filteredPlants.map(p => (
-                        <div key={p.id} className={`admin-item ${!p.active ? 'inactive' : ''}`}>
-                          {p.image_url ? <img src={p.image_url} alt={p.name} /> : <div className="no-img-sm">Sin foto</div>}
-                          <div className="admin-item-info">
-                            <strong>{p.name}</strong>
-                            <select
-                              value={p.category_id || ''}
-                              onChange={e => updatePlantCategory(p.id, e.target.value)}
-                              style={{ maxWidth: 220 }}
-                            >
-                              <option value="">Sin categoría</option>
-                              {categories.map(cat => (
-                                <option key={cat.id} value={cat.id}>{cat.emoji} {cat.name}</option>
-                              ))}
-                            </select>
-                            <div className="admin-item-controls">
-                              <label>$<input type="number" step="0.01" defaultValue={p.price} onBlur={e => updatePrice(p.id, Number(e.target.value))} /></label>
-                              <label>Stock: <input type="number" defaultValue={p.stock} onBlur={e => updateStock(p.id, Number(e.target.value))} /></label>
-                            </div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                    )
-                  })()}
-                </>
-              )}
-
               {view === 'categorias' && (
                 <>
                   <div className="admin-subtabs">
@@ -1294,24 +1253,20 @@ export default function Admin() {
                                   <button type="button" className="print-btn" onClick={printLabels}>
                                     🏷️ Etiquetas ({selectedLabels.size})
                                   </button>
-                                  <button type="button" className="print-btn" onClick={() => shareSelectedPhotos(galleryPlants)} disabled={sharingNotes}>
-                                    {sharingNotes ? 'Preparando...' : `📲 WhatsApp (${selectedLabels.size})`}
+                                  <button type="button" className="print-btn" onClick={() => setShareModalOpen(true)}>
+                                    📤 Compartir/Enviar ({selectedLabels.size})
                                   </button>
                                   <button type="button" className="print-btn" onClick={() => markSelectedShared(selectedLabels, true)}>
-                                    📤 Marcar para compartir ({selectedLabels.size})
+                                    ✅ Marcar disponibles para link ({selectedLabels.size})
                                   </button>
                                   <button type="button" className="print-btn" onClick={() => markSelectedShared(selectedLabels, false)}>
-                                    🚫 Quitar de compartidos ({selectedLabels.size})
+                                    🚫 Quitar del link ({selectedLabels.size})
                                   </button>
                                 </>
                               )}
                             </div>
                             <div className="gallery-grid">
-                              {galleryPlants.map(p => {
-                                const notesForPlant = plantNotes.filter(n => n.plant_id === p.id)
-                                const notesOpen = openPlantNotesListId === p.id
-                                const menuOpen = openActionMenuId === p.id
-                                return (
+                              {galleryPlants.map(p => (
                                 <div key={p.id} className="gallery-item" style={{ position: 'relative' }}>
                                   <label className="gallery-checkbox">
                                     <input
@@ -1320,54 +1275,76 @@ export default function Admin() {
                                       onChange={() => toggleLabelSelect(p.id)}
                                     />
                                   </label>
-                                  <button
-                                    type="button"
-                                    className="gallery-menu-btn"
-                                    style={{ position: 'absolute', top: 4, right: 4, zIndex: 2, background: 'rgba(255,255,255,0.85)', border: '1px solid #ccc', borderRadius: 6 }}
-                                    onClick={() => setOpenActionMenuId(menuOpen ? null : p.id)}
-                                  >⋮</button>
-                                  {p.shared_visible && <span title="Compartida" style={{ position: 'absolute', top: 4, left: 24, zIndex: 2 }}>📤</span>}
-                                  <div onClick={() => setPhotoModalPlantId(p.id)} style={{ cursor: 'pointer' }}>
+                                  {p.shared_visible && <span title="Compartida" style={{ position: 'absolute', top: 4, right: 4, zIndex: 2 }}>📤</span>}
+                                  <div onClick={() => { setPhotoModalPlantId(p.id); setPhotoModalIndex(0); setPhotoModalMenuOpen(false) }} style={{ cursor: 'pointer' }}>
                                     {p.image_url ? <img src={p.image_url} alt={p.name} /> : <div className="no-img-sm">Sin foto</div>}
                                   </div>
                                   <span>{p.name}{!p.active ? ' (oculta)' : ''}</span>
-
-                                  {menuOpen && (
-                                    <div className="gallery-action-menu" style={{ position: 'absolute', top: 30, right: 4, zIndex: 3, background: '#fff', border: '1px solid #ccc', borderRadius: 8, boxShadow: '0 2px 8px rgba(0,0,0,0.15)', display: 'flex', flexDirection: 'column', minWidth: 170 }}>
-                                      <button type="button" onClick={() => { toggleActive(p.id, p.active); setOpenActionMenuId(null) }}>{p.active ? 'Ocultar' : 'Mostrar'}</button>
-                                      <button type="button" onClick={() => { toggleIsNew(p.id, p.is_new) }}>{p.is_new ? '🌱 Nueva ✓' : 'Marcar como nueva'}</button>
-                                      <button type="button" onClick={() => { toggleOnSale(p.id, p.on_sale) }}>{p.on_sale ? '🏷️ En descuento ✓' : 'Marcar en descuento'}</button>
-                                      <button type="button" onClick={() => { setOpenPlantNotesListId(notesOpen ? null : p.id); setOpenActionMenuId(null) }}>📝 Notas ({notesForPlant.length})</button>
-                                    </div>
-                                  )}
-
-                                  {notesOpen && (
-                                    <div className="plant-notes-panel">
-                                      <button type="button" className="full-form-btn" onClick={() => openNewPlantNote(p.id)}>📝 Nueva nota</button>
-                                      {notesForPlant.length === 0 && <p className="status-msg">Todavía no hay notas para esta planta.</p>}
-                                      {notesForPlant.map(n => (
-                                        <div key={n.id} className="note-blocks-view plant-note-entry">
-                                          <div className="day-task-row">
-                                            <span className="task-note">{new Date(n.created_at).toLocaleDateString()}</span>
-                                            <button type="button" className="task-edit-btn" onClick={() => openEditPlantNote(n)}>✏️</button>
-                                            <button type="button" className="task-edit-btn" onClick={() => sharePlantNote(n)} disabled={sharingNotes} title="Compartir por WhatsApp">📲</button>
-                                            <button type="button" className="task-delete-btn" onClick={() => deletePlantNote(n.id)}>✕</button>
-                                          </div>
-                                          {(n.content_blocks || []).map((b, i) => (
-                                            <div key={i}>
-                                              {b.type === 'text' && <p className="task-note">{b.content}</p>}
-                                              {b.type === 'photo' && <img src={b.url} alt="" className="note-block-photo" />}
-                                              {b.type === 'video' && <video src={b.url} controls className="note-video" />}
-                                            </div>
-                                          ))}
-                                        </div>
-                                      ))}
-                                    </div>
-                                  )}
+                                  <select
+                                    value={p.category_id || ''}
+                                    onChange={e => updatePlantCategory(p.id, e.target.value)}
+                                    style={{ maxWidth: '100%' }}
+                                  >
+                                    <option value="">Sin categoría</option>
+                                    {categories.map(cat => (
+                                      <option key={cat.id} value={cat.id}>{cat.emoji} {cat.name}</option>
+                                    ))}
+                                  </select>
+                                  <div className="admin-item-controls">
+                                    <label>$<input type="number" step="0.01" defaultValue={p.price} onBlur={e => updatePrice(p.id, Number(e.target.value))} /></label>
+                                    <label>Stock: <input type="number" defaultValue={p.stock} onBlur={e => updateStock(p.id, Number(e.target.value))} /></label>
+                                  </div>
                                 </div>
-                                )
-                              })}
+                              ))}
                             </div>
+
+                            {shareModalOpen && (() => {
+                              let toSend = galleryPlants.filter(p => selectedLabels.has(p.id))
+                              if (shareOnlyStock) toSend = toSend.filter(p => p.stock > 0)
+                              return (
+                                <div className="admin-sheet-overlay" onClick={() => setShareModalOpen(false)}>
+                                  <div className="free-note-modal" onClick={e => e.stopPropagation()}>
+                                    <div className="free-note-modal-header">
+                                      <h4>Vista previa para enviar</h4>
+                                      <button type="button" className="modal-close-btn" onClick={() => setShareModalOpen(false)}>✕</button>
+                                    </div>
+                                    <div className="free-note-sheet">
+                                      <label style={{ display: 'block', marginBottom: 6 }}>
+                                        <input type="checkbox" checked={shareOnlyStock} onChange={e => setShareOnlyStock(e.target.checked)} /> Solo las que tienen stock
+                                      </label>
+                                      <label style={{ display: 'block', marginBottom: 6 }}>
+                                        <input type="checkbox" checked={shareIncludePrice} onChange={e => setShareIncludePrice(e.target.checked)} /> Incluir precio
+                                      </label>
+                                      <label style={{ display: 'block', marginBottom: 6 }}>
+                                        <input type="checkbox" checked={shareIncludeDiscount} onChange={e => setShareIncludeDiscount(e.target.checked)} /> Incluir descuento
+                                      </label>
+                                      <label style={{ display: 'block', marginBottom: 10 }}>
+                                        <input type="checkbox" checked={shareIncludeDescription} onChange={e => setShareIncludeDescription(e.target.checked)} /> Incluir descripción
+                                      </label>
+
+                                      <div className="admin-list">
+                                        {toSend.length === 0 && <p className="status-msg">Ninguna planta seleccionada cumple el filtro.</p>}
+                                        {toSend.map(p => (
+                                          <div key={p.id} className="admin-item">
+                                            {p.image_url ? <img src={p.image_url} alt={p.name} /> : <div className="no-img-sm">Sin foto</div>}
+                                            <div className="admin-item-info">
+                                              <strong>{p.name}</strong>
+                                              {shareIncludePrice && <span>${Number(p.price).toFixed(2)}</span>}
+                                              {shareIncludeDiscount && p.on_sale && <span>🏷️ En descuento</span>}
+                                              {shareIncludeDescription && p.description && <span>{p.description}</span>}
+                                            </div>
+                                          </div>
+                                        ))}
+                                      </div>
+
+                                      <button type="button" className="save-note-btn-inline" onClick={() => shareSelectedPhotos(galleryPlants)} disabled={sharingNotes || toSend.length === 0} style={{ marginTop: 10 }}>
+                                        {sharingNotes ? 'Preparando...' : `📲 Enviar por WhatsApp (${toSend.length})`}
+                                      </button>
+                                    </div>
+                                  </div>
+                                </div>
+                              )
+                            })()}
                           </>
                         )
                       })()}
@@ -1379,45 +1356,56 @@ export default function Admin() {
               {photoModalPlantId && (() => {
                 const p = plants.find(pl => pl.id === photoModalPlantId)
                 if (!p) return null
+                const notesForPlant = plantNotes.filter(n => n.plant_id === p.id)
+                const notesOpen = openPlantNotesListId === p.id
+                const slides = [
+                  { type: 'image', url: p.image_url, label: 'Foto 1', onUpload: f => updatePlantImage(p.id, f) },
+                  { type: 'image', url: p.extra_image_1, label: 'Foto 2', onUpload: f => updatePlantExtraImage(p.id, 'extra_image_1', f) },
+                  { type: 'image', url: p.extra_image_2, label: 'Foto 3', onUpload: f => updatePlantExtraImage(p.id, 'extra_image_2', f) },
+                  { type: 'video', url: p.video_url, label: 'Video', onUpload: f => updatePlantVideo(p.id, f) },
+                ]
+                const current = slides[photoModalIndex] || slides[0]
                 return (
-                  <div className="admin-sheet-overlay" onClick={() => setPhotoModalPlantId(null)}>
+                  <div className="admin-sheet-overlay" onClick={() => { setPhotoModalPlantId(null); setPhotoModalMenuOpen(false) }}>
                     <div className="free-note-modal" onClick={e => e.stopPropagation()}>
                       <div className="free-note-modal-header">
                         <h4>{p.name}</h4>
-                        <button type="button" className="modal-close-btn" onClick={() => setPhotoModalPlantId(null)}>✕</button>
+                        <div style={{ display: 'flex', gap: 8, alignItems: 'center', position: 'relative' }}>
+                          <button type="button" onClick={() => setPhotoModalMenuOpen(!photoModalMenuOpen)}>⋮</button>
+                          <button type="button" className="modal-close-btn" onClick={() => { setPhotoModalPlantId(null); setPhotoModalMenuOpen(false) }}>✕</button>
+
+                          {photoModalMenuOpen && (
+                            <div style={{ position: 'absolute', top: 32, right: 0, zIndex: 5, background: '#fff', border: '1px solid #ccc', borderRadius: 8, boxShadow: '0 2px 8px rgba(0,0,0,0.15)', display: 'flex', flexDirection: 'column', minWidth: 190 }}>
+                              <button type="button" onClick={() => { toggleActive(p.id, p.active); setPhotoModalMenuOpen(false) }}>{p.active ? 'Ocultar' : 'Mostrar'}</button>
+                              <button type="button" onClick={() => { toggleIsNew(p.id, p.is_new); setPhotoModalMenuOpen(false) }}>{p.is_new ? '🌱 Nueva ✓' : 'Marcar como nueva'}</button>
+                              <button type="button" onClick={() => { toggleOnSale(p.id, p.on_sale); setPhotoModalMenuOpen(false) }}>{p.on_sale ? '🏷️ En descuento ✓' : 'Marcar en descuento'}</button>
+                              <button type="button" onClick={() => { setOpenPlantNotesListId(notesOpen ? null : p.id); setPhotoModalMenuOpen(false) }}>📝 Notas ({notesForPlant.length})</button>
+                            </div>
+                          )}
+                        </div>
                       </div>
                       <div className="free-note-sheet">
-                        <div className="gallery-grid" style={{ gridTemplateColumns: 'repeat(3, 1fr)' }}>
-                          {[
-                            { url: p.image_url, field: 'image_url', label: 'Foto 1', onUpload: f => updatePlantImage(p.id, f) },
-                            { url: p.extra_image_1, field: 'extra_image_1', label: 'Foto 2', onUpload: f => updatePlantExtraImage(p.id, 'extra_image_1', f) },
-                            { url: p.extra_image_2, field: 'extra_image_2', label: 'Foto 3', onUpload: f => updatePlantExtraImage(p.id, 'extra_image_2', f) },
-                          ].map(slot => (
-                            <div key={slot.field} style={{ textAlign: 'center' }}>
-                              {slot.url ? <img src={slot.url} alt={slot.label} style={{ width: '100%', borderRadius: 8 }} /> : <div className="no-img-sm">Sin foto</div>}
-                              <label className="file-label" style={{ display: 'block', marginTop: 4, background: 'transparent', color: 'inherit', border: '1px solid #ccc' }}>
-                                {slot.url ? 'Cambiar' : `Subir ${slot.label}`}
-                                <input
-                                  type="file"
-                                  accept="image/*"
-                                  style={{ display: 'none' }}
-                                  onChange={e => { slot.onUpload(e.target.files[0]); e.target.value = '' }}
-                                />
-                              </label>
-                            </div>
-                          ))}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <button type="button" onClick={() => setPhotoModalIndex((photoModalIndex + slides.length - 1) % slides.length)}>‹</button>
+                          <div style={{ flex: 1, textAlign: 'center' }}>
+                            {current.type === 'image' ? (
+                              current.url ? <img src={current.url} alt={current.label} style={{ width: '100%', maxHeight: '55vh', objectFit: 'contain', borderRadius: 8 }} /> : <div className="no-img-sm" style={{ height: 200 }}>Sin foto</div>
+                            ) : (
+                              current.url ? <video src={current.url} controls className="note-video" style={{ width: '100%', maxHeight: '55vh' }} /> : <div className="no-img-sm" style={{ height: 200 }}>Sin video</div>
+                            )}
+                            <div style={{ marginTop: 4, fontSize: 13, color: '#888' }}>{current.label} ({photoModalIndex + 1}/{slides.length})</div>
+                            <label className="file-label" style={{ display: 'inline-block', marginTop: 4, background: 'transparent', color: 'inherit', border: '1px solid #ccc' }}>
+                              {current.url ? `Cambiar ${current.label}` : `Subir ${current.label}`}
+                              <input
+                                type="file"
+                                accept={current.type === 'video' ? 'video/*' : 'image/*'}
+                                style={{ display: 'none' }}
+                                onChange={e => { current.onUpload(e.target.files[0]); e.target.value = '' }}
+                              />
+                            </label>
+                          </div>
+                          <button type="button" onClick={() => setPhotoModalIndex((photoModalIndex + 1) % slides.length)}>›</button>
                         </div>
-
-                        {p.video_url && <video src={p.video_url} controls className="note-video" style={{ width: '100%', marginTop: 12 }} />}
-                        <label className="file-label" style={{ display: 'block', marginTop: 8, background: 'transparent', color: 'inherit', border: '1px solid #ccc' }}>
-                          {p.video_url ? '🎥 Cambiar video' : '🎥 Subir video'}
-                          <input
-                            type="file"
-                            accept="video/*"
-                            style={{ display: 'none' }}
-                            onChange={e => { updatePlantVideo(p.id, e.target.files[0]); e.target.value = '' }}
-                          />
-                        </label>
 
                         <textarea
                           className="plant-description-input"
@@ -1427,6 +1415,30 @@ export default function Admin() {
                           style={{ marginTop: 12, width: '100%' }}
                           onBlur={e => updatePlantDescription(p.id, e.target.value)}
                         />
+
+                        {notesOpen && (
+                          <div className="plant-notes-panel">
+                            <button type="button" className="full-form-btn" onClick={() => openNewPlantNote(p.id)}>📝 Nueva nota</button>
+                            {notesForPlant.length === 0 && <p className="status-msg">Todavía no hay notas para esta planta.</p>}
+                            {notesForPlant.map(n => (
+                              <div key={n.id} className="note-blocks-view plant-note-entry">
+                                <div className="day-task-row">
+                                  <span className="task-note">{new Date(n.created_at).toLocaleDateString()}</span>
+                                  <button type="button" className="task-edit-btn" onClick={() => openEditPlantNote(n)}>✏️</button>
+                                  <button type="button" className="task-edit-btn" onClick={() => sharePlantNote(n)} disabled={sharingNotes} title="Compartir por WhatsApp">📲</button>
+                                  <button type="button" className="task-delete-btn" onClick={() => deletePlantNote(n.id)}>✕</button>
+                                </div>
+                                {(n.content_blocks || []).map((b, i) => (
+                                  <div key={i}>
+                                    {b.type === 'text' && <p className="task-note">{b.content}</p>}
+                                    {b.type === 'photo' && <img src={b.url} alt="" className="note-block-photo" />}
+                                    {b.type === 'video' && <video src={b.url} controls className="note-video" />}
+                                  </div>
+                                ))}
+                              </div>
+                            ))}
+                          </div>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -1925,19 +1937,4 @@ export default function Admin() {
         </div>
       )}
 
-      {/* ---------- HOJA IMPRIMIBLE DE ETIQUETAS (solo visible al imprimir) ---------- */}
-      <div className="print-labels-sheet">
-        <div className="label-grid">
-          {plants.filter(p => selectedLabels.has(p.id)).map(p => (
-            <div key={p.id} className="label-card">
-              <span className="label-name">{p.name}</span>
-              {p.image_url
-                ? <img src={p.image_url} alt={p.name} className="label-photo" />
-                : <div className="label-photo label-no-img">Sin foto</div>}
-            </div>
-          ))}
-        </div>
-      </div>
-    </div>
-  )
-}
+      {/* ---------- HOJA
