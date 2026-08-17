@@ -705,6 +705,17 @@ export default function Admin() {
     loadData()
   }
 
+  async function toggleShared(id, current) {
+    await supabase.from('plants').update({ shared_visible: !current }).eq('id', id)
+    loadData()
+  }
+
+  async function copySharedLink() {
+    const link = `${window.location.origin}/?shared=1`
+    await navigator.clipboard.writeText(link)
+    alert('Link copiado. Este link solo muestra las plantas marcadas como "Disponible para compartir". Pégalo en WhatsApp para enviarlo.')
+  }
+
   async function toggleIsNew(id, current) {
     await supabase.from('plants').update({ is_new: !current }).eq('id', id)
     loadData()
@@ -1153,6 +1164,10 @@ export default function Admin() {
                 <>
                   <h3>Plantas existentes ({plants.length})</h3>
 
+                  <button type="button" onClick={copySharedLink} style={{ marginBottom: 10 }}>
+                    🔗 Copiar link de catálogo compartido
+                  </button>
+
                   <select className="gallery-select" value={plantsFilter} onChange={e => setPlantsFilter(e.target.value)}>
                     <option value="all">Todas las categorías</option>
                     {categories.map(c => <option key={c.id} value={c.id}>{c.emoji} {c.name}</option>)}
@@ -1198,6 +1213,7 @@ export default function Admin() {
                               <button onClick={() => toggleActive(p.id, p.active)}>{p.active ? 'Ocultar' : 'Mostrar'}</button>
                               <button onClick={() => toggleIsNew(p.id, p.is_new)}>{p.is_new ? '🌱 Nueva ✓' : 'Marcar como nueva'}</button>
                               <button onClick={() => toggleOnSale(p.id, p.on_sale)}>{p.on_sale ? '🏷️ En descuento ✓' : 'Marcar en descuento'}</button>
+                              <button onClick={() => toggleShared(p.id, p.shared_visible)}>{p.shared_visible ? '📤 Compartida ✓' : '📤 Compartir'}</button>
                               <button onClick={() => deletePlant(p.id)} className="danger">Borrar</button>
                               <button onClick={() => setOpenPlantNotesListId(notesOpen ? null : p.id)}>📝 Notas ({notesForPlant.length})</button>
                             </div>
@@ -1385,16 +1401,6 @@ export default function Admin() {
                                   onChange={e => { uploadCategoryImage(c.id, e.target.files[0]); e.target.value = '' }}
                                 />
                               </label>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  const link = `${window.location.origin}/?cat=${c.id}`
-                                  navigator.clipboard.writeText(link)
-                                  alert('Link copiado: solo muestra "' + c.name + '". Pégalo en WhatsApp para compartirlo.')
-                                }}
-                              >
-                                🔗 Copiar link de esta categoría
-                              </button>
                             </div>
                           </div>
                         ))}
