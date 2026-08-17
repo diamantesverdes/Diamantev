@@ -1385,6 +1385,16 @@ export default function Admin() {
                                   onChange={e => { uploadCategoryImage(c.id, e.target.files[0]); e.target.value = '' }}
                                 />
                               </label>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const link = `${window.location.origin}/?cat=${c.id}`
+                                  navigator.clipboard.writeText(link)
+                                  alert('Link copiado: solo muestra "' + c.name + '". Pégalo en WhatsApp para compartirlo.')
+                                }}
+                              >
+                                🔗 Copiar link de esta categoría
+                              </button>
                             </div>
                           </div>
                         ))}
