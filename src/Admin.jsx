@@ -27,6 +27,8 @@ export default function Admin() {
   const [plantsFilter, setPlantsFilter] = useState('all')
   const [plantsSearch, setPlantsSearch] = useState('')
   const [selectedLabels, setSelectedLabels] = useState(new Set())
+  const [photoModalPlantId, setPhotoModalPlantId] = useState(null)
+  const [openActionMenuId, setOpenActionMenuId] = useState(null)
 
   const [sharingNotes, setSharingNotes] = useState(false)
 
@@ -705,15 +707,17 @@ export default function Admin() {
     loadData()
   }
 
-  async function toggleShared(id, current) {
-    await supabase.from('plants').update({ shared_visible: !current }).eq('id', id)
-    loadData()
-  }
-
   async function copySharedLink() {
     const link = `${window.location.origin}/?shared=1`
     await navigator.clipboard.writeText(link)
-    alert('Link copiado. Este link solo muestra las plantas marcadas como "Disponible para compartir". Pégalo en WhatsApp para enviarlo.')
+    alert('Link copiado. Este link solo muestra las plantas marcadas para compartir. Pégalo en WhatsApp para enviarlo.')
+  }
+
+  async function markSelectedShared(idsSet, value) {
+    const ids = Array.from(idsSet)
+    if (ids.length === 0) return
+    await supabase.from('plants').update({ shared_visible: value }).in('id', ids)
+    loadData()
   }
 
   async function toggleIsNew(id, current) {
@@ -1164,10 +1168,6 @@ export default function Admin() {
                 <>
                   <h3>Plantas existentes ({plants.length})</h3>
 
-                  <button type="button" onClick={copySharedLink} style={{ marginBottom: 10 }}>
-                    🔗 Copiar link de catálogo compartido
-                  </button>
-
                   <select className="gallery-select" value={plantsFilter} onChange={e => setPlantsFilter(e.target.value)}>
                     <option value="all">Todas las categorías</option>
                     {categories.map(c => <option key={c.id} value={c.id}>{c.emoji} {c.name}</option>)}
@@ -1187,10 +1187,7 @@ export default function Admin() {
                     return (
                     <div className="admin-list">
                       {filteredPlants.length === 0 && <p className="status-msg">No se encontraron plantas.</p>}
-                      {filteredPlants.map(p => {
-                        const notesForPlant = plantNotes.filter(n => n.plant_id === p.id)
-                        const notesOpen = openPlantNotesListId === p.id
-                        return (
+                      {filteredPlants.map(p => (
                         <div key={p.id} className={`admin-item ${!p.active ? 'inactive' : ''}`}>
                           {p.image_url ? <img src={p.image_url} alt={p.name} /> : <div className="no-img-sm">Sin foto</div>}
                           <div className="admin-item-info">
@@ -1209,156 +1206,12 @@ export default function Admin() {
                               <label>$<input type="number" step="0.01" defaultValue={p.price} onBlur={e => updatePrice(p.id, Number(e.target.value))} /></label>
                               <label>Stock: <input type="number" defaultValue={p.stock} onBlur={e => updateStock(p.id, Number(e.target.value))} /></label>
                             </div>
-                            <div className="admin-item-actions">
-                              <button onClick={() => toggleActive(p.id, p.active)}>{p.active ? 'Ocultar' : 'Mostrar'}</button>
-                              <button onClick={() => toggleIsNew(p.id, p.is_new)}>{p.is_new ? '🌱 Nueva ✓' : 'Marcar como nueva'}</button>
-                              <button onClick={() => toggleOnSale(p.id, p.on_sale)}>{p.on_sale ? '🏷️ En descuento ✓' : 'Marcar en descuento'}</button>
-                              <button onClick={() => toggleShared(p.id, p.shared_visible)}>{p.shared_visible ? '📤 Compartida ✓' : '📤 Compartir'}</button>
-                              <button onClick={() => deletePlant(p.id)} className="danger">Borrar</button>
-                              <button onClick={() => setOpenPlantNotesListId(notesOpen ? null : p.id)}>📝 Notas ({notesForPlant.length})</button>
-                            </div>
-
-                            <div className="admin-item-actions">
-                              <label className="file-label" title="Subir foto 1" style={{ background: 'transparent', color: 'inherit', border: '1px solid #ccc' }}>
-                                📷 Foto 1 {p.image_url ? '✓' : ''}
-                                <input
-                                  type="file"
-                                  accept="image/*"
-                                  style={{ display: 'none' }}
-                                  onChange={e => { updatePlantImage(p.id, e.target.files[0]); e.target.value = '' }}
-                                />
-                              </label>
-                              <label className="file-label" title="Subir foto 2" style={{ background: 'transparent', color: 'inherit', border: '1px solid #ccc' }}>
-                                📷 Foto 2 {p.extra_image_1 ? '✓' : ''}
-                                <input
-                                  type="file"
-                                  accept="image/*"
-                                  style={{ display: 'none' }}
-                                  onChange={e => { updatePlantExtraImage(p.id, 'extra_image_1', e.target.files[0]); e.target.value = '' }}
-                                />
-                              </label>
-                              <label className="file-label" title="Subir foto 3" style={{ background: 'transparent', color: 'inherit', border: '1px solid #ccc' }}>
-                                📷 Foto 3 {p.extra_image_2 ? '✓' : ''}
-                                <input
-                                  type="file"
-                                  accept="image/*"
-                                  style={{ display: 'none' }}
-                                  onChange={e => { updatePlantExtraImage(p.id, 'extra_image_2', e.target.files[0]); e.target.value = '' }}
-                                />
-                              </label>
-                              <label className="file-label" title="Subir video" style={{ background: 'transparent', color: 'inherit', border: '1px solid #ccc' }}>
-                                🎥 Video {p.video_url ? '✓' : ''}
-                                <input
-                                  type="file"
-                                  accept="video/*"
-                                  style={{ display: 'none' }}
-                                  onChange={e => { updatePlantVideo(p.id, e.target.files[0]); e.target.value = '' }}
-                                />
-                              </label>
-                            </div>
-                            <textarea
-                              className="plant-description-input"
-                              placeholder="Descripción"
-                              defaultValue={p.description || ''}
-                              rows={2}
-                              onBlur={e => updatePlantDescription(p.id, e.target.value)}
-                            />
-
-                            {notesOpen && (
-                              <div className="plant-notes-panel">
-                                <button type="button" className="full-form-btn" onClick={() => openNewPlantNote(p.id)}>📝 Nueva nota</button>
-                                {notesForPlant.length === 0 && <p className="status-msg">Todavía no hay notas para esta planta.</p>}
-                                {notesForPlant.map(n => (
-                                  <div key={n.id} className="note-blocks-view plant-note-entry">
-                                    <div className="day-task-row">
-                                      <span className="task-note">{new Date(n.created_at).toLocaleDateString()}</span>
-                                      <button type="button" className="task-edit-btn" onClick={() => openEditPlantNote(n)}>✏️</button>
-                                      <button type="button" className="task-edit-btn" onClick={() => sharePlantNote(n)} disabled={sharingNotes} title="Compartir por WhatsApp">📲</button>
-                                      <button type="button" className="task-delete-btn" onClick={() => deletePlantNote(n.id)}>✕</button>
-                                    </div>
-                                    {(n.content_blocks || []).map((b, i) => (
-                                      <div key={i}>
-                                        {b.type === 'text' && <p className="task-note">{b.content}</p>}
-                                        {b.type === 'photo' && <img src={b.url} alt="" className="note-block-photo" />}
-                                        {b.type === 'video' && <video src={b.url} controls className="note-video" />}
-                                      </div>
-                                    ))}
-                                  </div>
-                                ))}
-                              </div>
-                            )}
                           </div>
                         </div>
-                        )
-                      })}
+                      ))}
                     </div>
                     )
                   })()}
-
-                  {plantNoteModalOpen && (
-                    <div className="admin-sheet-overlay">
-                      <div className="free-note-modal" onClick={e => e.stopPropagation()}>
-                        <div className="free-note-modal-header">
-                          <h4>{editingPlantNoteId ? 'Editar nota' : 'Nota'} — {plants.find(p => p.id === currentNotePlantId)?.name || ''}</h4>
-                          <button
-                            type="button"
-                            className="modal-close-btn"
-                            onClick={() => {
-                              const hasUnsaved = plantNoteCurrentText.trim().length > 0
-                              if (hasUnsaved && !confirm('¿Cerrar sin guardar? Perderás lo que escribiste.')) return
-                              setPlantNoteModalOpen(false)
-                              setEditingPlantNoteId(null)
-                            }}
-                          >✕</button>
-                        </div>
-                        <div className="free-note-sheet">
-                          {plantNoteBlocks.map((b, i) => (
-                            <div key={i} className="note-sheet-block">
-                              {b.type === 'text' && <p>{b.content}</p>}
-                              {b.type === 'photo' && <img src={b.url || URL.createObjectURL(b.file)} alt="" className="note-sheet-photo" />}
-                              {b.type === 'video' && (
-                                <video src={b.url || URL.createObjectURL(b.file)} controls className="note-video" />
-                              )}
-                            </div>
-                          ))}
-                          <textarea
-                            className="note-sheet-textarea"
-                            placeholder={plantNoteBlocks.length > 0 ? 'Sigue escribiendo...' : 'Escribe una nota para esta planta...'}
-                            rows={plantNoteBlocks.length > 0 ? 2 : 4}
-                            value={plantNoteCurrentText}
-                            onChange={e => setPlantNoteCurrentText(e.target.value)}
-                            autoFocus
-                          />
-                          <div className="note-sheet-toolbar">
-                            <label className="icon-btn" title="Insertar foto aquí">
-                              📷
-                              <input
-                                type="file"
-                                accept="image/*"
-                                style={{ display: 'none' }}
-                                onChange={e => { insertPhotoBlockToPlantNote(e.target.files[0]); e.target.value = '' }}
-                              />
-                            </label>
-                            <label className="icon-btn" title="Insertar video aquí">
-                              🎥
-                              <input
-                                type="file"
-                                accept="video/*"
-                                style={{ display: 'none' }}
-                                onChange={e => { insertVideoBlockToPlantNote(e.target.files[0]); e.target.value = '' }}
-                              />
-                            </label>
-                            {plantNoteBlocks.length > 0 && (
-                              <button type="button" className="icon-btn-text" onClick={removeLastPlantNoteBlock}>Deshacer</button>
-                            )}
-                            <button type="button" className="save-note-btn-inline" onClick={savePlantNote} disabled={savingPlantNote}>
-                              {savingPlantNote ? 'Guardando...' : 'Guardar'}
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  )}
                 </>
               )}
 
@@ -1410,6 +1263,10 @@ export default function Admin() {
 
                   {catSubTab === 'gallery' && (
                     <>
+                      <button type="button" onClick={copySharedLink} style={{ marginBottom: 10 }}>
+                        🔗 Copiar link de plantas compartidas
+                      </button>
+
                       <select className="gallery-select" value={galleryFilter} onChange={e => setGalleryFilter(e.target.value)}>
                         <option value="all">Todas las categorías</option>
                         {categories.map(c => (
@@ -1435,17 +1292,27 @@ export default function Admin() {
                               {selectedLabels.size > 0 && (
                                 <>
                                   <button type="button" className="print-btn" onClick={printLabels}>
-                                    🏷️ Imprimir etiquetas ({selectedLabels.size})
+                                    🏷️ Etiquetas ({selectedLabels.size})
                                   </button>
                                   <button type="button" className="print-btn" onClick={() => shareSelectedPhotos(galleryPlants)} disabled={sharingNotes}>
-                                    {sharingNotes ? 'Preparando...' : `📲 Enviar por WhatsApp (${selectedLabels.size})`}
+                                    {sharingNotes ? 'Preparando...' : `📲 WhatsApp (${selectedLabels.size})`}
+                                  </button>
+                                  <button type="button" className="print-btn" onClick={() => markSelectedShared(selectedLabels, true)}>
+                                    📤 Marcar para compartir ({selectedLabels.size})
+                                  </button>
+                                  <button type="button" className="print-btn" onClick={() => markSelectedShared(selectedLabels, false)}>
+                                    🚫 Quitar de compartidos ({selectedLabels.size})
                                   </button>
                                 </>
                               )}
                             </div>
                             <div className="gallery-grid">
-                              {galleryPlants.map(p => (
-                                <div key={p.id} className="gallery-item">
+                              {galleryPlants.map(p => {
+                                const notesForPlant = plantNotes.filter(n => n.plant_id === p.id)
+                                const notesOpen = openPlantNotesListId === p.id
+                                const menuOpen = openActionMenuId === p.id
+                                return (
+                                <div key={p.id} className="gallery-item" style={{ position: 'relative' }}>
                                   <label className="gallery-checkbox">
                                     <input
                                       type="checkbox"
@@ -1453,10 +1320,53 @@ export default function Admin() {
                                       onChange={() => toggleLabelSelect(p.id)}
                                     />
                                   </label>
-                                  {p.image_url ? <img src={p.image_url} alt={p.name} /> : <div className="no-img-sm">Sin foto</div>}
-                                  <span>{p.name}</span>
+                                  <button
+                                    type="button"
+                                    className="gallery-menu-btn"
+                                    style={{ position: 'absolute', top: 4, right: 4, zIndex: 2, background: 'rgba(255,255,255,0.85)', border: '1px solid #ccc', borderRadius: 6 }}
+                                    onClick={() => setOpenActionMenuId(menuOpen ? null : p.id)}
+                                  >⋮</button>
+                                  {p.shared_visible && <span title="Compartida" style={{ position: 'absolute', top: 4, left: 24, zIndex: 2 }}>📤</span>}
+                                  <div onClick={() => setPhotoModalPlantId(p.id)} style={{ cursor: 'pointer' }}>
+                                    {p.image_url ? <img src={p.image_url} alt={p.name} /> : <div className="no-img-sm">Sin foto</div>}
+                                  </div>
+                                  <span>{p.name}{!p.active ? ' (oculta)' : ''}</span>
+
+                                  {menuOpen && (
+                                    <div className="gallery-action-menu" style={{ position: 'absolute', top: 30, right: 4, zIndex: 3, background: '#fff', border: '1px solid #ccc', borderRadius: 8, boxShadow: '0 2px 8px rgba(0,0,0,0.15)', display: 'flex', flexDirection: 'column', minWidth: 170 }}>
+                                      <button type="button" onClick={() => { toggleActive(p.id, p.active); setOpenActionMenuId(null) }}>{p.active ? 'Ocultar' : 'Mostrar'}</button>
+                                      <button type="button" onClick={() => { toggleIsNew(p.id, p.is_new) }}>{p.is_new ? '🌱 Nueva ✓' : 'Marcar como nueva'}</button>
+                                      <button type="button" onClick={() => { toggleOnSale(p.id, p.on_sale) }}>{p.on_sale ? '🏷️ En descuento ✓' : 'Marcar en descuento'}</button>
+                                      <button type="button" onClick={() => { setOpenPlantNotesListId(notesOpen ? null : p.id); setOpenActionMenuId(null) }}>📝 Notas ({notesForPlant.length})</button>
+                                    </div>
+                                  )}
+
+                                  {notesOpen && (
+                                    <div className="plant-notes-panel">
+                                      <button type="button" className="full-form-btn" onClick={() => openNewPlantNote(p.id)}>📝 Nueva nota</button>
+                                      {notesForPlant.length === 0 && <p className="status-msg">Todavía no hay notas para esta planta.</p>}
+                                      {notesForPlant.map(n => (
+                                        <div key={n.id} className="note-blocks-view plant-note-entry">
+                                          <div className="day-task-row">
+                                            <span className="task-note">{new Date(n.created_at).toLocaleDateString()}</span>
+                                            <button type="button" className="task-edit-btn" onClick={() => openEditPlantNote(n)}>✏️</button>
+                                            <button type="button" className="task-edit-btn" onClick={() => sharePlantNote(n)} disabled={sharingNotes} title="Compartir por WhatsApp">📲</button>
+                                            <button type="button" className="task-delete-btn" onClick={() => deletePlantNote(n.id)}>✕</button>
+                                          </div>
+                                          {(n.content_blocks || []).map((b, i) => (
+                                            <div key={i}>
+                                              {b.type === 'text' && <p className="task-note">{b.content}</p>}
+                                              {b.type === 'photo' && <img src={b.url} alt="" className="note-block-photo" />}
+                                              {b.type === 'video' && <video src={b.url} controls className="note-video" />}
+                                            </div>
+                                          ))}
+                                        </div>
+                                      ))}
+                                    </div>
+                                  )}
                                 </div>
-                              ))}
+                                )
+                              })}
                             </div>
                           </>
                         )
@@ -1464,6 +1374,128 @@ export default function Admin() {
                     </>
                   )}
                 </>
+              )}
+
+              {photoModalPlantId && (() => {
+                const p = plants.find(pl => pl.id === photoModalPlantId)
+                if (!p) return null
+                return (
+                  <div className="admin-sheet-overlay" onClick={() => setPhotoModalPlantId(null)}>
+                    <div className="free-note-modal" onClick={e => e.stopPropagation()}>
+                      <div className="free-note-modal-header">
+                        <h4>{p.name}</h4>
+                        <button type="button" className="modal-close-btn" onClick={() => setPhotoModalPlantId(null)}>✕</button>
+                      </div>
+                      <div className="free-note-sheet">
+                        <div className="gallery-grid" style={{ gridTemplateColumns: 'repeat(3, 1fr)' }}>
+                          {[
+                            { url: p.image_url, field: 'image_url', label: 'Foto 1', onUpload: f => updatePlantImage(p.id, f) },
+                            { url: p.extra_image_1, field: 'extra_image_1', label: 'Foto 2', onUpload: f => updatePlantExtraImage(p.id, 'extra_image_1', f) },
+                            { url: p.extra_image_2, field: 'extra_image_2', label: 'Foto 3', onUpload: f => updatePlantExtraImage(p.id, 'extra_image_2', f) },
+                          ].map(slot => (
+                            <div key={slot.field} style={{ textAlign: 'center' }}>
+                              {slot.url ? <img src={slot.url} alt={slot.label} style={{ width: '100%', borderRadius: 8 }} /> : <div className="no-img-sm">Sin foto</div>}
+                              <label className="file-label" style={{ display: 'block', marginTop: 4, background: 'transparent', color: 'inherit', border: '1px solid #ccc' }}>
+                                {slot.url ? 'Cambiar' : `Subir ${slot.label}`}
+                                <input
+                                  type="file"
+                                  accept="image/*"
+                                  style={{ display: 'none' }}
+                                  onChange={e => { slot.onUpload(e.target.files[0]); e.target.value = '' }}
+                                />
+                              </label>
+                            </div>
+                          ))}
+                        </div>
+
+                        {p.video_url && <video src={p.video_url} controls className="note-video" style={{ width: '100%', marginTop: 12 }} />}
+                        <label className="file-label" style={{ display: 'block', marginTop: 8, background: 'transparent', color: 'inherit', border: '1px solid #ccc' }}>
+                          {p.video_url ? '🎥 Cambiar video' : '🎥 Subir video'}
+                          <input
+                            type="file"
+                            accept="video/*"
+                            style={{ display: 'none' }}
+                            onChange={e => { updatePlantVideo(p.id, e.target.files[0]); e.target.value = '' }}
+                          />
+                        </label>
+
+                        <textarea
+                          className="plant-description-input"
+                          placeholder="Descripción"
+                          defaultValue={p.description || ''}
+                          rows={3}
+                          style={{ marginTop: 12, width: '100%' }}
+                          onBlur={e => updatePlantDescription(p.id, e.target.value)}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )
+              })()}
+
+              {plantNoteModalOpen && (
+                <div className="admin-sheet-overlay">
+                  <div className="free-note-modal" onClick={e => e.stopPropagation()}>
+                    <div className="free-note-modal-header">
+                      <h4>{editingPlantNoteId ? 'Editar nota' : 'Nota'} — {plants.find(p => p.id === currentNotePlantId)?.name || ''}</h4>
+                      <button
+                        type="button"
+                        className="modal-close-btn"
+                        onClick={() => {
+                          const hasUnsaved = plantNoteCurrentText.trim().length > 0
+                          if (hasUnsaved && !confirm('¿Cerrar sin guardar? Perderás lo que escribiste.')) return
+                          setPlantNoteModalOpen(false)
+                          setEditingPlantNoteId(null)
+                        }}
+                      >✕</button>
+                    </div>
+                    <div className="free-note-sheet">
+                      {plantNoteBlocks.map((b, i) => (
+                        <div key={i} className="note-sheet-block">
+                          {b.type === 'text' && <p>{b.content}</p>}
+                          {b.type === 'photo' && <img src={b.url || URL.createObjectURL(b.file)} alt="" className="note-sheet-photo" />}
+                          {b.type === 'video' && (
+                            <video src={b.url || URL.createObjectURL(b.file)} controls className="note-video" />
+                          )}
+                        </div>
+                      ))}
+                      <textarea
+                        className="note-sheet-textarea"
+                        placeholder={plantNoteBlocks.length > 0 ? 'Sigue escribiendo...' : 'Escribe una nota para esta planta...'}
+                        rows={plantNoteBlocks.length > 0 ? 2 : 4}
+                        value={plantNoteCurrentText}
+                        onChange={e => setPlantNoteCurrentText(e.target.value)}
+                        autoFocus
+                      />
+                      <div className="note-sheet-toolbar">
+                        <label className="icon-btn" title="Insertar foto aquí">
+                          📷
+                          <input
+                            type="file"
+                            accept="image/*"
+                            style={{ display: 'none' }}
+                            onChange={e => { insertPhotoBlockToPlantNote(e.target.files[0]); e.target.value = '' }}
+                          />
+                        </label>
+                        <label className="icon-btn" title="Insertar video aquí">
+                          🎥
+                          <input
+                            type="file"
+                            accept="video/*"
+                            style={{ display: 'none' }}
+                            onChange={e => { insertVideoBlockToPlantNote(e.target.files[0]); e.target.value = '' }}
+                          />
+                        </label>
+                        {plantNoteBlocks.length > 0 && (
+                          <button type="button" className="icon-btn-text" onClick={removeLastPlantNoteBlock}>Deshacer</button>
+                        )}
+                        <button type="button" className="save-note-btn-inline" onClick={savePlantNote} disabled={savingPlantNote}>
+                          {savingPlantNote ? 'Guardando...' : 'Guardar'}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
               )}
 
               {view === 'pedidos' && (
