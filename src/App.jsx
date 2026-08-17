@@ -36,22 +36,14 @@ export default function App() {
   const [heroIndex, setHeroIndex] = useState(0)
   const [pendingCount, setPendingCount] = useState(0)
   const [syncing, setSyncing] = useState(false)
-  const [restrictedCategory, setRestrictedCategory] = useState(false)
-
-  useEffect(() => { loadData() }, [])
+  const [sharedMode, setSharedMode] = useState(false)
 
   useEffect(() => {
-    if (categories.length === 0) return
     const params = new URLSearchParams(window.location.search)
-    const catId = params.get('cat')
-    if (catId) {
-      const cat = categories.find(c => String(c.id) === catId)
-      if (cat) {
-        openCategory(cat)
-        setRestrictedCategory(true)
-      }
-    }
-  }, [categories])
+    if (params.get('shared') === '1') setSharedMode(true)
+  }, [])
+
+  useEffect(() => { loadData() }, [sharedMode])
 
   useEffect(() => {
     queueLength().then(setPendingCount)
@@ -94,8 +86,11 @@ export default function App() {
   async function loadData() {
     setLoading(true)
     const { data: cats } = await supabase.from('categories').select('*').order('name')
-    const { data: pls } = await supabase.from('plants').select('*').eq('active', true).order('name')
-    setCategories(cats || [])
+    let plantsQuery = supabase.from('plants').select('*').eq('active', true).order('name')
+    if (sharedMode) plantsQuery = plantsQuery.eq('shared_visible', true)
+    const { data: pls } = await plantsQuery
+    const visibleCatIds = new Set((pls || []).map(p => p.category_id))
+    setCategories(sharedMode ? (cats || []).filter(c => visibleCatIds.has(c.id)) : (cats || []))
     setPlants(pls || [])
     setLoading(false)
   }
@@ -342,9 +337,7 @@ export default function App() {
 
       {/* ---------- FRANJA SUPERIOR ---------- */}
      <div className="site-header">
-        {!restrictedCategory && (
-          <button className="header-icon-btn" onClick={() => setMenuOpen(true)} aria-label="Menú">☰</button>
-        )}
+        <button className="header-icon-btn" onClick={() => setMenuOpen(true)} aria-label="Menú">☰</button>
         <div className="header-icons">
           <button className="header-icon-btn" onClick={() => setShowFavorites(true)} aria-label="Mi lista">
             ❤️ {favorites.length > 0 && <span className="cart-badge">{favorites.length}</span>}
@@ -368,6 +361,21 @@ export default function App() {
           borderRadius: '6px',
         }}>
           {syncing ? `Sincronizando ${pendingCount} cambio(s)...` : `${pendingCount} pedido(s) guardados sin conexión, pendientes de subir`}
+        </p>
+      )}
+
+      {sharedMode && (
+        <p style={{
+          textAlign: 'center',
+          background: '#E4DFCB',
+          color: '#4B5A46',
+          fontSize: '0.8rem',
+          fontWeight: 600,
+          padding: '6px 10px',
+          margin: '6px 12px 0',
+          borderRadius: '6px',
+        }}>
+          🌿 Estás viendo una selección de plantas disponibles
         </p>
       )}
 
@@ -573,9 +581,7 @@ export default function App() {
 
       ) : (
         <>
-        {!restrictedCategory && (
-          <button className="back-btn" onClick={backToCategories}>← Volver a categorías</button>
-        )}
+        <button className="back-btn" onClick={backToCategories}>← Volver a categorías</button>
           <h2 className="plants-title">
             {selectedCategory.emoji || ''} {selectedCategory.name}
           </h2>
@@ -734,3 +740,4 @@ export default function App() {
     </div>
   )
 }
+
