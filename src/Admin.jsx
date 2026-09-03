@@ -1634,7 +1634,7 @@ function Admin() {
     <div className="admin" style={{ minHeight: '100vh', width: '100%', overflowX: 'hidden', boxSizing: 'border-box' }}>
       <div className="admin-header">
         <h1>Panel de administrador — Diamantev</h1>
-        <a href="/" target="_blank" rel="noreferrer" className="back-to-store">🌿 Ver tienda</a>
+        <a href={CLIENT_URL} target="_blank" rel="noreferrer" className="back-to-store">🌿 Ver tienda</a>
         <button onClick={handleLogout} className="back-to-store" style={{ background: 'transparent', border: '1px solid #b03434', color: '#b03434' }}>
           Cerrar sesión
         </button>
