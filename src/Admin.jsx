@@ -123,7 +123,7 @@ function Admin() {
       formData.append('file', file);
 
       // Reemplaza esta URL por tu Endpoint o Supabase Edge Function
-      const response = await fetch('https://TU_PROYECTO.supabase.co/functions/v1/analyze-purchase', {
+      const response = await fetch('https://hrtaqjjrktmuwqcibagx.supabase.co/functions/v1/analyze-purchase' {
         method: 'POST',
         body: formData,
       });
