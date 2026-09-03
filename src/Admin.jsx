@@ -111,7 +111,43 @@ function Admin() {
   const [addToLoteId, setAddToLoteId] = useState(null)
   const [addToLoteForm, setAddToLoteForm] = useState({ plant_id: '', new_plant_name: '', new_plant_category: '', quantity: '', unit_cost: '', sale_price: '', file: null })
   const [savingAddToLote, setSavingAddToLote] = useState(false)
+// --- ESTADO Y FUNCIÓN PARA LECTURA DE COMPRAS CON IA ---
+  const [isAnalyzingImage, setIsAnalyzingImage] = useState(false);
 
+  async function handleAutoFillFromImage(file) {
+    if (!file) return;
+    
+    setIsAnalyzingImage(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+
+      // Reemplaza esta URL por tu Endpoint o Supabase Edge Function
+      const response = await fetch('https://TU_PROYECTO.supabase.co/functions/v1/analyze-purchase', {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!response.ok) throw new Error('Error al procesar la imagen');
+
+      const result = await response.json();
+
+      // Autocompleta los campos del formulario
+      setLineForm(prev => ({
+        ...prev,
+        new_plant_name: result.plant_name || prev.new_plant_name || '',
+        quantity: result.quantity || prev.quantity || 1,
+        unit_cost: result.unit_cost || prev.unit_cost || 0,
+        sale_price: result.sale_price || prev.sale_price || 0,
+      }));
+    } catch (err) {
+      console.error('Error al analizar imagen:', err);
+      alert('No se pudieron extraer datos de la imagen. Por favor escríbelos manualmente.');
+    } finally {
+      setIsAnalyzingImage(false);
+    }
+  }
+  
   const [decrementos, setDecrementos] = useState([])
   const [decForm, setDecForm] = useState({ plant_id: '', quantity: '', motivo: '', motivo_otro: '', unit_price: '' })
   const [decPlantSearch, setDecPlantSearch] = useState('')
@@ -2639,7 +2675,29 @@ function Admin() {
                               <option value="">Selecciona categoría (crea la categoría primero en Categorías si no existe)</option>
                               {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                             </select>
-                            <input type="file" accept="image/*" onChange={e => setLineForm({ ...lineForm, file: e.target.files[0] })} />
+                           <div style={{ marginBottom: '10px' }}>
+  <label style={{ display: 'block', fontWeight: 'bold', fontSize: '13px', marginBottom: '4px' }}>
+    📷 Foto de la compra / etiqueta (Autocompletar)
+  </label>
+  <input 
+    type="file" 
+    accept="image/*"
+    disabled={isAnalyzingImage}
+    onChange={async (e) => {
+      const file = e.target.files[0];
+      if (file) {
+        setLineForm(prev => ({ ...prev, file }));
+        await handleAutoFillFromImage(file);
+      }
+    }} 
+  />
+
+  {isAnalyzingImage && (
+    <p style={{ color: '#2563eb', marginTop: '4px', fontSize: '13px', fontWeight: 'bold' }}>
+      🔍 Leyendo datos de la foto con IA...
+    </p>
+  )}
+</div>
                             <input placeholder="Cantidad" type="number" value={lineForm.quantity} onChange={e => setLineForm({ ...lineForm, quantity: e.target.value })} style={{ width: '100%', boxSizing: 'border-box', padding: 10, borderRadius: 6, border: '1px solid #ccc' }} />
                             <input placeholder="Precio de compra (por unidad)" type="number" step="0.01" value={lineForm.unit_cost} onChange={e => setLineForm({ ...lineForm, unit_cost: e.target.value })} style={{ width: '100%', boxSizing: 'border-box', padding: 10, borderRadius: 6, border: '1px solid #ccc' }} />
                             <input placeholder="Precio de venta (opcional)" type="number" step="0.01" value={lineForm.sale_price} onChange={e => setLineForm({ ...lineForm, sale_price: e.target.value })} style={{ width: '100%', boxSizing: 'border-box', padding: 10, borderRadius: 6, border: '1px solid #ccc' }} />
