@@ -1,0 +1,7057 @@
+import { useState, useEffect, useRef, Component } from 'react'
+import { createPortal } from 'react-dom'
+import { jsPDF } from 'jspdf'
+import JSZip from 'jszip'
+import * as XLSX from 'xlsx'
+import pptxgen from 'pptxgenjs'
+import { supabase, supabaseStorage } from './supabaseClient'
+import { addToQueue, isOnline, queueLength, processQueue } from './offlineQueue'
+
+// Componentes estables fuera de Admin(): si se definieran adentro, React los
+// recrearía en cada render (por ejemplo, en cada tecla escrita al buscar) y
+// los remontaría por completo, causando parpadeos/pérdida de scroll y foco.
+function PlantPicker({ list, selectedId, onSelect }) {
+  return (
+    <div style={{ maxHeight: 180, overflowY: 'auto', border: '1px solid #ccc', borderRadius: 8, marginBottom: 8, background: '#fff' }}>
+      {list.length === 0 && <p className="status-msg" style={{ padding: 8, margin: 0 }}>Sin resultados</p>}
+      {list.map(p => (
+        <div
+          key={p.id}
+          onClick={() => onSelect(p.id)}
+          style={{
+            padding: '10px 10px',
+            cursor: 'pointer',
+            background: selectedId === p.id ? '#e8dfc8' : 'transparent',
+            borderBottom: '1px solid #eee',
+            fontWeight: selectedId === p.id ? 'bold' : 'normal',
+          }}
+        >
+          {selectedId === p.id ? '✓ ' : ''}{p.name}
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function StatusChecklist({ steps, currentStatus, onAdvance, disabled }) {
+  const currentIndex = steps.findIndex(s => s.key === currentStatus)
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 2, fontSize: 11, textAlign: 'left' }}>
+      {steps.map((s, i) => {
+        const checked = i <= currentIndex
+        const isNext = i === currentIndex + 1
+        return (
+          <label key={s.key} style={{ display: 'flex', alignItems: 'center', gap: 4, opacity: checked || isNext ? 1 : 0.4 }}>
+            <input
+              type="checkbox"
+              checked={checked}
+              disabled={disabled || !isNext}
+              onChange={() => isNext && onAdvance(s.key)}
+            />
+            {s.label}
+          </label>
+        )
+      })}
+    </div>
+  )
+}
+
+// Paleta de "tonos" pastel de Diamantev para las tarjetas de filtro rápido.
+const QUICK_FILTER_TONES = {
+  sage:    { bg: '#EAF2E7', border: '#C9DDC2', active: '#DCE8D9' },
+  rose:    { bg: '#FBEEEF', border: '#EFC7CB', active: '#F7D9DC' },
+  cream:   { bg: '#FBF7EE', border: '#E8DFC8', active: '#F3ECDD' },
+  sky:     { bg: '#EEF4F9', border: '#C9DCEA', active: '#D8E6F0' },
+  neutral: { bg: '#FBF7EE', border: '#E8DFC8', active: '#F3ECDD' },
+}
+
+// Botón tipo "tarjeta" que despliega un menú con opciones (ej. Todas/Con/Sin).
+// Reemplaza los antiguos segmented-control de 3 botones por uno solo compacto.
+function QuickFilterButton({ icon, label, value, options, onChange, tone = 'neutral' }) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef(null)
+  const c = QUICK_FILTER_TONES[tone] || QUICK_FILTER_TONES.neutral
+  const isActive = value !== 'all'
+  const current = options.find(o => o.value === value)
+
+  useEffect(() => {
+    function handleOutside(e) {
+      if (ref.current && !ref.current.contains(e.target)) setOpen(false)
+    }
+    document.addEventListener('mousedown', handleOutside)
+    document.addEventListener('touchstart', handleOutside)
+    return () => {
+      document.removeEventListener('mousedown', handleOutside)
+      document.removeEventListener('touchstart', handleOutside)
+    }
+  }, [])
+
+  return (
+    <div style={{ position: 'relative' }} ref={ref}>
+      <button
+        type="button"
+        onClick={() => setOpen(o => !o)}
+        style={{
+          display: 'flex', alignItems: 'center', gap: 6,
+          background: isActive ? c.active : c.bg,
+          border: `1px solid ${c.border}`, borderRadius: 18,
+          padding: '9px 14px', fontWeight: isActive ? 700 : 600,
+          color: '#5B4636', fontSize: 13.5, whiteSpace: 'nowrap',
+          boxShadow: '0 1px 2px rgba(0,0,0,0.06)', cursor: 'pointer',
+        }}
+      >
+        <span style={{ fontSize: 16 }}>{icon}</span>
+        {label}
+        {isActive && <span style={{ fontSize: 12, opacity: 0.75 }}>· {current?.shortLabel || current?.label}</span>}
+        <span style={{ fontSize: 11, opacity: 0.6, marginLeft: 2 }}>⌄</span>
+      </button>
+      {open && (
+        <div style={{
+          position: 'absolute', top: '110%', left: 0, zIndex: 20,
+          background: '#fff', border: `1px solid ${c.border}`, borderRadius: 12,
+          boxShadow: '0 4px 14px rgba(0,0,0,0.16)', overflow: 'hidden', minWidth: 150,
+        }}>
+          {options.map(o => (
+            <div
+              key={o.value}
+              onClick={() => { onChange(o.value); setOpen(false) }}
+              style={{
+                padding: '10px 14px', cursor: 'pointer', fontSize: 13.5,
+                background: value === o.value ? c.active : '#fff',
+                fontWeight: value === o.value ? 700 : 400, color: '#5B4636',
+              }}
+            >
+              {value === o.value ? '✓ ' : ''}{o.label}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// Botón de una sola condición On/Off (ej. "Floreció alguna vez"), mismo estilo visual.
+function ToggleFilterButton({ icon, label, active, onClick, tone = 'neutral' }) {
+  const c = QUICK_FILTER_TONES[tone] || QUICK_FILTER_TONES.neutral
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        display: 'flex', alignItems: 'center', gap: 6,
+        background: active ? c.active : c.bg,
+        border: `1px solid ${c.border}`, borderRadius: 18,
+        padding: '9px 14px', fontWeight: active ? 700 : 600,
+        color: '#5B4636', fontSize: 13.5, whiteSpace: 'nowrap',
+        boxShadow: '0 1px 2px rgba(0,0,0,0.06)', cursor: 'pointer',
+      }}
+    >
+      <span style={{ fontSize: 16 }}>{icon}</span>
+      {label}
+      {active && <span style={{ fontSize: 12 }}>✓</span>}
+    </button>
+  )
+}
+
+// Botón que despliega un checklist de varias opciones combinables a la vez
+// (ej. "Revisar": sin foto, sin categoría, sin precio... todas se pueden marcar juntas).
+function MultiCheckFilterButton({ icon, label, tone = 'neutral', options, checked, onToggle }) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef(null)
+  const c = QUICK_FILTER_TONES[tone] || QUICK_FILTER_TONES.neutral
+  const activeCount = options.filter(o => checked.has(o.value)).length
+
+  useEffect(() => {
+    function handleOutside(e) {
+      if (ref.current && !ref.current.contains(e.target)) setOpen(false)
+    }
+    document.addEventListener('mousedown', handleOutside)
+    document.addEventListener('touchstart', handleOutside)
+    return () => {
+      document.removeEventListener('mousedown', handleOutside)
+      document.removeEventListener('touchstart', handleOutside)
+    }
+  }, [])
+
+  return (
+    <div style={{ position: 'relative' }} ref={ref}>
+      <button
+        type="button"
+        onClick={() => setOpen(o => !o)}
+        style={{
+          display: 'flex', alignItems: 'center', gap: 6,
+          background: activeCount > 0 ? c.active : c.bg,
+          border: `1px solid ${c.border}`, borderRadius: 18,
+          padding: '9px 14px', fontWeight: activeCount > 0 ? 700 : 600,
+          color: '#5B4636', fontSize: 13.5, whiteSpace: 'nowrap', cursor: 'pointer',
+        }}
+      >
+        <span style={{ fontSize: 16 }}>{icon}</span>
+        {label}{activeCount > 0 ? ` (${activeCount})` : ''}
+        <span style={{ fontSize: 11, opacity: 0.6 }}>⌄</span>
+      </button>
+      {open && (
+        <div style={{
+          position: 'absolute', top: '110%', left: 0, zIndex: 20,
+          background: '#fff', border: `1px solid ${c.border}`, borderRadius: 12,
+          boxShadow: '0 4px 14px rgba(0,0,0,0.16)', overflow: 'hidden', minWidth: 190,
+        }}>
+          {options.map(o => (
+            <label
+              key={o.value}
+              style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px', cursor: 'pointer', fontSize: 13.5, color: '#5B4636' }}
+            >
+              <input type="checkbox" checked={checked.has(o.value)} onChange={() => onToggle(o.value)} />
+              {o.icon ? `${o.icon} ` : ''}{o.label}
+            </label>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ---------- Botón "Atrás" del celular: cerrar pantallas/modales en vez de salir de la app ----------
+// Cada vez que se abre una pantalla o modal "cerrable con Atrás", se agrega una entrada
+// al historial del navegador. Cuando el usuario toca Atrás, en vez de salir de la app
+// (porque React no usa páginas reales), cerramos lo último que se abrió. Si hay varias
+// cosas abiertas a la vez (ej. Filtros y, dentro, el selector de categoría), Atrás cierra
+// primero la de más arriba, como en una app nativa.
+let backStack = []
+let backPopstateAttached = false
+
+function attachBackPopstateOnce() {
+  if (backPopstateAttached) return
+  backPopstateAttached = true
+  window.addEventListener('popstate', () => {
+    const top = backStack.pop()
+    if (top) top.onClose()
+  })
+}
+
+function useBackableModal(isOpen, onClose) {
+  const idRef = useRef(null)
+  if (idRef.current === null) idRef.current = Math.random().toString(36).slice(2)
+  const onCloseRef = useRef(onClose)
+  onCloseRef.current = onClose
+  const wasOpenRef = useRef(false)
+
+  useEffect(() => { attachBackPopstateOnce() }, [])
+
+  useEffect(() => {
+    if (isOpen && !wasOpenRef.current) {
+      window.history.pushState({ __backModal: idRef.current }, '')
+      backStack.push({ id: idRef.current, onClose: () => onCloseRef.current() })
+      wasOpenRef.current = true
+    } else if (!isOpen && wasOpenRef.current) {
+      wasOpenRef.current = false
+      const idx = backStack.findIndex(e => e.id === idRef.current)
+      if (idx !== -1) {
+        // Seguía en la pila: se cerró desde la propia UI (✕, "Cancelar", tocar afuera),
+        // no por el botón Atrás.
+        const isTop = idx === backStack.length - 1
+        if (isTop) {
+          // Dejamos que el propio evento popstate (disparado por history.back()) sea el
+          // único que la saca de la pila — si la sacábamos nosotros de una y ADEMÁS
+          // esperábamos el popstate, el popstate terminaba sacando la SIGUIENTE entrada
+          // (la de otro modal todavía abierto) por error.
+          window.history.back()
+        } else {
+          // Se cerró fuera de orden (no es la de más arriba): la sacamos directo,
+          // sin tocar el historial, para no arrastrar a la que sigue abierta.
+          backStack.splice(idx, 1)
+        }
+      }
+    }
+  }, [isOpen])
+}
+
+function Admin() {
+  const [authed, setAuthed] = useState(false)
+  const [checkingSession, setCheckingSession] = useState(true)
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [failed, setFailed] = useState(false)
+  const [loggingIn, setLoggingIn] = useState(false)
+  const [resetMode, setResetMode] = useState(false)
+  const [resetEmail, setResetEmail] = useState('')
+  const [resetSent, setResetSent] = useState(false)
+  const [sendingReset, setSendingReset] = useState(false)
+  const [recoveryMode, setRecoveryMode] = useState(false)
+  const [newPassword, setNewPassword] = useState('')
+  const [updatingPassword, setUpdatingPassword] = useState(false)
+
+  // 'galeria' (pantalla de aterrizaje) | 'categorias' | 'pedidos' | 'ingresos'
+  const [view, setView] = useState('galeria')
+
+  const [galleryFilter, setGalleryFilter] = useState('all')
+  const [galleryShowHidden, setGalleryShowHidden] = useState(false)
+  const [verMenuOpen, setVerMenuOpen] = useState(false)
+  const [galleryLabelStatus, setGalleryLabelStatus] = useState('all')
+  const [labelQtyModalOpen, setLabelQtyModalOpen] = useState(false)
+  const [pendingLabelAction, setPendingLabelAction] = useState(null) // 'print' | 'pdf' | 'pptx'
+  const [labelQuantities, setLabelQuantities] = useState({}) // { plantId: cantidad }
+  const [galleryProveedor, setGalleryProveedor] = useState('all')
+  const [galleryCompraStatus, setGalleryCompraStatus] = useState('all')
+  const [galleryLoteNumero, setGalleryLoteNumero] = useState('all')
+  const [galleryVentaLoteNumero, setGalleryVentaLoteNumero] = useState('all')
+  const [galleryVentaStatus, setGalleryVentaStatus] = useState('all')
+  const [galleryActionFilter, setGalleryActionFilter] = useState('all')
+  const [gallerySearch, setGallerySearch] = useState('')
+  const [galleryMissingFilters, setGalleryMissingFilters] = useState(new Set())
+  const [galleryFiltersOpen, setGalleryFiltersOpen] = useState(false)
+  const [catFilterSearch, setCatFilterSearch] = useState('')
+  const [showInlineNewCategory, setShowInlineNewCategory] = useState(false)
+  const [inlineNewCategoryName, setInlineNewCategoryName] = useState('')
+  const [inlineNewCategoryEmoji, setInlineNewCategoryEmoji] = useState('🌿')
+  const [provFilterSearch, setProvFilterSearch] = useState('')
+  const [loteFilterSearch, setLoteFilterSearch] = useState('')
+  const [ventaLoteFilterSearch, setVentaLoteFilterSearch] = useState('')
+  const [activeSelector, setActiveSelector] = useState(null)
+  const [categoriesSearch, setCategoriesSearch] = useState('')
+  const [selectedLabels, setSelectedLabels] = useState(new Set())
+  const [photoModalPlantId, setPhotoModalPlantId] = useState(null)
+  const [photoModalIndex, setPhotoModalIndex] = useState(0)
+  const [photoModalMenuOpen, setPhotoModalMenuOpen] = useState(false)
+  const [photoModalSection, setPhotoModalSection] = useState('fotos')
+  // Panel "Compra e inventario" del modal de planta: datos frescos de la BD + borrador editable
+  const [plantInv, setPlantInv] = useState(null) // { plantId, compras, lotes }
+  const [plantInvDraft, setPlantInvDraft] = useState(null)
+  const [plantInvBase, setPlantInvBase] = useState(null) // copia del borrador al cargar/guardar, para saber si hay cambios
+  const [savingPlantInv, setSavingPlantInv] = useState(false)
+  const [plantInvMsg, setPlantInvMsg] = useState('')
+  const photoModalSheetRef = useRef(null)
+  const bulkLoteBuilderPhotoInputRef = useRef(null)
+  const [bulkCategoryPickerFor, setBulkCategoryPickerFor] = useState(null) // 'loteBuilder' | null
+  const [bulkCategorySearch, setBulkCategorySearch] = useState('')
+  const [bulkChosenCategoryId, setBulkChosenCategoryId] = useState(null)
+  const [labelSelectMenuOpen, setLabelSelectMenuOpen] = useState(false)
+  const [isWideScreen, setIsWideScreen] = useState(() => typeof window !== 'undefined' && window.innerWidth >= 900)
+
+  const [tableFilters, setTableFilters] = useState({
+    categoria: 'all', proveedor: '', precioMin: '', precioMax: '',
+    stockMin: '', stockMax: '', altura: '', estado: 'all', nueva: 'all',
+    descuento: 'all', proximamente: 'all', revisar: 'all', florecio: 'all', vendido: 'all', foto: 'all',
+  })
+  const [tableSort, setTableSort] = useState({ field: 'name', dir: 'asc' })
+
+  function setTableFilter(field, value) {
+    setTableFilters(prev => ({ ...prev, [field]: value }))
+  }
+
+  function toggleTableSort(field) {
+    setTableSort(prev => prev.field === field ? { field, dir: prev.dir === 'asc' ? 'desc' : 'asc' } : { field, dir: 'asc' })
+  }
+
+  function exportTableToExcel(rows) {
+    const headers = [
+      'Nombre', 'Categoría', 'Proveedor', 'Precio sugerido', 'Precio', 'Precio con descuento', 'Stock', 'Altura', 'Estado',
+      'Nueva', 'Descuento', 'Próximamente', 'Para revisar', 'Floreció', 'Vendió',
+      'N° de compra', 'Fecha de compra', 'N° de venta', 'Fecha de venta',
+    ]
+    const data = rows.map(r => [
+      r.name,
+      r.categoria,
+      r.proveedor,
+      r.precioSugerido != null ? Number(r.precioSugerido.toFixed(2)) : '',
+      Number(r.price.toFixed(2)),
+      r.discountPercent > 0 ? Number(r.priceWithDiscount.toFixed(2)) : '',
+      r.stock,
+      r.height,
+      r.active ? 'Visible' : 'Oculta',
+      r.is_new ? 'Sí' : 'No',
+      r.on_sale ? 'Sí' : 'No',
+      r.coming_soon ? 'Sí' : 'No',
+      r.flagged ? 'Sí' : 'No',
+      r.florecio ? 'Sí' : 'No',
+      r.vendido ? 'Sí' : 'No',
+      r.loteNumero ?? '',
+      r.fechaCompra ? new Date(r.fechaCompra).toLocaleDateString() : '',
+      r.ventaNumero ?? '',
+      r.fechaVenta ? new Date(r.fechaVenta).toLocaleDateString() : '',
+    ])
+    const worksheet = XLSX.utils.aoa_to_sheet([headers, ...data])
+    worksheet['!cols'] = headers.map((h, i) => ({
+      wch: Math.max(h.length, ...data.map(row => String(row[i] ?? '').length)) + 2,
+    }))
+    const workbook = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Galería')
+    XLSX.writeFile(workbook, `diamantev-galeria-${new Date().toISOString().slice(0, 10)}.xlsx`)
+  }
+
+  useEffect(() => {
+    function handleResize() { setIsWideScreen(window.innerWidth >= 900) }
+    window.addEventListener('resize', handleResize)
+    return () => window.removeEventListener('resize', handleResize)
+  }, [])
+
+  // Antes de agregar las fotos a la compra, preguntamos si son todas de una categoría
+  // particular (o "sin categoría" para decidir después), y recién ahí abrimos el selector de fotos.
+  function chooseBulkCategory(catId) {
+    setBulkChosenCategoryId(catId)
+    const target = bulkCategoryPickerFor
+    setBulkCategoryPickerFor(null)
+    setBulkCategorySearch('')
+    if (target === 'loteBuilder') {
+      bulkLoteBuilderPhotoInputRef.current?.click()
+    }
+  }
+  const [shareModalOpen, setShareModalOpen] = useState(false)
+  const [shareOnlyStock, setShareOnlyStock] = useState(false)
+
+  const [sharingNotes, setSharingNotes] = useState(false)
+
+  const [orders, setOrders] = useState([])
+  const [approvingIds, setApprovingIds] = useState([])
+
+  const [compras, setCompras] = useState([])
+  const [lotes, setLotes] = useState([])
+  const [ventaLotes, setVentaLotes] = useState([])
+  const [ventaLoteBuilderOpen, setVentaLoteBuilderOpen] = useState(false)
+  const [ventaLoteCliente, setVentaLoteCliente] = useState('')
+  const [ventaLoteLines, setVentaLoteLines] = useState([])
+  const [ventaLineForm, setVentaLineForm] = useState({ plant_id: '', quantity: '', unit_price: '', motivo: 'Venta manual (con precio)' })
+  const [savingVentaLote, setSavingVentaLote] = useState(false)
+  const [addToVentaLoteId, setAddToVentaLoteId] = useState(null)
+  const [shareVentaMenuId, setShareVentaMenuId] = useState(null)
+  const [shareOrderMenuId, setShareOrderMenuId] = useState(null)
+  const [loteBuilderOpen, setLoteBuilderOpen] = useState(false)
+  const [loteStep, setLoteStep] = useState('header') // 'header' (paso 1) | 'products' (paso 2)
+  const [loteAddMode, setLoteAddMode] = useState('choose') // 'choose' | 'search' | 'new'
+  const [loteNota, setLoteNota] = useState('')
+  const [loteProveedor, setLoteProveedor] = useState('')
+  const [loteLines, setLoteLines] = useState([])
+  const [lineForm, setLineForm] = useState({ plant_id: '', new_plant_name: '', new_plant_category: '', quantity: '', unit_cost: '', sale_price: '', file: null })
+  const [loteLinePlantSearch, setLoteLinePlantSearch] = useState('')
+  const [loteLinePlantCategory, setLoteLinePlantCategory] = useState('all')
+  const [savingLote, setSavingLote] = useState(false)
+  const [addToLoteId, setAddToLoteId] = useState(null)
+  const [addToLoteForm, setAddToLoteForm] = useState({ plant_id: '', new_plant_name: '', new_plant_category: '', quantity: '', unit_cost: '', sale_price: '', file: null })
+  const [savingAddToLote, setSavingAddToLote] = useState(false)
+// --- ESTADO Y FUNCIÓN PARA LECTURA DE COMPRAS CON IA ---
+  const [isAnalyzingImage, setIsAnalyzingImage] = useState(false);
+
+  // Reduce el tamaño de la foto antes de subirla, para que el escaneo con IA
+  // sea rápido y no se corte la conexión con fotos pesadas del celular.
+  function resizeImageForUpload(file, maxDim = 1600, quality = 0.75) {
+    return new Promise((resolve, reject) => {
+      const img = new Image()
+      const url = URL.createObjectURL(file)
+      img.onload = () => {
+        URL.revokeObjectURL(url)
+        let { width, height } = img
+        if (width > maxDim || height > maxDim) {
+          if (width > height) {
+            height = Math.round(height * (maxDim / width))
+            width = maxDim
+          } else {
+            width = Math.round(width * (maxDim / height))
+            height = maxDim
+          }
+        }
+        const canvas = document.createElement('canvas')
+        canvas.width = width
+        canvas.height = height
+        const ctx = canvas.getContext('2d')
+        ctx.drawImage(img, 0, 0, width, height)
+        canvas.toBlob(
+          blob => {
+            if (blob) resolve(blob)
+            else reject(new Error('No se pudo comprimir la imagen'))
+          },
+          'image/jpeg',
+          quality
+        )
+      }
+      img.onerror = () => {
+        URL.revokeObjectURL(url)
+        reject(new Error('No se pudo cargar la imagen'))
+      }
+      img.src = url
+    })
+  }
+
+  async function handleAutoFillFromImage(file) {
+    if (!file) return;
+    
+    setIsAnalyzingImage(true);
+    try {
+      const resizedBlob = await resizeImageForUpload(file);
+      const formData = new FormData();
+      formData.append('file', resizedBlob, 'foto.jpg');
+
+      // Reemplaza esta URL por tu Endpoint o Supabase Edge Function
+      const response = await fetch('https://hrtaqjjrktmuwqcibagx.supabase.co/functions/v1/analyze-purchase', {
+        method: 'POST',
+        headers: { Authorization: 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhydGFxampya3RtdXdxY2liYWd4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQ2NzY4NDQsImV4cCI6MjEwMDI1Mjg0NH0.Q1wJS8m7EwBG2MaFXqO50cbg2QeMCeo27tggsFPg4aU', apikey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhydGFxampya3RtdXdxY2liYWd4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQ2NzY4NDQsImV4cCI6MjEwMDI1Mjg0NH0.Q1wJS8m7EwBG2MaFXqO50cbg2QeMCeo27tggsFPg4aU' },
+        body: formData,
+      });
+
+      if (!response.ok) {
+        const errBody = await response.text();
+        throw new Error(`HTTP ${response.status}: ${errBody.slice(0, 300)}`);
+      }
+
+      const result = await response.json();
+      const first = (result.items && result.items[0]) || {};
+
+      // Autocompleta los campos del formulario
+      setLineForm(prev => ({
+        ...prev,
+        new_plant_name: first.nombre || prev.new_plant_name || '',
+        quantity: first.cantidad != null ? String(first.cantidad) : (prev.quantity || '1'),
+        unit_cost: first.precio_unitario != null ? String(first.precio_unitario) : (prev.unit_cost || '0'),
+      }));
+    } catch (err) {
+      console.error('Error al analizar imagen:', err);
+      alert('No se pudieron extraer datos de la imagen. Por favor escríbelos manualmente.');
+    } finally {
+      setIsAnalyzingImage(false);
+    }
+  }
+
+  // --- ESCANEAR FACTURA COMPLETA (varios productos a la vez) ---
+  const [scanningFactura, setScanningFactura] = useState(false)
+  const [facturaScanOpen, setFacturaScanOpen] = useState(false)
+  const [facturaData, setFacturaData] = useState({ proveedor: '', fecha: '', items: [], envio: '', subtotal: '', total: '' })
+  const [savingFactura, setSavingFactura] = useState(false)
+
+  async function handleScanFacturaFile(e) {
+    const file = e.target.files && e.target.files[0]
+    e.target.value = ''
+    if (!file) return
+    setScanningFactura(true)
+    try {
+      const resizedBlob = await resizeImageForUpload(file)
+      const formData = new FormData()
+      formData.append('file', resizedBlob, 'factura.jpg')
+      const response = await fetch('https://hrtaqjjrktmuwqcibagx.supabase.co/functions/v1/analyze-purchase', {
+        method: 'POST',
+        headers: { Authorization: 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhydGFxampya3RtdXdxY2liYWd4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQ2NzY4NDQsImV4cCI6MjEwMDI1Mjg0NH0.Q1wJS8m7EwBG2MaFXqO50cbg2QeMCeo27tggsFPg4aU', apikey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhydGFxampya3RtdXdxY2liYWd4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQ2NzY4NDQsImV4cCI6MjEwMDI1Mjg0NH0.Q1wJS8m7EwBG2MaFXqO50cbg2QeMCeo27tggsFPg4aU' },
+        body: formData,
+      })
+      if (!response.ok) {
+        const errBody = await response.text()
+        throw new Error(`HTTP ${response.status}: ${errBody.slice(0, 300)}`)
+      }
+      const result = await response.json()
+      setFacturaData({
+        proveedor: result.proveedor || '',
+        fecha: result.fecha || '',
+        items: (result.items || []).map(it => ({
+          nombre: it.nombre || '',
+          cantidad: it.cantidad != null ? String(it.cantidad) : '1',
+          precio_unitario: it.precio_unitario != null ? String(it.precio_unitario) : '0',
+        })),
+        envio: result.envio != null ? String(result.envio) : '',
+        subtotal: result.subtotal != null ? String(result.subtotal) : '',
+        total: result.total != null ? String(result.total) : '',
+      })
+      setFacturaScanOpen(true)
+    } catch (err) {
+      console.error('Error al escanear factura:', err)
+      alert('No se pudo leer la factura automáticamente. Detalle: ' + (err instanceof Error ? err.message : String(err)))
+    } finally {
+      setScanningFactura(false)
+    }
+  }
+
+  function updateFacturaField(field, value) {
+    setFacturaData(prev => ({ ...prev, [field]: value }))
+  }
+
+  function updateFacturaItem(index, field, value) {
+    setFacturaData(prev => {
+      const items = [...prev.items]
+      items[index] = { ...items[index], [field]: value }
+      return { ...prev, items }
+    })
+  }
+
+  function addFacturaItem() {
+    setFacturaData(prev => ({ ...prev, items: [...prev.items, { nombre: '', cantidad: '1', precio_unitario: '0' }] }))
+  }
+
+  function removeFacturaItem(index) {
+    setFacturaData(prev => ({ ...prev, items: prev.items.filter((_, i) => i !== index) }))
+  }
+
+  async function saveFacturaCompra() {
+    const itemsValidos = facturaData.items.filter(it => it.nombre.trim())
+    if (itemsValidos.length === 0) { alert('Agrega al menos un producto con nombre antes de guardar'); return }
+    setSavingFactura(true)
+
+    const loteInsert = { nota: 'Registrado por escaneo de factura', proveedor: facturaData.proveedor || null }
+    if (facturaData.fecha) loteInsert.created_at = facturaData.fecha
+    if (facturaData.envio) loteInsert.envio1 = Number(facturaData.envio) || 0
+
+    const { data: lote, error: loteError } = await supabase.from('compra_lotes').insert(loteInsert).select().single()
+    if (loteError) { alert('Error al crear la compra: ' + loteError.message); setSavingFactura(false); return }
+
+    for (const item of itemsValidos) {
+      const nameNormalized = item.nombre.trim().toLowerCase()
+      const existing = plants.find(p => p.name.trim().toLowerCase() === nameNormalized)
+      const quantity = Number(item.cantidad) || 1
+      const unit_cost = Number(item.precio_unitario) || 0
+      const row = existing
+        ? { plant_id: existing.id, plant_name: existing.name, quantity, unit_cost, sale_price: null, image_url: null, total: quantity * unit_cost, proveedor: facturaData.proveedor || null, status: 'pedido', lote_id: lote.id }
+        : { plant_id: null, plant_name: item.nombre.trim(), new_plant_category: null, quantity, unit_cost, sale_price: null, image_url: null, total: quantity * unit_cost, proveedor: facturaData.proveedor || null, status: 'pedido', lote_id: lote.id }
+      const { data: insertedCompra, error } = await supabase.from('compras').insert(row).select().single()
+      if (error) { alert('Error al guardar "' + item.nombre + '": ' + error.message); continue }
+      if (!existing) {
+        const { data: newPlant } = await supabase.from('plants').insert({
+          name: item.nombre.trim(),
+          category_id: null,
+          price: 0,
+          stock: 0,
+          image_url: null,
+          active: false,
+          flagged: true,
+        }).select().single()
+        if (newPlant) await supabase.from('compras').update({ plant_id: newPlant.id }).eq('id', insertedCompra.id)
+      }
+    }
+
+    setFacturaScanOpen(false)
+    setFacturaData({ proveedor: '', fecha: '', items: [], envio: '', subtotal: '', total: '' })
+    setSavingFactura(false)
+    loadData()
+  }
+  
+  const [decrementos, setDecrementos] = useState([])
+  const [decForm, setDecForm] = useState({ plant_id: '', quantity: '', motivo: '', motivo_otro: '', unit_price: '' })
+  const [decPlantSearch, setDecPlantSearch] = useState('')
+  const [decPlantCategory, setDecPlantCategory] = useState('all')
+  const [movMenuOpen, setMovMenuOpen] = useState(false)
+  const [savingDec, setSavingDec] = useState(false)
+
+  const [movSearch, setMovSearch] = useState('')
+  const [movStatusFilter, setMovStatusFilter] = useState('all')
+  const [movTypeFilter, setMovTypeFilter] = useState('all')
+
+  const [ingresosSearch, setIngresosSearch] = useState('')
+  const [ingresosMenuOpen, setIngresosMenuOpen] = useState(false)
+  const [editingLoteId, setEditingLoteId] = useState(null)
+  const [editingVentaLoteId, setEditingVentaLoteId] = useState(null)
+  const [ingresosDate, setIngresosDate] = useState('')
+  const [ingresosCategoria, setIngresosCategoria] = useState('all')
+  const [ingresosStatus, setIngresosStatus] = useState('all')
+  const [ingresosSubTab, setIngresosSubTab] = useState('compras')
+
+  const [seedBatches, setSeedBatches] = useState([])
+  const [seedBatchEvents, setSeedBatchEvents] = useState([])
+  const [sbFormOpen, setSbFormOpen] = useState(false)
+  const [sbForm, setSbForm] = useState({
+    origen: 'cosecha', plant_id: '', category_id: '', nombre: '', es_noid: false,
+    proveedor: '', cantidad_semillas: '', fecha: '', price: '',
+  })
+  const [sbConvertId, setSbConvertId] = useState(null)
+  const [editingSeedBatchId, setEditingSeedBatchId] = useState(null)
+  const [sbConvertForm, setSbConvertForm] = useState({ nombre: '', category_id: '', price: '', stock: '' })
+  const [sbNoteModalOpen, setSbNoteModalOpen] = useState(false)
+  const [currentNoteSeedBatchId, setCurrentNoteSeedBatchId] = useState(null)
+  const [sbNoteBlocks, setSbNoteBlocks] = useState([])
+  const [sbNoteCurrentText, setSbNoteCurrentText] = useState('')
+  const [savingSbNote, setSavingSbNote] = useState(false)
+
+  const [plants, setPlants] = useState([])
+  const [categories, setCategories] = useState([])
+  const [loading, setLoading] = useState(true)
+  // true una vez que ya cargamos datos al menos una vez (para no ocultar las vistas en las recargas siguientes)
+  const hasLoadedOnce = useRef(false)
+
+  const [plantNotes, setPlantNotes] = useState([])
+  const [floraciones, setFloraciones] = useState([])
+  const [pups, setPups] = useState([])
+  const [showCustomFloracionDate, setShowCustomFloracionDate] = useState(false)
+  const [customFloracionDate, setCustomFloracionDate] = useState('')
+  const [showCustomPupDate, setShowCustomPupDate] = useState(false)
+  const [customPupDate, setCustomPupDate] = useState('')
+  const [newPupCantidad, setNewPupCantidad] = useState('')
+  const [showMoverPupsForm, setShowMoverPupsForm] = useState(false)
+  const [moverPupsCantidad, setMoverPupsCantidad] = useState('')
+  const [backupInProgress, setBackupInProgress] = useState(false)
+  const [homeMenuOpen, setHomeMenuOpen] = useState(false)
+  const [backupProgress, setBackupProgress] = useState('')
+  const [showRetroCompraForm, setShowRetroCompraForm] = useState(false)
+  const [retroCompraForm, setRetroCompraForm] = useState({ proveedor: '', fecha: '', quantity: '', unit_cost: '' })
+  const [loteNoteModalOpen, setLoteNoteModalOpen] = useState(false)
+  const [currentNoteLoteId, setCurrentNoteLoteId] = useState(null)
+  const [loteNoteBlocks, setLoteNoteBlocks] = useState([])
+  const [loteNoteCurrentText, setLoteNoteCurrentText] = useState('')
+  const [categoryNotes, setCategoryNotes] = useState([])
+  const [noteFilterCategory, setNoteFilterCategory] = useState('all')
+  const [globalNoteSearch, setGlobalNoteSearch] = useState('')
+  const [expandedCategoryGroups, setExpandedCategoryGroups] = useState(new Set())
+
+  function toggleCategoryGroupExpanded(id) {
+    setExpandedCategoryGroups(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+  const [categoryNoteModalOpen, setCategoryNoteModalOpen] = useState(false)
+  const [editingCategoryNoteId, setEditingCategoryNoteId] = useState(null)
+  const [categoryNoteCategoryId, setCategoryNoteCategoryId] = useState('')
+  const [categoryNoteBlocks, setCategoryNoteBlocks] = useState([])
+  const [categoryNoteCurrentText, setCategoryNoteCurrentText] = useState('')
+  const [savingCategoryNote, setSavingCategoryNote] = useState(false)
+  const [savingLoteNote, setSavingLoteNote] = useState(false)
+  const [plantNoteModalOpen, setPlantNoteModalOpen] = useState(false)
+  const [currentNotePlantId, setCurrentNotePlantId] = useState(null)
+  const [editingPlantNoteId, setEditingPlantNoteId] = useState(null)
+  const [plantNoteBlocks, setPlantNoteBlocks] = useState([])
+  const [plantNoteCurrentText, setPlantNoteCurrentText] = useState('')
+  const [savingPlantNote, setSavingPlantNote] = useState(false)
+  const [isDictatingPlantNote, setIsDictatingPlantNote] = useState(false)
+  const plantNoteRecognitionRef = useRef(null)
+
+  const [newCatName, setNewCatName] = useState('')
+  const [newCatParentId, setNewCatParentId] = useState('')
+  const [newCatEmoji, setNewCatEmoji] = useState('🌿')
+  const [pendingCount, setPendingCount] = useState(0)
+  const [syncing, setSyncing] = useState(false)
+
+  // El botón Atrás del celular cierra la pantalla/modal abierto en vez de salir de la app.
+  // Si hay varias cosas abiertas a la vez, cierra primero la de más arriba (la última abierta).
+  useBackableModal(view !== 'galeria', () => setView('galeria'))
+  useBackableModal(loteBuilderOpen, () => { setLoteBuilderOpen(false); setLoteLines([]); setLoteNota(''); setLoteProveedor(''); setLoteStep('header'); setLoteAddMode('choose') })
+  useBackableModal(!!activeSelector, () => setActiveSelector(null))
+  useBackableModal(galleryFiltersOpen, () => setGalleryFiltersOpen(false))
+  useBackableModal(shareModalOpen, () => setShareModalOpen(false))
+  useBackableModal(!!bulkCategoryPickerFor, () => { setBulkCategoryPickerFor(null); setBulkCategorySearch('') })
+  useBackableModal(labelQtyModalOpen, () => setLabelQtyModalOpen(false))
+  useBackableModal(categoryNoteModalOpen, () => setCategoryNoteModalOpen(false))
+  useBackableModal(!!photoModalPlantId, () => { setPhotoModalPlantId(null); setPhotoModalMenuOpen(false); setPhotoModalSection('fotos') })
+  useBackableModal(plantNoteModalOpen, () => { setPlantNoteModalOpen(false); setEditingPlantNoteId(null) })
+  useBackableModal(loteNoteModalOpen, () => setLoteNoteModalOpen(false))
+  useBackableModal(sbNoteModalOpen, () => setSbNoteModalOpen(false))
+  useBackableModal(facturaScanOpen, () => setFacturaScanOpen(false))
+  useBackableModal(homeMenuOpen, () => setHomeMenuOpen(false))
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data }) => {
+      setAuthed(!!data.session)
+      setCheckingSession(false)
+    })
+    const { data: listener } = supabase.auth.onAuthStateChange((event, session) => {
+      setAuthed(!!session)
+      if (event === 'PASSWORD_RECOVERY') setRecoveryMode(true)
+    })
+    return () => listener.subscription.unsubscribe()
+  }, [])
+
+  useEffect(() => {
+    if (authed) loadData()
+    else hasLoadedOnce.current = false // al cerrar sesión, la próxima carga vuelve a ser "inicial"
+  }, [authed])
+
+  // Al abrir el modal de una planta (desde Galería, Tabla o Notas) se leen de la base de datos
+  // sus datos de compra e inventario. Si no hay conexión, se usa lo que ya está cargado en memoria.
+  useEffect(() => {
+    if (!photoModalPlantId) {
+      setPlantInv(null); setPlantInvDraft(null); setPlantInvBase(null); setPlantInvMsg('')
+      return
+    }
+    let cancelled = false
+    const plantId = photoModalPlantId
+    ;(async () => {
+      let plantRow = null, cs = null, ls = null
+      try {
+        const r1 = await supabase.from('plants').select('id, category_id, stock, label_printed_count, label_placed_count').eq('id', plantId).single()
+        const r2 = await supabase.from('compras').select('*').eq('plant_id', plantId).order('created_at', { ascending: false })
+        if (!r1.error && !r2.error) {
+          plantRow = r1.data
+          cs = r2.data || []
+          const loteIds = [...new Set(cs.map(c => c.lote_id).filter(Boolean))]
+          if (loteIds.length === 0) ls = []
+          else {
+            const r3 = await supabase.from('compra_lotes').select('*').in('id', loteIds)
+            if (!r3.error) ls = r3.data || []
+          }
+        }
+      } catch (e) { /* sin conexión: se usan los datos en memoria */ }
+      if (cancelled) return
+      if (!plantRow || !cs || !ls) {
+        plantRow = plants.find(pl => pl.id === plantId) || null
+        cs = compras.filter(c => c.plant_id === plantId).sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+        ls = lotes.filter(l => cs.some(c => c.lote_id === l.id))
+      }
+      const draft = {
+        plantId,
+        categoryId: plantRow?.category_id || '',
+        stock: String(plantRow?.stock ?? 0),
+        printed: String(plantRow?.label_printed_count || 0),
+        placed: String(plantRow?.label_placed_count || 0),
+        ...invCompraFields(cs, ls, cs[0]?.id),
+      }
+      setPlantInv({ plantId, compras: cs, lotes: ls })
+      setPlantInvDraft(draft)
+      setPlantInvBase(draft)
+      setPlantInvMsg('')
+    })()
+    return () => { cancelled = true }
+  }, [photoModalPlantId])
+
+  useEffect(() => {
+    if (!plantNoteModalOpen && plantNoteRecognitionRef.current) {
+      plantNoteRecognitionRef.current.stop()
+    }
+  }, [plantNoteModalOpen])
+
+  useEffect(() => {
+    queueLength().then(setPendingCount)
+    function handleOnline() { syncOfflineQueue() }
+    window.addEventListener('online', handleOnline)
+    if (isOnline()) syncOfflineQueue()
+    return () => window.removeEventListener('online', handleOnline)
+  }, [authed])
+
+  async function syncOfflineQueue() {
+    if (!isOnline()) return
+    const len = await queueLength()
+    if (len === 0) return
+    setSyncing(true)
+    await processQueue({
+      decremento: async (payload) => {
+        await supabase.from('decrementos').insert(payload.decremento)
+        if (payload.plantId) {
+          const { data: current } = await supabase.from('plants').select('stock').eq('id', payload.plantId).single()
+          if (current) {
+            await supabase.from('plants').update({ stock: Math.max(0, current.stock - payload.quantity) }).eq('id', payload.plantId)
+          }
+        }
+      },
+      compra_lote_group: async (payload) => {
+        const { data: lote, error: loteError } = await supabase
+          .from('compra_lotes').insert({ nota: payload.nota, proveedor: payload.proveedor }).select().single()
+        if (loteError) throw loteError
+        for (const line of payload.lines) {
+          const usingNew = !line.plant_id && line.new_plant_name
+          const quantity = Number(line.quantity)
+          const unit_cost = Number(line.unit_cost)
+          const sale_price = line.sale_price ? Number(line.sale_price) : null
+          let image_url = null
+          if (line.file) image_url = await uploadImage(line.file)
+          const row = usingNew
+            ? { plant_id: null, plant_name: line.plant_name, new_plant_category: line.new_plant_category, quantity, unit_cost, sale_price, image_url, total: quantity * unit_cost, proveedor: payload.proveedor, status: 'pedido', lote_id: lote.id }
+            : { plant_id: line.plant_id, plant_name: line.plant_name, quantity, unit_cost, sale_price, image_url, total: quantity * unit_cost, proveedor: payload.proveedor, status: 'pedido', lote_id: lote.id }
+          const { data: insertedCompra, error } = await supabase.from('compras').insert(row).select().single()
+          if (error) throw error
+          if (usingNew) {
+            const { data: newPlant } = await supabase.from('plants').insert({
+              name: line.plant_name,
+              category_id: line.new_plant_category || null,
+              price: sale_price || 0,
+              stock: 0,
+              image_url: image_url || null,
+              active: false,
+              flagged: !line.new_plant_category,
+            }).select().single()
+            if (newPlant) await supabase.from('compras').update({ plant_id: newPlant.id }).eq('id', insertedCompra.id)
+          }
+        }
+      },
+      compra_add_line: async (payload) => {
+        const usingNew = !payload.plant_id && payload.new_plant_name
+        let image_url = null
+        if (payload.file) image_url = await uploadImage(payload.file)
+        const row = usingNew
+          ? { plant_id: null, plant_name: payload.new_plant_name, new_plant_category: payload.new_plant_category, quantity: payload.quantity, unit_cost: payload.unit_cost, sale_price: payload.sale_price, image_url, total: payload.quantity * payload.unit_cost, proveedor: payload.proveedor, status: payload.status, lote_id: payload.loteId }
+          : { plant_id: payload.plant_id, plant_name: payload.plant_name, quantity: payload.quantity, unit_cost: payload.unit_cost, sale_price: payload.sale_price, image_url, total: payload.quantity * payload.unit_cost, proveedor: payload.proveedor, status: payload.status, lote_id: payload.loteId }
+        if (payload.status === 'pagado' || payload.status === 'recibido') row.fecha_pago = new Date().toISOString()
+        if (payload.status === 'recibido') row.fecha_recibido = new Date().toISOString()
+        const { data: insertedCompra, error } = await supabase.from('compras').insert(row).select().single()
+        if (error) throw error
+        if (payload.status === 'recibido' && !usingNew && payload.plant_id) {
+          const { data: current } = await supabase.from('plants').select('stock').eq('id', payload.plant_id).single()
+          if (current) {
+            const updates = { stock: current.stock + payload.quantity }
+            if (image_url) updates.image_url = image_url
+            await supabase.from('plants').update(updates).eq('id', payload.plant_id)
+          }
+        } else if (usingNew) {
+          const { data: newPlant } = await supabase.from('plants').insert({
+            name: payload.new_plant_name,
+            category_id: payload.new_plant_category,
+            price: payload.sale_price || 0,
+            stock: payload.status === 'recibido' ? payload.quantity : 0,
+            image_url: image_url || null,
+            active: false,
+          }).select().single()
+          if (newPlant) await supabase.from('compras').update({ plant_id: newPlant.id }).eq('id', insertedCompra.id)
+        }
+      },
+      lote_note: async (payload) => {
+        const finalBlocks = []
+        for (const b of payload.blocks) {
+          if (b.type === 'text') finalBlocks.push(b)
+          else if (b.url) finalBlocks.push(b)
+          else {
+            const url = await uploadImage(b.file, 'category-notes')
+            if (url) finalBlocks.push({ type: b.type, url })
+          }
+        }
+        const { error } = await supabase.from('compra_lotes').update({ content_blocks: finalBlocks }).eq('id', payload.loteId)
+        if (error) throw error
+      },
+      plant_note: async (payload) => {
+        const finalBlocks = []
+        for (const b of payload.blocks) {
+          if (b.type === 'text') finalBlocks.push(b)
+          else if (b.url) finalBlocks.push(b)
+          else {
+            const url = await uploadImage(b.file, 'category-notes')
+            if (url) finalBlocks.push({ type: b.type, url })
+          }
+        }
+        const { error } = payload.editingNoteId
+          ? await supabase.from('plant_notes').update({ content_blocks: finalBlocks }).eq('id', payload.editingNoteId)
+          : await supabase.from('plant_notes').insert({ plant_id: payload.plantId, content_blocks: finalBlocks })
+        if (error) throw error
+      },
+    })
+    setPendingCount(await queueLength())
+    setSyncing(false)
+    loadData()
+  }
+
+  async function loadData() {
+    // Solo la PRIMERA carga muestra "Cargando..." y oculta las vistas. Las recargas siguientes
+    // (que se llaman después de casi cualquier acción) se hacen en segundo plano: así la pantalla
+    // no se desmonta, no se pierde el scroll ni la pestaña/sección en la que estabas.
+    if (!hasLoadedOnce.current) setLoading(true)
+    const { data: cats } = await supabase.from('categories').select('*').order('name')
+    const { data: pls } = await supabase.from('plants').select('*').order('name')
+    const { data: ords } = await supabase.from('orders').select('*, order_items(*)').order('id', { ascending: false })
+    const { data: comps } = await supabase.from('compras').select('*').order('created_at', { ascending: false })
+    const { data: lts } = await supabase.from('compra_lotes').select('*').order('numero', { ascending: false })
+    const { data: vlts } = await supabase.from('venta_lotes').select('*').order('created_at', { ascending: false })
+    const { data: decs } = await supabase.from('decrementos').select('*').order('created_at', { ascending: false })
+    const { data: pnts } = await supabase.from('plant_notes').select('*').order('created_at', { ascending: false })
+    const { data: flrs } = await supabase.from('floraciones').select('*').order('fecha', { ascending: false })
+    const { data: pps } = await supabase.from('plant_pups').select('*').order('fecha', { ascending: false })
+    setCategories(cats || [])
+    setPlants(pls || [])
+    setOrders(ords || [])
+    setCompras(comps || [])
+    setLotes(lts || [])
+    setVentaLotes(vlts || [])
+    setDecrementos(decs || [])
+    setPlantNotes(pnts || [])
+    setFloraciones(flrs || [])
+    setPups(pps || [])
+    const { data: sbs } = await supabase.from('seed_batches').select('*').order('fecha', { ascending: false })
+    const { data: sbevs } = await supabase.from('seed_batch_events').select('*').order('fecha', { ascending: false })
+    const { data: catNotes } = await supabase.from('category_notes').select('*').order('updated_at', { ascending: false })
+    setSeedBatches(sbs || [])
+    setSeedBatchEvents(sbevs || [])
+    setCategoryNotes(catNotes || [])
+    hasLoadedOnce.current = true
+    setLoading(false)
+  }
+
+  async function handleLogin(e) {
+    e.preventDefault()
+    setLoggingIn(true)
+    setFailed(false)
+    const { error } = await supabase.auth.signInWithPassword({ email, password })
+    if (error) {
+      setFailed(true)
+    }
+    setLoggingIn(false)
+  }
+
+  async function handleForgotPassword(e) {
+    e.preventDefault()
+    if (!resetEmail.trim()) return
+    setSendingReset(true)
+    const { error } = await supabase.auth.resetPasswordForEmail(resetEmail, {
+      redirectTo: window.location.origin + window.location.pathname,
+    })
+    setSendingReset(false)
+    if (error) {
+      alert('Error al enviar el correo: ' + error.message)
+      return
+    }
+    setResetSent(true)
+  }
+
+  async function handleUpdatePassword(e) {
+    e.preventDefault()
+    if (!newPassword.trim()) return
+    setUpdatingPassword(true)
+    const { error } = await supabase.auth.updateUser({ password: newPassword })
+    setUpdatingPassword(false)
+    if (error) {
+      alert('Error al actualizar la contraseña: ' + error.message)
+      return
+    }
+    setNewPassword('')
+    setRecoveryMode(false)
+    alert('Contraseña actualizada. Ya puedes usarla la próxima vez que entres.')
+  }
+
+  async function handleLogout() {
+    await supabase.auth.signOut()
+  }
+
+  async function uploadImage(file, bucket = 'plant-photos') {
+    const ext = file.name.split('.').pop()
+    const fileName = `${Date.now()}.${ext}`
+    const { error } = await supabaseStorage.storage.from(bucket).upload(fileName, file)
+    if (error) { alert('Error al subir el archivo: ' + error.message); return null }
+    const { data } = supabaseStorage.storage.from(bucket).getPublicUrl(fileName)
+    return data.publicUrl
+  }
+
+
+  // ---------- Ingresos (compras agrupadas en lotes) ----------
+  // Carga masiva dentro de "Nueva compra": cada foto se agrega directo a la lista de
+  // productos (como una línea "planta nueva" más), sin subirla todavía — recién se sube
+  // al tocar "Guardar compra", igual que el resto de las líneas.
+  function addBulkPhotosToLoteBuilder(fileList) {
+    const files = Array.from(fileList || [])
+    if (files.length === 0) return
+    const startIndex = loteLines.length
+    const newEntries = files.map((file, i) => {
+      const baseName = file.name.replace(/\.[^/.]+$/, '').replace(/[_-]+/g, ' ').trim()
+      const name = baseName || `Planta sin nombre ${startIndex + i + 1}`
+      return {
+        plant_id: '',
+        new_plant_name: name,
+        new_plant_category: bulkChosenCategoryId || null,
+        plant_name: name,
+        quantity: '1',
+        unit_cost: '0',
+        sale_price: '',
+        file,
+      }
+    })
+    setLoteLines(prev => [...prev, ...newEntries])
+  }
+
+  function addLineToLote(e) {
+    e.preventDefault()
+    const usingNew = !lineForm.plant_id && lineForm.new_plant_name
+    if ((!lineForm.plant_id && !usingNew) || !lineForm.quantity) {
+      alert('Selecciona una planta o escribe el nombre de una nueva, y completa la cantidad')
+      return false
+    }
+    if (usingNew && !lineForm.new_plant_category) {
+      alert('Selecciona una categoría para la planta nueva')
+      return false
+    }
+    if (usingNew) {
+      const nameNormalized = lineForm.new_plant_name.trim().toLowerCase()
+      const existing = plants.find(p => p.name.trim().toLowerCase() === nameNormalized)
+      if (existing) {
+        alert(`Ya existe una planta llamada "${existing.name}". Selecciónala de la lista "Selecciona planta existente" en vez de escribirla como nueva, para no duplicarla.`)
+        return false
+      }
+    }
+    const plant = lineForm.plant_id ? plants.find(p => p.id === lineForm.plant_id) : null
+    setLoteLines(prev => [...prev, { ...lineForm, plant_name: usingNew ? lineForm.new_plant_name : (plant ? plant.name : '') }])
+    setLineForm({ plant_id: '', new_plant_name: '', new_plant_category: '', quantity: '', unit_cost: '', sale_price: '', file: null })
+    return true
+  }
+
+  function removeLoteLine(index) {
+    setLoteLines(prev => prev.filter((_, i) => i !== index))
+  }
+
+  async function saveLote() {
+    if (loteLines.length === 0) { alert('Agrega al menos una planta a la compra'); return }
+    setSavingLote(true)
+
+    if (!isOnline()) {
+      await addToQueue('compra_lote_group', { nota: loteNota, proveedor: loteProveedor, lines: loteLines })
+      setLoteNota('')
+      setLoteProveedor('')
+      setLoteLines([])
+      setLoteBuilderOpen(false)
+      setSavingLote(false)
+      setPendingCount(await queueLength())
+      alert('Sin conexión: la compra se guardó en el celular y se subirá sola cuando vuelva la señal.')
+      return
+    }
+
+    const { data: lote, error: loteError } = await supabase
+      .from('compra_lotes').insert({ nota: loteNota, proveedor: loteProveedor }).select().single()
+    if (loteError) { alert('Error al crear la compra: ' + loteError.message); setSavingLote(false); return }
+
+    for (const line of loteLines) {
+      const usingNew = !line.plant_id && line.new_plant_name
+      const quantity = Number(line.quantity)
+      const unit_cost = Number(line.unit_cost)
+      const sale_price = line.sale_price ? Number(line.sale_price) : null
+      let image_url = null
+      if (line.file) image_url = await uploadImage(line.file)
+
+      const row = usingNew
+        ? { plant_id: null, plant_name: line.plant_name, new_plant_category: line.new_plant_category, quantity, unit_cost, sale_price, image_url, total: quantity * unit_cost, proveedor: loteProveedor, status: 'pedido', lote_id: lote.id }
+        : { plant_id: line.plant_id, plant_name: line.plant_name, quantity, unit_cost, sale_price, image_url, total: quantity * unit_cost, proveedor: loteProveedor, status: 'pedido', lote_id: lote.id }
+
+      const { data: insertedCompra, error } = await supabase.from('compras').insert(row).select().single()
+      if (error) { alert('Error al guardar una de las plantas: ' + error.message); continue }
+
+      if (usingNew) {
+        // Se crea la planta de inmediato (oculta, stock 0) para que ya aparezca en Galería
+        // y sus filtros de compra, sin esperar a que se marque "Recibido".
+        const { data: newPlant } = await supabase.from('plants').insert({
+          name: line.plant_name,
+          category_id: line.new_plant_category || null,
+          price: sale_price || 0,
+          stock: 0,
+          image_url: image_url || null,
+          active: false,
+          flagged: !line.new_plant_category,
+        }).select().single()
+        if (newPlant) await supabase.from('compras').update({ plant_id: newPlant.id }).eq('id', insertedCompra.id)
+      }
+    }
+    setLoteNota('')
+    setLoteProveedor('')
+    setLoteLines([])
+    setLoteBuilderOpen(false)
+    setSavingLote(false)
+    loadData()
+  }
+
+  async function saveAddToLote(lote) {
+    const usingNew = !addToLoteForm.plant_id && addToLoteForm.new_plant_name
+    if ((!addToLoteForm.plant_id && !usingNew) || !addToLoteForm.quantity) {
+      alert('Selecciona una planta o escribe el nombre de una nueva, y completa la cantidad')
+      return
+    }
+    if (usingNew && !addToLoteForm.new_plant_category) {
+      alert('Selecciona una categoría para la planta nueva')
+      return
+    }
+    setSavingAddToLote(true)
+    const plant = addToLoteForm.plant_id ? plants.find(p => p.id === addToLoteForm.plant_id) : null
+    const quantity = Number(addToLoteForm.quantity)
+    const unit_cost = Number(addToLoteForm.unit_cost) || 0
+    const sale_price = addToLoteForm.sale_price ? Number(addToLoteForm.sale_price) : null
+
+    // Toma el mismo estado que ya tienen las demás líneas de esta compra
+    const lineasDeEsteLote = compras.filter(c => c.lote_id === lote.id)
+    const status = lineasDeEsteLote.some(c => c.status === 'recibido')
+      ? 'recibido'
+      : lineasDeEsteLote.some(c => c.status === 'pagado')
+        ? 'pagado'
+        : 'pedido'
+
+    if (!isOnline()) {
+      await addToQueue('compra_add_line', {
+        plant_id: addToLoteForm.plant_id || null,
+        plant_name: plant ? plant.name : '',
+        new_plant_name: addToLoteForm.new_plant_name,
+        new_plant_category: addToLoteForm.new_plant_category,
+        quantity, unit_cost, sale_price,
+        file: addToLoteForm.file,
+        proveedor: lote.proveedor,
+        status,
+        loteId: lote.id,
+      })
+      setAddToLoteForm({ plant_id: '', new_plant_name: '', new_plant_category: '', quantity: '', unit_cost: '', sale_price: '', file: null })
+      setAddToLoteId(null)
+      setSavingAddToLote(false)
+      setPendingCount(await queueLength())
+      alert('Sin conexión: se guardó en el celular y se subirá sola cuando vuelva la señal.')
+      return
+    }
+
+    let image_url = null
+    if (addToLoteForm.file) image_url = await uploadImage(addToLoteForm.file)
+
+    const row = usingNew
+      ? { plant_id: null, plant_name: addToLoteForm.new_plant_name, new_plant_category: addToLoteForm.new_plant_category, quantity, unit_cost, sale_price, image_url, total: quantity * unit_cost, proveedor: lote.proveedor, status, lote_id: lote.id }
+      : { plant_id: addToLoteForm.plant_id, plant_name: plant ? plant.name : '', quantity, unit_cost, sale_price, image_url, total: quantity * unit_cost, proveedor: lote.proveedor, status, lote_id: lote.id }
+
+    if (status === 'pagado' || status === 'recibido') row.fecha_pago = new Date().toISOString()
+    if (status === 'recibido') row.fecha_recibido = new Date().toISOString()
+
+    const { data: insertedCompra, error } = await supabase.from('compras').insert(row).select().single()
+    if (error) { alert('Error al agregar la planta: ' + error.message); setSavingAddToLote(false); return }
+
+    // La foto se aplica de inmediato si es una planta existente (no afecta el stock)
+    if (!usingNew && plant && image_url) {
+      await supabase.from('plants').update({ image_url }).eq('id', plant.id)
+    }
+
+    if (status === 'recibido' && !usingNew && plant) {
+      // Compra de planta existente ya recibida: sumar stock de inmediato
+      await supabase.from('plants').update({ stock: plant.stock + quantity }).eq('id', plant.id)
+    } else if (usingNew) {
+      // Planta nueva: se crea de inmediato en Galería (con stock 0 si aún no llega), y se enlaza a la compra
+      const { data: newPlant } = await supabase.from('plants').insert({
+        name: addToLoteForm.new_plant_name,
+        category_id: addToLoteForm.new_plant_category,
+        price: sale_price || 0,
+        stock: status === 'recibido' ? quantity : 0,
+        image_url: image_url || null,
+        active: false,
+      }).select().single()
+      if (newPlant) await supabase.from('compras').update({ plant_id: newPlant.id }).eq('id', insertedCompra.id)
+    }
+
+    setAddToLoteForm({ plant_id: '', new_plant_name: '', new_plant_category: '', quantity: '', unit_cost: '', sale_price: '', file: null })
+    setAddToLoteId(null)
+    setSavingAddToLote(false)
+    loadData()
+  }
+
+  async function markLotePagado(loteId) {
+    if (approvingIds.includes(loteId)) return
+    const lineas = compras.filter(c => c.lote_id === loteId && c.status === 'pedido')
+    if (lineas.length === 0) return
+    setApprovingIds(prev => [...prev, loteId])
+    const ids = lineas.map(c => c.id)
+    const patch = { status: 'pagado', fecha_pago: new Date().toISOString() }
+    const undo = patchLocal(setCompras, compras, ids, patch) // se ve al instante
+    const { error } = await supabase.from('compras').update(patch).in('id', ids) // una sola llamada
+    if (error) { undo(); alert('No se pudo marcar como pagado: ' + error.message) }
+    setApprovingIds(prev => prev.filter(id => id !== loteId))
+  }
+
+  async function markLoteRecibido(loteId) {
+    if (approvingIds.includes(loteId)) return
+    const lineas = compras.filter(c => c.lote_id === loteId && c.status === 'pagado')
+    if (lineas.length === 0) return
+    setApprovingIds(prev => [...prev, loteId])
+    const ids = lineas.map(c => c.id)
+    const patch = { status: 'recibido', fecha_recibido: new Date().toISOString() }
+    const undo = patchLocal(setCompras, compras, ids, patch) // se ve al instante
+    const { error } = await supabase.from('compras').update(patch).in('id', ids) // una sola llamada
+    if (error) {
+      undo()
+      alert('No se pudo marcar como recibido: ' + error.message)
+    } else {
+      const stockNow = {}
+      for (const c of lineas) await applyRecepcionAPlanta(c, stockNow)
+    }
+    setApprovingIds(prev => prev.filter(id => id !== loteId))
+  }
+
+  async function renumberLotesAfterDelete(table, list, deletedNumero) {
+    if (deletedNumero == null) return
+    const toShift = list.filter(l => l.numero > deletedNumero).sort((a, b) => a.numero - b.numero)
+    for (const l of toShift) {
+      await supabase.from(table).update({ numero: l.numero - 1 }).eq('id', l.id)
+    }
+  }
+
+  async function deleteLote(loteId) {
+    if (!confirm('¿Eliminar esta compra completa? Se borrarán todas las plantas registradas en ella. Esta acción no se puede deshacer.')) return
+    const deletedNumero = lotes.find(l => l.id === loteId)?.numero
+    const lineas = compras.filter(c => c.lote_id === loteId)
+    for (const c of lineas) {
+      if (c.status === 'recibido' && c.plant_id) {
+        const { data: current } = await supabase.from('plants').select('stock').eq('id', c.plant_id).single()
+        if (current) {
+          await supabase.from('plants').update({ stock: Math.max(0, current.stock - c.quantity) }).eq('id', c.plant_id)
+        }
+      }
+    }
+    const plantIds = [...new Set(lineas.map(c => c.plant_id).filter(Boolean))]
+    const { error: comprasError } = await supabase.from('compras').delete().eq('lote_id', loteId)
+    if (comprasError) {
+      alert('Error al borrar las plantas de la compra: ' + comprasError.message)
+      return
+    }
+    const { error: loteError } = await supabase.from('compra_lotes').delete().eq('id', loteId)
+    if (loteError) {
+      alert('Error al borrar la compra: ' + loteError.message)
+      return
+    }
+    // Intentamos borrar también las plantas que quedaron sin ninguna otra referencia
+    // (compras, ventas, notas, etc.). Si una planta todavía tiene historial en otro
+    // lado, esta operación simplemente falla en silencio y la planta queda (oculta).
+    for (const plantId of plantIds) {
+      await supabase.from('plants').delete().eq('id', plantId)
+    }
+    await renumberLotesAfterDelete('compra_lotes', lotes, deletedNumero)
+    loadData()
+  }
+
+  async function cancelVentaLote(loteId) {
+    const lote = ventaLotes.find(l => l.id === loteId)
+    if (!lote) return
+    if (lote.status === 'cancelada') { alert('Esta venta ya está cancelada.'); return }
+    const motivo = prompt('¿Por qué se cancela esta venta? (ej. "Cliente no pagó", "Se arrepintió")')
+    if (motivo === null) return // el usuario le dio "Cancelar" al prompt, no seguimos
+    const lineas = decrementos.filter(d => d.lote_id === loteId)
+    for (const d of lineas) {
+      if (d.plant_id) {
+        const { data: current } = await supabase.from('plants').select('stock').eq('id', d.plant_id).single()
+        if (current) {
+          await supabase.from('plants').update({ stock: current.stock + d.quantity }).eq('id', d.plant_id)
+        }
+      }
+    }
+    const { error } = await supabase
+      .from('venta_lotes')
+      .update({ status: 'cancelada', motivo_cancelacion: motivo || 'Sin motivo especificado' })
+      .eq('id', loteId)
+    if (error) {
+      alert('Error al cancelar la venta: ' + error.message)
+      return
+    }
+    loadData()
+  }
+
+  async function deleteVentaLote(loteId) {
+    if (!confirm('¿Eliminar esta venta completa? Se borrarán todas las plantas registradas en ella. Esta acción no se puede deshacer.')) return
+    const lote = ventaLotes.find(l => l.id === loteId)
+    const deletedNumero = lote?.numero
+    const yaCancelada = lote?.status === 'cancelada'
+    const lineas = decrementos.filter(d => d.lote_id === loteId)
+    if (!yaCancelada) {
+      for (const d of lineas) {
+        if (d.plant_id) {
+          const { data: current } = await supabase.from('plants').select('stock').eq('id', d.plant_id).single()
+          if (current) {
+            await supabase.from('plants').update({ stock: current.stock + d.quantity }).eq('id', d.plant_id)
+          }
+        }
+      }
+    }
+    const { error: decError } = await supabase.from('decrementos').delete().eq('lote_id', loteId)
+    if (decError) {
+      alert('Error al borrar las plantas de la venta: ' + decError.message)
+      return
+    }
+    const { error: loteError } = await supabase.from('venta_lotes').delete().eq('id', loteId)
+    if (loteError) {
+      alert('Error al borrar la venta: ' + loteError.message)
+      return
+    }
+    await renumberLotesAfterDelete('venta_lotes', ventaLotes, deletedNumero)
+    loadData()
+  }
+
+  async function updateLoteProveedor(lote, value) {
+    const { error } = await supabase.from('compra_lotes').update({ proveedor: value }).eq('id', lote.id)
+    if (error) { alert('Error al guardar el cambio: ' + error.message); return }
+    // Actualiza también el proveedor de todas las líneas de esta compra, para mantenerlo consistente
+    await supabase.from('compras').update({ proveedor: value }).eq('lote_id', lote.id)
+    loadData()
+  }
+
+  async function updateLoteExtra(lote, field, value) {
+    const num = Number(value) || 0
+    const { error } = await supabase.from('compra_lotes').update({ [field]: num }).eq('id', lote.id)
+    if (error) { alert('Error al guardar el cambio: ' + error.message); return }
+    loadData()
+  }
+
+  // Color pastel de fondo para la tarjeta de una compra/venta según su estado:
+  // si todas las líneas llegaron al último paso (recibido/entregado) -> verde,
+  // si alguna ya está pagada (pero no todas recibidas) -> celeste, si no -> amarillo.
+  function statusPastelBg(lineas, finalStatus) {
+    if (lineas.length === 0) return undefined
+    if (lineas.every(l => l.status === finalStatus)) return '#E3F4E1' // verde pastel
+    if (lineas.some(l => l.status === 'pagado' || l.status === finalStatus)) return '#DCEBF9' // celeste pastel
+    return '#FFF6D8' // amarillo pastel
+  }
+
+  function loteProration(lote, lineas) {
+    const subtotal = lineas.reduce((sum, c) => sum + Number(c.unit_cost) * Number(c.quantity), 0)
+    const extras = Number(lote.envio1 || 0) + Number(lote.envio2 || 0) + Number(lote.varios || 0)
+    const withExtra = lineas.map(c => {
+      const value = Number(c.unit_cost) * Number(c.quantity)
+      const proportion = subtotal > 0 ? value / subtotal : 0
+      const prorated = proportion * extras
+      return { ...c, _value: value, _prorated: prorated, _lineTotal: value + prorated }
+    })
+    return { subtotal, extras, total: subtotal + extras, lineas: withExtra }
+  }
+
+  async function updateOrderExtra(order, field, value) {
+    const num = Number(value) || 0
+    const { error } = await supabase.from('orders').update({ [field]: num }).eq('id', order.id)
+    if (error) { alert('Error al guardar el cambio: ' + error.message); return }
+    loadData()
+  }
+
+  function orderProration(order) {
+    const items = (order.order_items || []).map(it => {
+      const plant = plants.find(p => p.id === it.plant_id)
+      const unitPrice = it.price ?? plant?.price ?? 0
+      return { ...it, _plant: plant, _unitPrice: Number(unitPrice) }
+    })
+    const subtotal = items.reduce((sum, it) => sum + it._unitPrice * Number(it.quantity), 0)
+    const extras = Number(order.envio1 || 0) + Number(order.envio2 || 0) + Number(order.varios || 0)
+    const withExtra = items.map(it => {
+      const value = it._unitPrice * Number(it.quantity)
+      const proportion = subtotal > 0 ? value / subtotal : 0
+      const prorated = proportion * extras
+      return { ...it, _value: value, _prorated: prorated, _lineTotal: value + prorated }
+    })
+    return { subtotal, extras, total: subtotal + extras, items: withExtra }
+  }
+
+  const [compraDrafts, setCompraDrafts] = useState({})
+  const [loteDrafts, setLoteDrafts] = useState({})
+
+  function setLineDraft(compraId, field, value) {
+    setCompraDrafts(prev => ({ ...prev, [compraId]: { ...prev[compraId], [field]: value } }))
+  }
+
+  function setLoteDraftField(loteId, field, value) {
+    setLoteDrafts(prev => ({ ...prev, [loteId]: { ...prev[loteId], [field]: value } }))
+  }
+
+  // Fecha de HOY (o de una fecha dada) en la zona horaria local, no UTC.
+  // new Date().toISOString() siempre convierte a UTC primero, lo que en Ecuador
+  // (UTC-5) puede adelantar la fecha un día si es de noche. Esto la corrige.
+  function localDateISO(d = new Date()) {
+    const date = new Date(d)
+    const offsetMs = date.getTimezoneOffset() * 60000
+    return new Date(date.getTime() - offsetMs).toISOString().slice(0, 10)
+  }
+
+  function dateToInputValue(dateStr) {
+    if (!dateStr) return ''
+    const d = new Date(dateStr)
+    if (isNaN(d)) return ''
+    return localDateISO(d)
+  }
+
+  async function commitCompraLineDraft(compra, draft) {
+    if (!draft) return
+    const updates = {}
+    if (draft.plant_name !== undefined) updates.plant_name = draft.plant_name
+    const quantity = draft.quantity !== undefined ? (Number(draft.quantity) || 0) : Number(compra.quantity)
+    const unit_cost = draft.unit_cost !== undefined ? (Number(draft.unit_cost) || 0) : Number(compra.unit_cost)
+    if (draft.quantity !== undefined) updates.quantity = quantity
+    if (draft.unit_cost !== undefined) updates.unit_cost = unit_cost
+    if (draft.quantity !== undefined || draft.unit_cost !== undefined) updates.total = quantity * unit_cost
+    if (draft.sale_price !== undefined) updates.sale_price = draft.sale_price === '' ? null : Number(draft.sale_price)
+    if (draft.proveedor !== undefined) updates.proveedor = draft.proveedor
+    if (Object.keys(updates).length === 0) return
+    const { error } = await supabase.from('compras').update(updates).eq('id', compra.id)
+    if (error) { alert(`Error al guardar "${draft.plant_name || compra.plant_name}": ${error.message}`); return }
+    // Si cambió el nombre de una línea enlazada a una planta, se renombra también la planta
+    const newName = (draft.plant_name ?? '').trim()
+    if (compra.plant_id && newName && newName !== compraNombre(compra)) await syncPlantName(compra.plant_id, newName)
+  }
+
+  async function commitLoteDraft(lote) {
+    const draft = loteDrafts[lote.id]
+    if (!draft) return
+    const updates = {}
+    if (draft.proveedor !== undefined) updates.proveedor = draft.proveedor
+    if (draft.fecha !== undefined && draft.fecha) updates.created_at = new Date(draft.fecha + 'T12:00:00').toISOString()
+    if (draft.envio1 !== undefined) updates.envio1 = Number(draft.envio1) || 0
+    if (draft.envio2 !== undefined) updates.envio2 = Number(draft.envio2) || 0
+    if (draft.varios !== undefined) updates.varios = Number(draft.varios) || 0
+    if (Object.keys(updates).length === 0) return
+    const { error } = await supabase.from('compra_lotes').update(updates).eq('id', lote.id)
+    if (error) alert('Error al guardar los datos de la compra: ' + error.message)
+  }
+
+  async function finishEditingLote(lote, lineas) {
+    await commitLoteDraft(lote)
+    for (const c of lineas) {
+      if (compraDrafts[c.id]) await commitCompraLineDraft(c, compraDrafts[c.id])
+    }
+    setCompraDrafts(prev => {
+      const next = { ...prev }
+      lineas.forEach(c => delete next[c.id])
+      return next
+    })
+    setLoteDrafts(prev => {
+      const next = { ...prev }
+      delete next[lote.id]
+      return next
+    })
+    setEditingLoteId(null)
+    await loadData()
+  }
+
+  async function updateCompraField(compra, field, rawValue) {
+    let updates = {}
+    if (field === 'plant_name') {
+      updates.plant_name = rawValue
+    } else if (field === 'quantity') {
+      const quantity = Number(rawValue) || 0
+      updates.quantity = quantity
+      updates.total = quantity * Number(compra.unit_cost)
+    } else if (field === 'unit_cost') {
+      const unit_cost = Number(rawValue) || 0
+      updates.unit_cost = unit_cost
+      updates.total = Number(compra.quantity) * unit_cost
+    } else if (field === 'sale_price') {
+      updates.sale_price = rawValue === '' ? null : Number(rawValue)
+    } else if (field === 'proveedor') {
+      updates.proveedor = rawValue
+    } else if (field === 'image_url') {
+      updates.image_url = rawValue
+    }
+    const { error } = await supabase.from('compras').update(updates).eq('id', compra.id)
+    if (error) { alert('Error al guardar el cambio: ' + error.message); return }
+    if (field === 'plant_name') {
+      const newName = (rawValue ?? '').trim()
+      if (compra.plant_id && newName && newName !== compraNombre(compra)) await syncPlantName(compra.plant_id, newName)
+    }
+    loadData()
+  }
+
+  // Nombre "vivo" de una línea de compra: si la línea está enlazada a una planta (plant_id),
+  // se muestra el nombre ACTUAL de esa planta, así los renombres hechos en la Tabla se reflejan
+  // solos en Ingresos. Si no hay planta enlazada, se usa el texto guardado en la compra.
+  function compraNombre(c) {
+    const plant = c.plant_id ? plants.find(p => p.id === c.plant_id) : null
+    return plant?.name || c.plant_name || ''
+  }
+
+  // Renombra una planta y deja sincronizado el nombre guardado en todas sus compras.
+  async function syncPlantName(plantId, name) {
+    const { error } = await supabase.from('plants').update({ name }).eq('id', plantId)
+    if (error) { alert('No se pudo renombrar la planta: ' + error.message); return false }
+    await supabase.from('compras').update({ plant_name: name }).eq('plant_id', plantId)
+    return true
+  }
+
+  // Aplica un cambio a filas del estado local (se ve al instante, sin recargar nada) y devuelve
+  // una función para deshacerlo si Supabase falla.
+  function patchLocal(setter, currentList, ids, patch) {
+    const before = currentList.filter(r => ids.includes(r.id))
+    setter(prev => prev.map(r => (ids.includes(r.id) ? { ...r, ...patch } : r)))
+    return () => setter(prev => prev.map(r => before.find(b => b.id === r.id) || r))
+  }
+
+  // Efecto de recibir una compra sobre su planta (stock, activa, foto), en Supabase y en el estado local.
+  // stockNow acumula el stock ya sumado en esta misma tanda, por si varias líneas son de la misma planta.
+  async function applyRecepcionAPlanta(c, stockNow = {}) {
+    if (c.plant_id) {
+      const plant = plants.find(p => p.id === c.plant_id)
+      if (!plant) return
+      const updates = { stock: (stockNow[plant.id] ?? plant.stock) + c.quantity }
+      if (c.new_plant_category) updates.active = true
+      if (c.image_url) updates.image_url = c.image_url
+      const { error } = await supabase.from('plants').update(updates).eq('id', plant.id)
+      if (error) { alert(`La compra quedó recibida, pero no se pudo sumar el stock de "${plant.name}": ${error.message}`); return }
+      stockNow[plant.id] = updates.stock
+      setPlants(prev => prev.map(p => (p.id === plant.id ? { ...p, ...updates } : p)))
+    } else if (c.plant_name) {
+      // Compatibilidad con compras antiguas creadas antes de que la planta se generara de inmediato
+      const { data: newPlant, error } = await supabase.from('plants').insert({
+        name: c.plant_name,
+        category_id: c.new_plant_category || null,
+        price: c.sale_price || 0,
+        stock: c.quantity,
+        image_url: c.image_url || null,
+        active: true,
+        flagged: !c.new_plant_category,
+      }).select().single()
+      if (error || !newPlant) { alert(`La compra quedó recibida, pero no se pudo crear la planta "${c.plant_name}".`); return }
+      await supabase.from('compras').update({ plant_id: newPlant.id }).eq('id', c.id)
+      setPlants(prev => [...prev, newPlant])
+      setCompras(prev => prev.map(x => (x.id === c.id ? { ...x, plant_id: newPlant.id } : x)))
+    }
+  }
+
+  async function markCompraPagada(compra) {
+    if (compra.status !== 'pedido' || approvingIds.includes(compra.id)) return
+    setApprovingIds(prev => [...prev, compra.id])
+    const patch = { status: 'pagado', fecha_pago: new Date().toISOString() }
+    const undo = patchLocal(setCompras, compras, [compra.id], patch) // se ve al instante
+    const { error } = await supabase.from('compras').update(patch).eq('id', compra.id)
+    if (error) { undo(); alert('No se pudo marcar como pagado: ' + error.message) }
+    setApprovingIds(prev => prev.filter(id => id !== compra.id))
+  }
+
+  async function markCompraRecibida(compra) {
+    if (compra.status !== 'pagado' || approvingIds.includes(compra.id)) return
+    setApprovingIds(prev => [...prev, compra.id])
+    const patch = { status: 'recibido', fecha_recibido: new Date().toISOString() }
+    const undo = patchLocal(setCompras, compras, [compra.id], patch) // se ve al instante
+    const { error } = await supabase.from('compras').update(patch).eq('id', compra.id)
+    if (error) {
+      undo()
+      alert('No se pudo marcar como recibido: ' + error.message)
+    } else {
+      await applyRecepcionAPlanta(compra)
+    }
+    setApprovingIds(prev => prev.filter(id => id !== compra.id))
+  }
+
+  // ---------- Nota libre por compra ----------
+  function openLoteNote(lote) {
+    setCurrentNoteLoteId(lote.id)
+    setLoteNoteBlocks(lote.content_blocks || [])
+    setLoteNoteCurrentText('')
+    setLoteNoteModalOpen(true)
+  }
+
+  function insertPhotoBlockToLoteNote(file) {
+    if (!file) return
+    setLoteNoteBlocks(prev => {
+      const next = [...prev]
+      if (loteNoteCurrentText.trim()) next.push({ type: 'text', content: loteNoteCurrentText })
+      next.push({ type: 'photo', file })
+      return next
+    })
+    setLoteNoteCurrentText('')
+  }
+
+  function insertVideoBlockToLoteNote(file) {
+    if (!file) return
+    setLoteNoteBlocks(prev => {
+      const next = [...prev]
+      if (loteNoteCurrentText.trim()) next.push({ type: 'text', content: loteNoteCurrentText })
+      next.push({ type: 'video', file })
+      return next
+    })
+    setLoteNoteCurrentText('')
+  }
+
+  function removeLastLoteNoteBlock() {
+    setLoteNoteBlocks(prev => prev.slice(0, -1))
+  }
+
+  async function saveLoteNote() {
+    if (!currentNoteLoteId) return
+    const blocks = [...loteNoteBlocks]
+    if (loteNoteCurrentText.trim()) blocks.push({ type: 'text', content: loteNoteCurrentText })
+    setSavingLoteNote(true)
+
+    if (!isOnline()) {
+      await addToQueue('lote_note', { loteId: currentNoteLoteId, blocks })
+      setLoteNoteBlocks([])
+      setLoteNoteCurrentText('')
+      setSavingLoteNote(false)
+      setLoteNoteModalOpen(false)
+      setPendingCount(await queueLength())
+      alert('Sin conexión: la nota se guardó en el celular y se subirá sola cuando vuelva la señal.')
+      return
+    }
+
+    const finalBlocks = []
+    for (const b of blocks) {
+      if (b.type === 'text') {
+        finalBlocks.push(b)
+      } else if (b.url) {
+        finalBlocks.push(b)
+      } else {
+        const url = await uploadImage(b.file, 'category-notes')
+        if (url) finalBlocks.push({ type: b.type, url })
+      }
+    }
+    const { error } = await supabase.from('compra_lotes').update({ content_blocks: finalBlocks }).eq('id', currentNoteLoteId)
+    if (error) { alert('Error al guardar la nota: ' + error.message); setSavingLoteNote(false); return }
+    setLoteNoteBlocks([])
+    setLoteNoteCurrentText('')
+    setSavingLoteNote(false)
+    setLoteNoteModalOpen(false)
+    loadData()
+  }
+
+  // ---------- Notas (separadas de las plantas, ej. notas por categoría o generales) ----------
+  function openNewCategoryNote() {
+    setEditingCategoryNoteId(null)
+    setCategoryNoteCategoryId('')
+    setCategoryNoteBlocks([])
+    setCategoryNoteCurrentText('')
+    setCategoryNoteModalOpen(true)
+  }
+
+  function openEditCategoryNote(note) {
+    setEditingCategoryNoteId(note.id)
+    setCategoryNoteCategoryId(note.category_id || '')
+    setCategoryNoteBlocks(note.content_blocks || [])
+    setCategoryNoteCurrentText('')
+    setCategoryNoteModalOpen(true)
+  }
+
+  function insertPhotoBlockToCategoryNote(file) {
+    if (!file) return
+    setCategoryNoteBlocks(prev => {
+      const next = [...prev]
+      if (categoryNoteCurrentText.trim()) next.push({ type: 'text', content: categoryNoteCurrentText })
+      next.push({ type: 'photo', file })
+      return next
+    })
+    setCategoryNoteCurrentText('')
+  }
+
+  function insertVideoBlockToCategoryNote(file) {
+    if (!file) return
+    setCategoryNoteBlocks(prev => {
+      const next = [...prev]
+      if (categoryNoteCurrentText.trim()) next.push({ type: 'text', content: categoryNoteCurrentText })
+      next.push({ type: 'video', file })
+      return next
+    })
+    setCategoryNoteCurrentText('')
+  }
+
+  function removeLastCategoryNoteBlock() {
+    setCategoryNoteBlocks(prev => prev.slice(0, -1))
+  }
+
+  async function saveCategoryNote() {
+    const blocks = [...categoryNoteBlocks]
+    if (categoryNoteCurrentText.trim()) blocks.push({ type: 'text', content: categoryNoteCurrentText })
+    if (blocks.length === 0) { alert('Escribe algo o agrega una foto/video antes de guardar'); return }
+    setSavingCategoryNote(true)
+    const finalBlocks = []
+    for (const b of blocks) {
+      if (b.type === 'text') {
+        finalBlocks.push(b)
+      } else if (b.url) {
+        finalBlocks.push(b)
+      } else {
+        const url = await uploadImage(b.file, 'category-notes')
+        if (url) finalBlocks.push({ type: b.type, url })
+      }
+    }
+    if (editingCategoryNoteId) {
+      const { error } = await supabase.from('category_notes').update({ content_blocks: finalBlocks, category_id: categoryNoteCategoryId || null, updated_at: new Date().toISOString() }).eq('id', editingCategoryNoteId)
+      if (error) { alert('Error al guardar la nota: ' + error.message); setSavingCategoryNote(false); return }
+    } else {
+      const { error } = await supabase.from('category_notes').insert({ content_blocks: finalBlocks, category_id: categoryNoteCategoryId || null })
+      if (error) { alert('Error al guardar la nota: ' + error.message); setSavingCategoryNote(false); return }
+    }
+    setCategoryNoteBlocks([])
+    setCategoryNoteCurrentText('')
+    setSavingCategoryNote(false)
+    setCategoryNoteModalOpen(false)
+    loadData()
+  }
+
+  async function deleteCategoryNote(id) {
+    if (!confirm('¿Borrar esta nota permanentemente?')) return
+    await supabase.from('category_notes').delete().eq('id', id)
+    loadData()
+  }
+
+
+  async function markAsPaid(order) {
+    if (order.status !== 'pedido' || approvingIds.includes(order.id)) return
+    setApprovingIds(prev => [...prev, order.id])
+    const patch = { status: 'pagado', fecha_pago: new Date().toISOString() }
+    const undo = patchLocal(setOrders, orders, [order.id], patch) // se ve al instante
+    const { error } = await supabase.from('orders').update(patch).eq('id', order.id)
+    // Nota: el stock ya se descontó una vez cuando el cliente hizo el pedido (en App.jsx),
+    // así que NO se vuelve a descontar acá — antes esto causaba un doble descuento.
+    if (error) { undo(); alert('No se pudo marcar como pagado: ' + error.message) }
+    setApprovingIds(prev => prev.filter(id => id !== order.id))
+  }
+
+  async function markAsDelivered(order) {
+    if (order.status !== 'pagado' || approvingIds.includes(order.id)) return
+    setApprovingIds(prev => [...prev, order.id])
+    const patch = { status: 'entregado', fecha_entrega: new Date().toISOString() }
+    const undo = patchLocal(setOrders, orders, [order.id], patch) // se ve al instante
+    const { error } = await supabase.from('orders').update(patch).eq('id', order.id)
+    if (error) { undo(); alert('No se pudo marcar como entregado: ' + error.message) }
+    setApprovingIds(prev => prev.filter(id => id !== order.id))
+  }
+
+  // ---------- Ventas agrupadas en factura (venta_lotes) ----------
+  // En el buscador de "Nueva venta", los lotes de semillas se identifican con el
+  // prefijo 'seed:' delante de su id, para poder mezclarlos con las plantas en la
+  // misma lista sin confundir los ids.
+  function resolveVentaTarget(selectionId) {
+    if (!selectionId) return { isSeed: false, plant: null, seedBatch: null }
+    if (selectionId.startsWith('seed:')) {
+      const seedBatchId = selectionId.slice(5)
+      return { isSeed: true, plant: null, seedBatch: seedBatches.find(sb => sb.id === seedBatchId) }
+    }
+    return { isSeed: false, plant: plants.find(p => p.id === selectionId), seedBatch: null }
+  }
+
+  function seedBatchDisplayName(sb) {
+    if (!sb) return ''
+    return `🌰 ${sb.es_noid ? 'NOID' : (sb.nombre || 'Lote de semillas')}`
+  }
+
+  function addLineToVentaLote(e) {
+    e.preventDefault()
+    if (!ventaLineForm.plant_id || !ventaLineForm.quantity || !ventaLineForm.motivo) {
+      alert('Selecciona una planta o lote de semillas, la cantidad y el motivo')
+      return
+    }
+    const { isSeed, plant, seedBatch } = resolveVentaTarget(ventaLineForm.plant_id)
+    setVentaLoteLines(prev => [...prev, {
+      ...ventaLineForm,
+      seed_batch_id: isSeed ? seedBatch?.id : null,
+      plant_id: isSeed ? null : ventaLineForm.plant_id,
+      plant_name: isSeed ? seedBatchDisplayName(seedBatch) : (plant ? plant.name : ''),
+      unit_price: ventaLineForm.unit_price !== '' ? ventaLineForm.unit_price : 0,
+    }])
+    setVentaLineForm({ plant_id: '', quantity: '', unit_price: '', motivo: 'Venta manual (con precio)' })
+  }
+
+  function removeVentaLoteLine(index) {
+    setVentaLoteLines(prev => prev.filter((_, i) => i !== index))
+  }
+
+  async function saveVentaLote() {
+    if (ventaLoteLines.length === 0) { alert('Agrega al menos una planta a la factura'); return }
+    setSavingVentaLote(true)
+    const { data: lote, error: loteError } = await supabase.from('venta_lotes').insert({ cliente: ventaLoteCliente }).select().single()
+    if (loteError) { alert('Error al crear la venta: ' + loteError.message); setSavingVentaLote(false); return }
+
+    for (const line of ventaLoteLines) {
+      const plant = line.plant_id ? plants.find(p => p.id === line.plant_id) : null
+      const seedBatch = line.seed_batch_id ? seedBatches.find(sb => sb.id === line.seed_batch_id) : null
+      const quantity = Number(line.quantity)
+      const unit_price = Number(line.unit_price) || 0
+      const { error } = await supabase.from('decrementos').insert({
+        plant_id: line.plant_id || null, seed_batch_id: line.seed_batch_id || null, plant_name: line.plant_name, quantity, motivo: line.motivo, unit_price, lote_id: lote.id, status: 'pedido',
+      })
+      if (error) { alert('Error al guardar una de las plantas: ' + error.message); continue }
+      // Descontar stock de inmediato al registrar el decremento (venta manual, pérdida o regalo)
+      if (plant) {
+        await supabase.from('plants').update({ stock: Math.max(0, plant.stock - quantity) }).eq('id', plant.id)
+      } else if (seedBatch) {
+        await supabase.from('seed_batches').update({ stock: Math.max(0, (seedBatch.stock || 0) - quantity) }).eq('id', seedBatch.id)
+      }
+    }
+    setVentaLoteCliente('')
+    setVentaLoteLines([])
+    setVentaLoteBuilderOpen(false)
+    setSavingVentaLote(false)
+    loadData()
+  }
+
+  async function addPlantToVentaLote(loteId) {
+    if (!ventaLineForm.plant_id || !ventaLineForm.quantity || !ventaLineForm.motivo) {
+      alert('Selecciona una planta o lote de semillas, la cantidad y el motivo')
+      return
+    }
+    const { isSeed, plant, seedBatch } = resolveVentaTarget(ventaLineForm.plant_id)
+    const quantity = Number(ventaLineForm.quantity)
+    const unit_price = Number(ventaLineForm.unit_price) || 0
+    const { error } = await supabase.from('decrementos').insert({
+      plant_id: isSeed ? null : ventaLineForm.plant_id,
+      seed_batch_id: isSeed ? seedBatch?.id : null,
+      plant_name: isSeed ? seedBatchDisplayName(seedBatch) : (plant ? plant.name : ''),
+      quantity, motivo: ventaLineForm.motivo, unit_price, lote_id: loteId, status: 'pedido',
+    })
+    if (error) { alert('Error al guardar la planta: ' + error.message); return }
+    // Descontar stock de inmediato al registrar el decremento (venta manual, pérdida o regalo)
+    if (plant) {
+      await supabase.from('plants').update({ stock: Math.max(0, plant.stock - quantity) }).eq('id', plant.id)
+    } else if (seedBatch) {
+      await supabase.from('seed_batches').update({ stock: Math.max(0, (seedBatch.stock || 0) - quantity) }).eq('id', seedBatch.id)
+    }
+    setVentaLineForm({ plant_id: '', quantity: '', unit_price: '', motivo: 'Venta manual (con precio)' })
+    setAddToVentaLoteId(null)
+    loadData()
+  }
+
+  async function updateDecrementoField(d, field, rawValue) {
+    const updates = {}
+    if (field === 'quantity' || field === 'unit_price') {
+      updates[field] = Number(rawValue) || 0
+    } else {
+      updates[field] = rawValue
+    }
+    const { error } = await supabase.from('decrementos').update(updates).eq('id', d.id)
+    if (error) { alert('Error al guardar el cambio: ' + error.message); return }
+    loadData()
+  }
+
+  async function markDecrementoPagado(d) {
+    if (approvingIds.includes(d.id)) return
+    setApprovingIds(prev => [...prev, d.id])
+    const undo = patchLocal(setDecrementos, decrementos, [d.id], { status: 'pagado' }) // se ve al instante
+    const { error } = await supabase.from('decrementos').update({ status: 'pagado' }).eq('id', d.id)
+    if (error) { undo(); alert('Error al actualizar: ' + error.message) }
+    setApprovingIds(prev => prev.filter(id => id !== d.id))
+  }
+
+  async function markDecrementoEntregado(d) {
+    if (approvingIds.includes(d.id)) return
+    setApprovingIds(prev => [...prev, d.id])
+    const undo = patchLocal(setDecrementos, decrementos, [d.id], { status: 'entregado' }) // se ve al instante
+    const { error } = await supabase.from('decrementos').update({ status: 'entregado' }).eq('id', d.id)
+    // Nota: el stock ya se descontó al momento de registrar este decremento, no acá.
+    if (error) { undo(); alert('Error al actualizar: ' + error.message) }
+    setApprovingIds(prev => prev.filter(id => id !== d.id))
+  }
+
+  async function updateVentaLoteExtra(lote, field, value) {
+    const num = Number(value) || 0
+    const { error } = await supabase.from('venta_lotes').update({ [field]: num }).eq('id', lote.id)
+    if (error) { alert('Error al guardar el cambio: ' + error.message); return }
+    loadData()
+  }
+
+  function ventaLoteProration(lote, lineas) {
+    const subtotal = lineas.reduce((sum, d) => sum + Number(d.unit_price || 0) * Number(d.quantity), 0)
+    const extras = Number(lote.envio1 || 0) + Number(lote.envio2 || 0) + Number(lote.varios || 0)
+    const withExtra = lineas.map(d => {
+      const value = Number(d.unit_price || 0) * Number(d.quantity)
+      const proportion = subtotal > 0 ? value / subtotal : 0
+      const prorated = proportion * extras
+      return { ...d, _value: value, _prorated: prorated, _lineTotal: value + prorated }
+    })
+    return { subtotal, extras, total: subtotal + extras, lineas: withExtra }
+  }
+
+  function buildInvoiceText({ numeroLabel, cliente, dateStr, lineas, subtotal, envio1, envio2, varios, total }) {
+    const items = lineas.map(l => `- ${l.plant_name} x${l.quantity} — $${l._lineTotal.toFixed(2)}`).join('\n')
+    let text = `🧾 ${numeroLabel}\n`
+    if (cliente) text += `Cliente: ${cliente}\n`
+    text += `Fecha: ${dateStr}\n\n`
+    text += `Detalle:\n${items}\n\n`
+    text += `Subtotal: $${subtotal.toFixed(2)}\n`
+    if (envio1) text += `Envío 1: $${Number(envio1).toFixed(2)}\n`
+    if (envio2) text += `Envío 2: $${Number(envio2).toFixed(2)}\n`
+    if (varios) text += `Varios: $${Number(varios).toFixed(2)}\n`
+    text += `Total: $${total.toFixed(2)}\n\n`
+    text += `¡Gracias por tu compra! - Diamantev 🌿`
+    return text
+  }
+
+  function sendInvoiceWhatsApp(params) {
+    window.open(`https://wa.me/?text=${encodeURIComponent(buildInvoiceText(params))}`, '_blank')
+  }
+
+  async function downloadInvoicePDF(params) {
+    try {
+      const doc = new jsPDF({ unit: 'mm', format: 'a4' })
+      let y = 20
+      doc.setFontSize(16)
+      doc.text(params.numeroLabel, 15, y)
+      y += 8
+      doc.setFontSize(11)
+      if (params.cliente) { doc.text(`Cliente: ${params.cliente}`, 15, y); y += 6 }
+      doc.text(`Fecha: ${params.dateStr}`, 15, y)
+      y += 10
+
+      doc.setFont(undefined, 'bold')
+      doc.text('Producto', 15, y)
+      doc.text('Cant.', 110, y)
+      doc.text('P.Unit', 135, y)
+      doc.text('Total', 170, y)
+      doc.setFont(undefined, 'normal')
+      y += 3
+      doc.line(15, y, 195, y)
+      y += 6
+
+      params.lineas.forEach(l => {
+        if (y > 270) { doc.addPage(); y = 20 }
+        doc.text(String(l.plant_name).slice(0, 45), 15, y)
+        doc.text(String(l.quantity), 110, y)
+        doc.text(`$${Number(l.unit_price || 0).toFixed(2)}`, 135, y)
+        doc.text(`$${l._lineTotal.toFixed(2)}`, 170, y)
+        y += 6
+      })
+
+      y += 2
+      doc.line(15, y, 195, y)
+      y += 6
+      doc.text(`Subtotal: $${params.subtotal.toFixed(2)}`, 135, y); y += 6
+      if (params.envio1) { doc.text(`Envío 1: $${Number(params.envio1).toFixed(2)}`, 135, y); y += 6 }
+      if (params.envio2) { doc.text(`Envío 2: $${Number(params.envio2).toFixed(2)}`, 135, y); y += 6 }
+      if (params.varios) { doc.text(`Varios: $${Number(params.varios).toFixed(2)}`, 135, y); y += 6 }
+      doc.setFont(undefined, 'bold')
+      doc.text(`Total: $${params.total.toFixed(2)}`, 135, y)
+
+      doc.save(`${params.filenameSlug}.pdf`)
+    } catch (err) {
+      alert('No se pudo generar el PDF. Intenta de nuevo.')
+    }
+  }
+
+  // ---- Wrappers para ventas manuales (venta_lotes / decrementos) ----
+  function sendVentaInvoiceWhatsApp(lote, lineasConProrrateo, subtotal, totalLote) {
+    sendInvoiceWhatsApp({
+      numeroLabel: `Factura de venta #${lote.numero}`,
+      cliente: lote.cliente,
+      dateStr: new Date(lote.created_at).toLocaleDateString(),
+      lineas: lineasConProrrateo,
+      subtotal, envio1: lote.envio1, envio2: lote.envio2, varios: lote.varios, total: totalLote,
+    })
+  }
+
+  function downloadVentaInvoicePDF(lote, lineasConProrrateo, subtotal, totalLote) {
+    return downloadInvoicePDF({
+      numeroLabel: `Factura de venta #${lote.numero}`,
+      cliente: lote.cliente,
+      dateStr: new Date(lote.created_at).toLocaleDateString(),
+      lineas: lineasConProrrateo,
+      subtotal, envio1: lote.envio1, envio2: lote.envio2, varios: lote.varios, total: totalLote,
+      filenameSlug: `factura-venta-${lote.numero}`,
+    })
+  }
+
+  // ---- Wrappers para pedidos web (orders) ----
+  function sendOrderInvoiceWhatsApp(order, items, subtotal, total) {
+    sendInvoiceWhatsApp({
+      numeroLabel: `Pedido #${order.id}`,
+      cliente: order.customer_name,
+      dateStr: new Date(order.created_at).toLocaleDateString(),
+      lineas: items.map(it => ({ plant_name: it._plant ? it._plant.name : 'Planta', quantity: it.quantity, unit_price: it._unitPrice, _lineTotal: it._lineTotal })),
+      subtotal, envio1: order.envio1, envio2: order.envio2, varios: order.varios, total,
+    })
+  }
+
+  function downloadOrderInvoicePDF(order, items, subtotal, total) {
+    return downloadInvoicePDF({
+      numeroLabel: `Pedido #${order.id}`,
+      cliente: order.customer_name,
+      dateStr: new Date(order.created_at).toLocaleDateString(),
+      lineas: items.map(it => ({ plant_name: it._plant ? it._plant.name : 'Planta', quantity: it.quantity, unit_price: it._unitPrice, _lineTotal: it._lineTotal })),
+      subtotal, envio1: order.envio1, envio2: order.envio2, varios: order.varios, total,
+      filenameSlug: `factura-pedido-${order.id}`,
+    })
+  }
+
+  async function addDecremento(e) {
+    e.preventDefault()
+    if (!decForm.plant_id || !decForm.quantity || !decForm.motivo) {
+      alert('Selecciona la planta, cantidad y motivo')
+      return
+    }
+    if (decForm.motivo === 'Otro' && !decForm.motivo_otro.trim()) {
+      alert('Escribe el motivo')
+      return
+    }
+    setSavingDec(true)
+    const plant = plants.find(p => p.id === decForm.plant_id)
+    const quantity = Number(decForm.quantity)
+    const payload = {
+      plant_id: decForm.plant_id,
+      plant_name: plant ? plant.name : '',
+      quantity,
+      motivo: decForm.motivo,
+      motivo_otro: decForm.motivo === 'Otro' ? decForm.motivo_otro : null,
+      unit_price: decForm.motivo === 'Venta' ? Number(decForm.unit_price) || (plant ? Number(plant.price) : 0) : null,
+    }
+
+    if (!isOnline()) {
+      await addToQueue('decremento', { decremento: payload, plantId: decForm.plant_id, quantity })
+      if (plant) {
+        setPlants(prev => prev.map(p => p.id === plant.id ? { ...p, stock: Math.max(0, p.stock - quantity) } : p))
+      }
+      setDecForm({ plant_id: '', quantity: '', motivo: '', motivo_otro: '', unit_price: '' })
+      setSavingDec(false)
+      setPendingCount(await queueLength())
+      alert('Sin conexión: la venta se guardó en el celular y se subirá sola cuando vuelva la señal.')
+      return
+    }
+
+    const { error: decError } = await supabase.from('decrementos').insert(payload)
+    if (decError) { alert('Error al registrar el decremento: ' + decError.message); setSavingDec(false); return }
+    if (plant) {
+      await supabase.from('plants').update({ stock: Math.max(0, plant.stock - quantity) }).eq('id', plant.id)
+    }
+    setDecForm({ plant_id: '', quantity: '', motivo: '', motivo_otro: '', unit_price: '' })
+    setSavingDec(false)
+    loadData()
+  }
+
+  // ---------- Stock actual ----------
+  async function updatePlantDiscount(id, percent) {
+    const value = percent === '' ? 0 : Math.max(0, Math.min(100, Number(percent) || 0))
+    await supabase.from('plants').update({ discount_percent: value }).eq('id', id)
+    loadData()
+  }
+
+  async function applyBulkDiscount(ids) {
+    if (ids.length === 0) return
+    const input = prompt(`¿Qué % de descuento querés aplicar a las ${ids.length} planta(s) seleccionada(s)? (0 para quitar el descuento)`)
+    if (input === null) return
+    const percent = Math.max(0, Math.min(100, Number(input) || 0))
+    await supabase.from('plants').update({ discount_percent: percent, on_sale: percent > 0 }).in('id', ids)
+    loadData()
+  }
+
+  async function updatePlantHeight(id, height) {
+    await supabase.from('plants').update({ height: height.trim() }).eq('id', id)
+    loadData()
+  }
+
+  async function updatePlantName(id, newName) {
+    const name = newName.trim()
+    if (!name) return
+    await syncPlantName(id, name)
+    loadData()
+  }
+
+  // Campos de compra del borrador para la compra elegida. Si la compra pertenece a un lote
+  // (compra agrupada), N.°, fecha y proveedor son los del lote; si fue registrada a mano, los de la línea.
+  function invCompraFields(cs, ls, compraId) {
+    const c = cs.find(x => String(x.id) === String(compraId))
+    if (!c) return { compraId: '', numero: '', fecha: '', proveedor: '' }
+    const l = c.lote_id ? ls.find(x => x.id === c.lote_id) : null
+    return {
+      compraId: c.id,
+      numero: l && l.numero != null ? String(l.numero) : '',
+      fecha: dateToInputValue(l ? l.created_at : c.created_at),
+      proveedor: (l ? l.proveedor : c.proveedor) || c.proveedor || '',
+    }
+  }
+
+  // Crea la categoría en la BD y la deja elegida en el borrador (se asigna a la planta al Guardar cambios)
+  async function createCategoryForPlantInv() {
+    const name = inlineNewCategoryName.trim()
+    if (!name) { alert('Ponle un nombre a la categoría'); return }
+    const { data, error } = await supabase.from('categories').insert({ name, emoji: inlineNewCategoryEmoji || '🌿' }).select().single()
+    if (error) { alert('Error al crear la categoría: ' + error.message); return }
+    setCategories(prev => [...prev, data].sort((a, b) => String(a.name).localeCompare(String(b.name))))
+    setPlantInvDraft(d => (d ? { ...d, categoryId: data.id } : d))
+    setShowInlineNewCategory(false)
+    setInlineNewCategoryName('')
+    setInlineNewCategoryEmoji('🌿')
+  }
+
+  // Guarda de una vez todo el panel "Compra e inventario" de la planta abierta
+  async function savePlantInv() {
+    const d = plantInvDraft
+    if (!d || !plantInv || savingPlantInv) return
+    const plantId = d.plantId
+    const stock = Math.max(0, parseInt(d.stock, 10) || 0)
+    const printed = Math.max(0, parseInt(d.printed, 10) || 0)
+    const placed = Math.max(0, Math.min(printed, parseInt(d.placed, 10) || 0))
+    const compra = plantInv.compras.find(c => String(c.id) === String(d.compraId)) || null
+    const lote = compra && compra.lote_id ? plantInv.lotes.find(l => l.id === compra.lote_id) : null
+    const proveedor = d.proveedor.trim() || null
+    const fechaISO = d.fecha ? new Date(d.fecha + 'T12:00:00').toISOString() : null
+
+    // Validaciones antes de escribir nada
+    let numero = null
+    if (lote && String(d.numero).trim() !== '') {
+      numero = Number(d.numero)
+      if (!Number.isInteger(numero) || numero < 1) { alert('El N.° de compra debe ser un número entero mayor que 0'); return }
+      if (numero !== lote.numero && lotes.some(l => l.id !== lote.id && l.numero === numero)) {
+        alert(`Ya existe la compra #${numero}. Elige otro número.`)
+        return
+      }
+    }
+
+    setSavingPlantInv(true)
+    const errores = []
+
+    // 1) Planta: categoría, stock y etiquetas
+    const plantUpdates = { category_id: d.categoryId || null, stock, label_printed_count: printed, label_placed_count: placed }
+    const { error: pErr } = await supabase.from('plants').update(plantUpdates).eq('id', plantId)
+    if (pErr) errores.push('inventario: ' + pErr.message)
+    else setPlants(prev => prev.map(pl => (pl.id === plantId ? { ...pl, ...plantUpdates } : pl)))
+
+    // 2) Compra: N.°, fecha y proveedor
+    if (compra) {
+      if (lote) {
+        const updates = { proveedor }
+        if (fechaISO) updates.created_at = fechaISO
+        if (numero != null && numero !== lote.numero) updates.numero = numero
+        const { error: lErr } = await supabase.from('compra_lotes').update(updates).eq('id', lote.id)
+        if (lErr) {
+          errores.push('compra: ' + lErr.message)
+        } else {
+          setLotes(prev => prev.map(l => (l.id === lote.id ? { ...l, ...updates } : l)))
+          setPlantInv(prev => (prev ? { ...prev, lotes: prev.lotes.map(l => (l.id === lote.id ? { ...l, ...updates } : l)) } : prev))
+          // Las líneas de la compra llevan una copia del proveedor: se mantiene igual que el lote
+          if ((lote.proveedor || null) !== proveedor) {
+            const { error: e2 } = await supabase.from('compras').update({ proveedor }).eq('lote_id', lote.id)
+            if (e2) {
+              errores.push('proveedor de las líneas: ' + e2.message)
+            } else {
+              setCompras(prev => prev.map(c => (c.lote_id === lote.id ? { ...c, proveedor } : c)))
+              setPlantInv(prev => (prev ? { ...prev, compras: prev.compras.map(c => (c.lote_id === lote.id ? { ...c, proveedor } : c)) } : prev))
+            }
+          }
+          if (updates.numero != null) loadData() // reordena las compras por su nuevo número (en segundo plano)
+        }
+      } else {
+        const updates = { proveedor }
+        if (fechaISO) updates.created_at = fechaISO
+        const { error: cErr } = await supabase.from('compras').update(updates).eq('id', compra.id)
+        if (cErr) {
+          errores.push('compra: ' + cErr.message)
+        } else {
+          setCompras(prev => prev.map(c => (c.id === compra.id ? { ...c, ...updates } : c)))
+          setPlantInv(prev => (prev ? { ...prev, compras: prev.compras.map(c => (c.id === compra.id ? { ...c, ...updates } : c)) } : prev))
+        }
+      }
+    }
+
+    setSavingPlantInv(false)
+    if (errores.length > 0) {
+      alert('Algunos cambios no se pudieron guardar:\n- ' + errores.join('\n- '))
+      return
+    }
+    const saved = {
+      ...d,
+      stock: String(stock),
+      printed: String(printed),
+      placed: String(placed),
+      proveedor: proveedor || '',
+      numero: numero != null ? String(numero) : d.numero,
+    }
+    setPlantInvDraft(saved)
+    setPlantInvBase(saved)
+    setPlantInvMsg('✔ Cambios guardados')
+    setTimeout(() => setPlantInvMsg(''), 2500)
+  }
+
+  async function updateStock(id, newStock) {
+    await supabase.from('plants').update({ stock: newStock }).eq('id', id)
+    loadData()
+  }
+
+  async function updatePrice(id, newPrice) {
+    await supabase.from('plants').update({ price: newPrice }).eq('id', id)
+    loadData()
+  }
+
+  async function toggleActive(id, current) {
+    await supabase.from('plants').update({ active: !current }).eq('id', id)
+    loadData()
+  }
+
+  async function copySharedLink() {
+    const link = `${window.location.origin}/?shared=1`
+    await navigator.clipboard.writeText(link)
+    alert('Link copiado. Este link solo muestra las plantas marcadas para compartir. Pégalo en WhatsApp para enviarlo.')
+  }
+
+  async function markSelectedShared(idsSet, value) {
+    const ids = Array.from(idsSet)
+    if (ids.length === 0) return
+    await supabase.from('plants').update({ shared_visible: value }).in('id', ids)
+    loadData()
+  }
+
+  // ---------- Marca "para cliente" (botón redondo "C" en la Galería) ----------
+  // Es independiente de los checkboxes de selección y de "shared_visible" (link público compartido).
+  // Requiere la columna plants.marcado_cliente (boolean, default false).
+  function alertMarcadoClienteError(error) {
+    const msg = String(error?.message || '')
+    if (msg.includes('marcado_cliente') || error?.code === 'PGRST204' || error?.code === '42703') {
+      alert('Falta crear la columna "marcado_cliente" en la tabla plants. Ejecuta en Supabase (SQL Editor):\n\nalter table plants add column if not exists marcado_cliente boolean not null default false;')
+    } else {
+      alert('No se pudo guardar la marca de cliente: ' + msg)
+    }
+  }
+
+  async function toggleMarcadoCliente(id, current) {
+    const next = !current
+    const undo = patchLocal(setPlants, plants, [id], { marcado_cliente: next }) // se ve al instante
+    const { error } = await supabase.from('plants').update({ marcado_cliente: next }).eq('id', id)
+    if (error) { undo(); alertMarcadoClienteError(error) }
+  }
+
+  async function markSelectedCliente(idsSet, value) {
+    const ids = Array.from(idsSet)
+    if (ids.length === 0) return
+    const undo = patchLocal(setPlants, plants, ids, { marcado_cliente: value })
+    const { error } = await supabase.from('plants').update({ marcado_cliente: value }).in('id', ids)
+    if (error) { undo(); alertMarcadoClienteError(error) }
+  }
+
+  async function markPlantsAction(ids, field) {
+    if (ids.length === 0) return
+    await supabase.from('plants').update({ [field]: new Date().toISOString() }).in('id', ids)
+    loadData()
+  }
+
+  // Etiquetas: en vez de un solo estado, cada planta lleva dos contadores.
+  // "Impresas" = cuántas copias de su etiqueta salieron de la imprenta en total.
+  // "Colocadas" = cuántas de esas ya están puestas en el jardín.
+  // La resta (impresas - colocadas) es el "stock" de etiquetas sin pegar todavía.
+  function labelStatusOf(p) {
+    const printed = Number(p.label_printed_count) || 0
+    const placed = Number(p.label_placed_count) || 0
+    if (printed === 0) return 'disponible' // nunca se generó
+    if (placed < printed) return 'sobrante' // tiene de sobra sin pegar
+    return 'colocada' // todo lo impreso ya está colocado
+  }
+
+  async function addPrintedLabels(idsWithQty) {
+    for (const { id, qty } of idsWithQty) {
+      if (!qty || qty <= 0) continue
+      const plant = plants.find(p => p.id === id)
+      const current = Number(plant?.label_printed_count) || 0
+      await supabase.from('plants').update({ label_printed_count: current + qty }).eq('id', id)
+    }
+    await loadData()
+  }
+
+  async function incrementLabelPlaced(id) {
+    const plant = plants.find(p => p.id === id)
+    if (!plant) return
+    const printed = Number(plant.label_printed_count) || 0
+    const placed = Number(plant.label_placed_count) || 0
+    if (placed >= printed) return
+    await supabase.from('plants').update({ label_placed_count: placed + 1 }).eq('id', id)
+    loadData()
+  }
+
+  async function updateLabelCounts(id, printed, placed) {
+    const p = Math.max(0, Number(printed) || 0)
+    const c = Math.max(0, Math.min(p, Number(placed) || 0))
+    await supabase.from('plants').update({ label_printed_count: p, label_placed_count: c }).eq('id', id)
+    loadData()
+  }
+
+  async function markAllPlacedForSelected(ids) {
+    for (const id of ids) {
+      const plant = plants.find(p => p.id === id)
+      const printed = Number(plant?.label_printed_count) || 0
+      await supabase.from('plants').update({ label_placed_count: printed }).eq('id', id)
+    }
+    await loadData()
+  }
+
+  async function toggleIsNew(id, current) {
+    await supabase.from('plants').update({ is_new: !current }).eq('id', id)
+    loadData()
+  }
+
+  async function updatePlantCategory(id, categoryId) {
+    await supabase.from('plants').update({ category_id: categoryId || null }).eq('id', id)
+    loadData()
+  }
+
+  async function toggleOnSale(id, current) {
+    await supabase.from('plants').update({ on_sale: !current }).eq('id', id)
+    loadData()
+  }
+
+  async function toggleComingSoon(id, current) {
+    await supabase.from('plants').update({ coming_soon: !current }).eq('id', id)
+    loadData()
+  }
+
+  async function updatePlantImage(id, file) {
+    if (!file) return
+    const url = await uploadImage(file)
+    if (url) {
+      await supabase.from('plants').update({ image_url: url }).eq('id', id)
+      loadData()
+    }
+  }
+
+  async function updatePlantExtraImage(id, field, file) {
+    if (!file) return
+    const url = await uploadImage(file)
+    if (url) {
+      await supabase.from('plants').update({ [field]: url }).eq('id', id)
+      loadData()
+    }
+  }
+
+  async function updatePlantVideo(id, file) {
+    if (!file) return
+    const url = await uploadImage(file, 'plant-photos')
+    if (url) {
+      await supabase.from('plants').update({ video_url: url }).eq('id', id)
+      loadData()
+    }
+  }
+
+  async function updatePlantDescription(id, description) {
+    await supabase.from('plants').update({ description }).eq('id', id)
+    loadData()
+  }
+
+  async function toggleFlag(id, current) {
+    await supabase.from('plants').update({ flagged: !current, flag_comment: !current ? '' : null }).eq('id', id)
+    loadData()
+  }
+
+  async function updateFlagComment(id, comment) {
+    await supabase.from('plants').update({ flag_comment: comment }).eq('id', id)
+    loadData()
+  }
+
+  async function repairPendingPlantLinks() {
+    // Antes solo agarraba compras con categoría asignada; esto dejaba afuera líneas viejas
+    // (ej. de "Escanear factura") que quedaron sin categoría Y sin planta creada.
+    const pendientes = compras.filter(c => !c.plant_id && c.plant_name)
+    if (pendientes.length === 0) { alert('No hay compras pendientes por vincular. Todo está en orden.'); return }
+    if (!confirm(`Se encontraron ${pendientes.length} línea(s) de compra sin planta creada (nunca llegaron a "Recibido"). Se creará una planta para cada una (con stock 0, oculta) y quedará enlazada. ¿Continuar?`)) return
+    let fixed = 0
+    for (const c of pendientes) {
+      const { data: newPlant, error } = await supabase.from('plants').insert({
+        name: c.plant_name,
+        category_id: c.new_plant_category || null,
+        price: c.sale_price || 0,
+        stock: 0,
+        image_url: c.image_url || null,
+        active: false,
+        flagged: !c.new_plant_category,
+      }).select().single()
+      if (!error && newPlant) {
+        await supabase.from('compras').update({ plant_id: newPlant.id }).eq('id', c.id)
+        fixed++
+      }
+    }
+    await loadData()
+    alert(`Listo, se crearon y enlazaron ${fixed} planta(s). Ya deberían aparecer en Galería (ocultas, con stock 0) y ser encontrables por sus filtros de compra. Las que quedaron sin categoría están marcadas "🚩 Para revisar".`)
+  }
+
+  async function createCategoryAndAssign(plantId, name, emoji) {
+    if (!name.trim()) { alert('Ponle un nombre a la categoría'); return }
+    const { data, error } = await supabase.from('categories').insert({ name: name.trim(), emoji: emoji || '🌿' }).select().single()
+    if (error) { alert('Error al crear la categoría: ' + error.message); return }
+    await supabase.from('plants').update({ category_id: data.id }).eq('id', plantId)
+    setShowInlineNewCategory(false)
+    setInlineNewCategoryName('')
+    setInlineNewCategoryEmoji('🌿')
+    loadData()
+  }
+
+  async function deletePlant(id, onSuccess) {
+    if (!confirm('¿Borrar esta planta permanentemente? Esta acción no se puede deshacer.')) return
+    const { error } = await supabase.from('plants').delete().eq('id', id)
+    if (error) {
+      if (error.code === '23503') {
+        alert('Esta planta no se puede borrar porque todavía tiene historial relacionado (compras, ventas, notas, floraciones, etc. — se perdería ese historial). Usa "Ocultar" en su lugar.')
+      } else {
+        alert('Error al borrar la planta: ' + error.message)
+      }
+      return
+    }
+    await loadData()
+    if (onSuccess) onSuccess()
+  }
+
+  // ---------- Notas libres por planta ----------
+  function openNewPlantNote(plantId) {
+    setCurrentNotePlantId(plantId)
+    setEditingPlantNoteId(null)
+    setPlantNoteBlocks([])
+    setPlantNoteCurrentText('')
+    setPlantNoteModalOpen(true)
+  }
+
+  function openEditPlantNote(note) {
+    setCurrentNotePlantId(note.plant_id)
+    setEditingPlantNoteId(note.id)
+    setPlantNoteBlocks(note.content_blocks || [])
+    setPlantNoteCurrentText('')
+    setPlantNoteModalOpen(true)
+  }
+
+  function insertPhotoBlockToPlantNote(file) {
+    if (!file) return
+    setPlantNoteBlocks(prev => {
+      const next = [...prev]
+      if (plantNoteCurrentText.trim()) next.push({ type: 'text', content: plantNoteCurrentText })
+      next.push({ type: 'photo', file })
+      return next
+    })
+    setPlantNoteCurrentText('')
+  }
+
+  function insertVideoBlockToPlantNote(file) {
+    if (!file) return
+    setPlantNoteBlocks(prev => {
+      const next = [...prev]
+      if (plantNoteCurrentText.trim()) next.push({ type: 'text', content: plantNoteCurrentText })
+      next.push({ type: 'video', file })
+      return next
+    })
+    setPlantNoteCurrentText('')
+  }
+
+  function removeLastPlantNoteBlock() {
+    setPlantNoteBlocks(prev => prev.slice(0, -1))
+  }
+
+  function togglePlantNoteDictation() {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
+    if (!SpeechRecognition) {
+      alert('Tu navegador no soporta dictado por voz. Prueba con Chrome en Android.')
+      return
+    }
+    if (isDictatingPlantNote) {
+      plantNoteRecognitionRef.current?.stop()
+      return
+    }
+    const recognition = new SpeechRecognition()
+    recognition.lang = 'es-ES'
+    recognition.continuous = true
+    recognition.interimResults = false
+    recognition.onresult = event => {
+      let finalText = ''
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        if (event.results[i].isFinal) finalText += event.results[i][0].transcript
+      }
+      if (finalText.trim()) {
+        setPlantNoteCurrentText(prev => (prev.trim() ? prev.trim() + ' ' : '') + finalText.trim())
+      }
+    }
+    recognition.onerror = () => setIsDictatingPlantNote(false)
+    recognition.onend = () => setIsDictatingPlantNote(false)
+    recognition.start()
+    plantNoteRecognitionRef.current = recognition
+    setIsDictatingPlantNote(true)
+  }
+
+  async function savePlantNote() {
+    if (!currentNotePlantId) return
+    const blocks = [...plantNoteBlocks]
+    if (plantNoteCurrentText.trim()) blocks.push({ type: 'text', content: plantNoteCurrentText })
+    if (blocks.length === 0) return
+    setSavingPlantNote(true)
+
+    if (!isOnline()) {
+      await addToQueue('plant_note', { plantId: currentNotePlantId, editingNoteId: editingPlantNoteId, blocks })
+      setPlantNoteBlocks([])
+      setPlantNoteCurrentText('')
+      setEditingPlantNoteId(null)
+      setSavingPlantNote(false)
+      setPlantNoteModalOpen(false)
+      setPendingCount(await queueLength())
+      alert('Sin conexión: la nota se guardó en el celular y se subirá sola cuando vuelva la señal.')
+      return
+    }
+
+    const finalBlocks = []
+    for (const b of blocks) {
+      if (b.type === 'text') {
+        finalBlocks.push(b)
+      } else if (b.url) {
+        finalBlocks.push(b)
+      } else {
+        const url = await uploadImage(b.file, 'category-notes')
+        if (url) finalBlocks.push({ type: b.type, url })
+      }
+    }
+    const { error } = editingPlantNoteId
+      ? await supabase.from('plant_notes').update({ content_blocks: finalBlocks }).eq('id', editingPlantNoteId)
+      : await supabase.from('plant_notes').insert({ plant_id: currentNotePlantId, content_blocks: finalBlocks })
+    if (error) { alert('Error al guardar la nota: ' + error.message); setSavingPlantNote(false); return }
+    setPlantNoteBlocks([])
+    setPlantNoteCurrentText('')
+    setEditingPlantNoteId(null)
+    setSavingPlantNote(false)
+    setPlantNoteModalOpen(false)
+    loadData()
+  }
+
+  async function deletePlantNote(id) {
+    if (!confirm('¿Borrar esta nota permanentemente?')) return
+    await supabase.from('plant_notes').delete().eq('id', id)
+    loadData()
+  }
+
+  // ---------- Historial: floraciones por planta ----------
+  async function addFloracion(plantId, fecha) {
+    const { error } = await supabase.from('floraciones').insert({ plant_id: plantId, fecha })
+    if (error) { alert('Error al registrar la floración: ' + error.message); return }
+    setShowCustomFloracionDate(false)
+    setCustomFloracionDate('')
+    loadData()
+  }
+
+  async function deleteFloracion(id) {
+    if (!confirm('¿Borrar este registro de floración?')) return
+    await supabase.from('floraciones').delete().eq('id', id)
+    loadData()
+  }
+
+  // ---------- Historial: hijos (propágulos) por planta ----------
+  function hijosEnDesarrollo(plantId) {
+    return pups
+      .filter(x => x.plant_id === plantId)
+      .reduce((sum, x) => x.tipo === 'movido' ? sum - x.cantidad : sum + x.cantidad, 0)
+  }
+
+  async function addPupRegistro(plantId, fecha, cantidad) {
+    const cant = Number(cantidad)
+    if (!cant || cant <= 0) { alert('Ingresa una cantidad válida'); return }
+    const { error } = await supabase.from('plant_pups').insert({ plant_id: plantId, fecha, cantidad: cant, tipo: 'registro' })
+    if (error) { alert('Error al registrar los hijos: ' + error.message); return }
+    setShowCustomPupDate(false)
+    setCustomPupDate('')
+    setNewPupCantidad('')
+    loadData()
+  }
+
+  async function moverPupsAStock(plant, cantidad) {
+    const cant = Number(cantidad)
+    const disponibles = hijosEnDesarrollo(plant.id)
+    if (!cant || cant <= 0) { alert('Ingresa una cantidad válida'); return }
+    if (cant > disponibles) { alert(`Solo tienes ${disponibles} hijo(s) en desarrollo`); return }
+    const fecha = localDateISO()
+    const { error } = await supabase.from('plant_pups').insert({ plant_id: plant.id, fecha, cantidad: cant, tipo: 'movido' })
+    if (error) { alert('Error al pasar a stock: ' + error.message); return }
+    await supabase.from('plants').update({ stock: (plant.stock || 0) + cant }).eq('id', plant.id)
+    setShowMoverPupsForm(false)
+    setMoverPupsCantidad('')
+    loadData()
+  }
+
+  async function deletePup(id) {
+    if (!confirm('¿Borrar este registro?')) return
+    await supabase.from('plant_pups').delete().eq('id', id)
+    loadData()
+  }
+
+  // ---------- Ingreso de Semillas (lotes independientes, con o sin planta identificada) ----------
+  function openSbNote(batch) {
+    setCurrentNoteSeedBatchId(batch.id)
+    setSbNoteBlocks(batch.content_blocks || [])
+    setSbNoteCurrentText('')
+    setSbNoteModalOpen(true)
+  }
+
+  function insertPhotoBlockToSbNote(file) {
+    if (!file) return
+    setSbNoteBlocks(prev => {
+      const next = [...prev]
+      if (sbNoteCurrentText.trim()) next.push({ type: 'text', content: sbNoteCurrentText })
+      next.push({ type: 'photo', file })
+      return next
+    })
+    setSbNoteCurrentText('')
+  }
+
+  function insertVideoBlockToSbNote(file) {
+    if (!file) return
+    setSbNoteBlocks(prev => {
+      const next = [...prev]
+      if (sbNoteCurrentText.trim()) next.push({ type: 'text', content: sbNoteCurrentText })
+      next.push({ type: 'video', file })
+      return next
+    })
+    setSbNoteCurrentText('')
+  }
+
+  function removeLastSbNoteBlock() {
+    setSbNoteBlocks(prev => prev.slice(0, -1))
+  }
+
+  async function saveSbNote() {
+    if (!currentNoteSeedBatchId) return
+    const blocks = [...sbNoteBlocks]
+    if (sbNoteCurrentText.trim()) blocks.push({ type: 'text', content: sbNoteCurrentText })
+    setSavingSbNote(true)
+    const finalBlocks = []
+    for (const b of blocks) {
+      if (b.type === 'text') {
+        finalBlocks.push(b)
+      } else if (b.url) {
+        finalBlocks.push(b)
+      } else {
+        const url = await uploadImage(b.file, 'category-notes')
+        if (url) finalBlocks.push({ type: b.type, url })
+      }
+    }
+    const { error } = await supabase.from('seed_batches').update({ content_blocks: finalBlocks }).eq('id', currentNoteSeedBatchId)
+    if (error) { alert('Error al guardar la nota: ' + error.message); setSavingSbNote(false); return }
+    setSbNoteBlocks([])
+    setSbNoteCurrentText('')
+    setSavingSbNote(false)
+    setSbNoteModalOpen(false)
+    loadData()
+  }
+
+  function resetSbForm() {
+    setSbForm({ origen: 'cosecha', plant_id: '', category_id: '', nombre: '', es_noid: false, proveedor: '', cantidad_semillas: '', fecha: '', price: '' })
+  }
+
+  function onSbFormPlantChange(plantId) {
+    const plant = plants.find(pp => pp.id === plantId)
+    setSbForm(f => ({ ...f, plant_id: plantId, nombre: plant ? plant.name : f.nombre, category_id: plant ? (plant.category_id || '') : f.category_id }))
+  }
+
+  async function saveSeedBatch() {
+    const cant = Number(sbForm.cantidad_semillas)
+    if (!cant || cant <= 0) { alert('Ingresa la cantidad de semillas'); return }
+    if (sbForm.origen === 'cosecha' && !sbForm.plant_id) { alert('Elige de qué planta cosechaste'); return }
+    if (!sbForm.es_noid && !sbForm.category_id && sbForm.origen !== 'cosecha') { alert('Elige una categoría o marca como NOID'); return }
+    const { error } = await supabase.from('seed_batches').insert({
+      origen: sbForm.origen,
+      plant_id: sbForm.origen === 'cosecha' ? sbForm.plant_id : null,
+      category_id: sbForm.es_noid ? null : (sbForm.category_id || null),
+      nombre: sbForm.es_noid ? (sbForm.nombre || 'NOID') : (sbForm.nombre || null),
+      es_noid: sbForm.es_noid,
+      proveedor: sbForm.origen === 'compra' ? (sbForm.proveedor || null) : null,
+      cantidad_semillas: cant,
+      fecha: sbForm.fecha || localDateISO(),
+      price: sbForm.price ? Number(sbForm.price) : null,
+      stock: cant,
+      estado: 'semillas',
+      costo: 0,
+      envio1: 0,
+      envio2: 0,
+      varios: 0,
+    })
+    if (error) { alert('Error al guardar: ' + error.message); return }
+    resetSbForm()
+    setSbFormOpen(false)
+    loadData()
+  }
+
+  async function updateSeedBatchField(id, field, value) {
+    await supabase.from('seed_batches').update({ [field]: value }).eq('id', id)
+    loadData()
+  }
+
+  async function deleteSeedBatch(id) {
+    if (!confirm('¿Borrar este lote de semillas y todo su historial?')) return
+    await supabase.from('seed_batches').delete().eq('id', id)
+    loadData()
+  }
+
+  function openConvertSeedBatch(batch) {
+    setSbConvertId(batch.id)
+    setSbConvertForm({
+      nombre: batch.nombre && batch.nombre !== 'NOID' ? batch.nombre : '',
+      category_id: batch.category_id || '',
+      price: batch.price || '',
+      stock: '',
+    })
+  }
+
+  async function confirmConvertSeedBatch(batch) {
+    if (!sbConvertForm.nombre.trim()) { alert('Ponle un nombre a la planta'); return }
+    if (!sbConvertForm.category_id) { alert('Elige una categoría'); return }
+    const stock = Number(sbConvertForm.stock) || 0
+    const { data: newPlant, error } = await supabase.from('plants').insert({
+      name: sbConvertForm.nombre.trim(),
+      category_id: sbConvertForm.category_id,
+      price: sbConvertForm.price ? Number(sbConvertForm.price) : 0,
+      stock,
+      active: true,
+    }).select().single()
+    if (error) { alert('Error al crear la planta: ' + error.message); return }
+    await supabase.from('seed_batches').update({ estado: 'catalogado', converted_plant_id: newPlant.id }).eq('id', batch.id)
+    setSbConvertId(null)
+    loadData()
+    alert(`Listo, "${sbConvertForm.nombre}" ya está catalogada en Galería.`)
+  }
+
+  async function addRetroCompra(plant, form) {
+    if (!form.quantity) { alert('Completa al menos la cantidad'); return }
+    const quantity = Number(form.quantity) || 0
+    const unit_cost = Number(form.unit_cost) || 0
+    const row = {
+      plant_id: plant.id,
+      plant_name: plant.name,
+      quantity,
+      unit_cost,
+      sale_price: null,
+      image_url: null,
+      total: quantity * unit_cost,
+      proveedor: form.proveedor || null,
+      status: 'recibido',
+      lote_id: null,
+    }
+    if (form.fecha) row.created_at = form.fecha
+    const { error } = await supabase.from('compras').insert(row)
+    if (error) { alert('Error al agregar el dato de compra: ' + error.message); return }
+    setShowRetroCompraForm(false)
+    setRetroCompraForm({ proveedor: '', fecha: '', quantity: '', unit_cost: '' })
+    loadData()
+  }
+
+  // ---------- Categorías ----------
+  async function uploadCategoryImage(catId, file) {
+    const url = await uploadImage(file)
+    if (url) {
+      await supabase.from('categories').update({ image_url: url }).eq('id', catId)
+      loadData()
+    }
+  }
+
+  async function updateCategoryEmoji(catId, emoji) {
+    await supabase.from('categories').update({ emoji }).eq('id', catId)
+    loadData()
+  }
+
+  async function updateCategoryName(catId, name) {
+    if (!name.trim()) return
+    await supabase.from('categories').update({ name }).eq('id', catId)
+    loadData()
+  }
+
+  async function addCategory(e) {
+    e.preventDefault()
+    if (!newCatName.trim()) return
+    await supabase.from('categories').insert({ name: newCatName, emoji: newCatEmoji, parent_id: newCatParentId || null })
+    setNewCatName('')
+    setNewCatEmoji('🌿')
+    setNewCatParentId('')
+    loadData()
+  }
+
+  async function updateCategoryParent(id, parentId) {
+    await supabase.from('categories').update({ parent_id: parentId || null }).eq('id', id)
+    loadData()
+  }
+
+  async function deleteCategory(id) {
+    const hasChildren = categories.some(c => c.parent_id === id)
+    if (hasChildren) { alert('Esta categoría agrupa otras — primero cambiales el "Grupo" a otra cosa (o "Sin agrupar") antes de borrar esta.'); return }
+    const plantsUsingIt = plants.filter(p => p.category_id === id).length
+    if (plantsUsingIt > 0) { alert(`Hay ${plantsUsingIt} planta(s) con esta categoría — cambiales la categoría antes de borrarla.`); return }
+    if (!confirm('¿Borrar esta categoría permanentemente?')) return
+    const { error } = await supabase.from('categories').delete().eq('id', id)
+    if (error) { alert('Error al borrar la categoría: ' + error.message); return }
+    loadData()
+  }
+
+  // Categorías que tienen al menos una hija: son "carpetas" agrupadoras y no se le
+  // pueden asignar directo a una planta (solo sirven para organizar/filtrar).
+  function isParentCategory(categoryId) {
+    return categories.some(c => c.parent_id === categoryId)
+  }
+
+  // Lista de categorías asignables a una planta (deja afuera las que son solo agrupadoras)
+  function assignableCategories() {
+    return categories.filter(c => !isParentCategory(c.id))
+  }
+
+  // ---------- Etiquetas para imprimir ----------
+  function toggleLabelSelect(id) {
+    setSelectedLabels(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  function openSelector(type) {
+    setActiveSelector(type)
+    setCatFilterSearch('')
+    setProvFilterSearch('')
+    setLoteFilterSearch('')
+    setVentaLoteFilterSearch('')
+  }
+
+  // Selección directa: aplica el filtro al tocar la opción y cierra el selector,
+  // sin paso intermedio de "Confirmar selección".
+  function selectAndClose(type, value) {
+    if (type === 'categoria') setGalleryFilter(value)
+    if (type === 'proveedor') setGalleryProveedor(value)
+    if (type === 'compra') setGalleryLoteNumero(value)
+    if (type === 'ventaLote') setGalleryVentaLoteNumero(value)
+    setActiveSelector(null)
+  }
+
+  function toggleGalleryMissingFilter(key) {
+    setGalleryMissingFilters(prev => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+  }
+
+  function setGalleryTriState(hasKey, noKey, value) {
+    setGalleryMissingFilters(prev => {
+      const next = new Set(prev)
+      next.delete(hasKey)
+      next.delete(noKey)
+      if (value === 'has') next.add(hasKey)
+      if (value === 'no') next.add(noKey)
+      return next
+    })
+  }
+
+  function getGalleryTriState(hasKey, noKey) {
+    if (galleryMissingFilters.has(hasKey)) return 'has'
+    if (galleryMissingFilters.has(noKey)) return 'no'
+    return 'all'
+  }
+
+  function selectAllLabels(list) {
+    setSelectedLabels(new Set(list.map(p => p.id)))
+  }
+
+  function clearLabels() {
+    setSelectedLabels(new Set())
+  }
+
+  function printLabels() {
+    const ids = Array.from(selectedLabels)
+    markPlantsAction(ids, 'printed_at')
+    addPrintedLabels(ids.map(id => ({ id, qty: Math.max(1, Number(labelQuantities[id]) || 1) })))
+    window.print()
+  }
+
+  async function urlToDataURL(url) {
+    const res = await fetch(url)
+    const blob = await res.blob()
+    return await new Promise((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onloadend = () => resolve(reader.result)
+      reader.onerror = reject
+      reader.readAsDataURL(blob)
+    })
+  }
+
+  function safeFileName(str, fallback) {
+    const clean = (str || fallback || 'archivo').toString().trim().replace(/[^a-zA-Z0-9-_ ]/g, '').replace(/\s+/g, '-')
+    return clean || fallback || 'archivo'
+  }
+
+  function extFromUrl(url) {
+    const match = (url || '').split('?')[0].match(/\.([a-zA-Z0-9]+)$/)
+    return match ? match[1] : 'jpg'
+  }
+
+  async function downloadFullBackup() {
+    if (backupInProgress) return
+    setBackupInProgress(true)
+    setBackupProgress('Preparando...')
+    try {
+      const zip = new JSZip()
+
+      // 1) Volcado de todos los datos (tablas) en un solo JSON
+      const dataDump = {
+        exported_at: new Date().toISOString(),
+        categories,
+        plants,
+        orders,
+        compras,
+        compra_lotes: lotes,
+        venta_lotes: ventaLotes,
+        decrementos,
+        plant_notes: plantNotes,
+        floraciones,
+        plant_pups: pups,
+        seed_batches: seedBatches,
+        seed_batch_events: seedBatchEvents,
+      }
+      zip.file('datos.json', JSON.stringify(dataDump, null, 2))
+
+      // 2) Reunir todas las fotos/videos referenciados en toda la app
+      const mediaJobs = []
+      categories.forEach(c => {
+        if (c.image_url) mediaJobs.push({ url: c.image_url, path: `categorias/${safeFileName(c.name, c.id)}.${extFromUrl(c.image_url)}` })
+      })
+      plants.forEach(p => {
+        const folder = `plantas/${safeFileName(p.name, p.id)}`
+        if (p.image_url) mediaJobs.push({ url: p.image_url, path: `${folder}/foto1.${extFromUrl(p.image_url)}` })
+        if (p.extra_image_1) mediaJobs.push({ url: p.extra_image_1, path: `${folder}/foto2.${extFromUrl(p.extra_image_1)}` })
+        if (p.extra_image_2) mediaJobs.push({ url: p.extra_image_2, path: `${folder}/foto3.${extFromUrl(p.extra_image_2)}` })
+        if (p.video_url) mediaJobs.push({ url: p.video_url, path: `${folder}/video.${extFromUrl(p.video_url)}` })
+      })
+      plantNotes.forEach(n => {
+        const plant = plants.find(p => p.id === n.plant_id)
+        const folder = `notas-plantas/${safeFileName(plant?.name, n.plant_id)}`
+        ;(n.content_blocks || []).forEach((b, i) => {
+          if ((b.type === 'photo' || b.type === 'video') && b.url) {
+            mediaJobs.push({ url: b.url, path: `${folder}/nota-${n.id}-${i}.${extFromUrl(b.url)}` })
+          }
+        })
+      })
+      compras.forEach(c => {
+        if (c.image_url) mediaJobs.push({ url: c.image_url, path: `compras/${safeFileName(compraNombre(c), c.id)}.${extFromUrl(c.image_url)}` })
+      })
+      lotes.forEach(l => {
+        ;(l.content_blocks || []).forEach((b, i) => {
+          if ((b.type === 'photo' || b.type === 'video') && b.url) {
+            mediaJobs.push({ url: b.url, path: `notas-compras/lote-${l.numero || l.id}-${i}.${extFromUrl(b.url)}` })
+          }
+        })
+      })
+      seedBatchEvents.forEach(x => {
+        if (x.photo_url) {
+          const batch = seedBatches.find(sb => sb.id === x.seed_batch_id)
+          mediaJobs.push({ url: x.photo_url, path: `semillas/${safeFileName(batch?.nombre, x.seed_batch_id)}/registro-${x.id}.${extFromUrl(x.photo_url)}` })
+        }
+      })
+      seedBatches.forEach(batch => {
+        ;(batch.content_blocks || []).forEach((b, i) => {
+          if ((b.type === 'photo' || b.type === 'video') && b.url) {
+            mediaJobs.push({ url: b.url, path: `notas-semillas/${safeFileName(batch.nombre, batch.id)}-${i}.${extFromUrl(b.url)}` })
+          }
+        })
+      })
+
+      // 3) Descargar cada archivo y agregarlo al zip
+      const failed = []
+      for (let i = 0; i < mediaJobs.length; i++) {
+        const job = mediaJobs[i]
+        setBackupProgress(`Descargando fotos... ${i + 1}/${mediaJobs.length}`)
+        try {
+          const res = await fetch(job.url)
+          const blob = await res.blob()
+          zip.file(job.path, blob)
+        } catch (err) {
+          failed.push(job.path)
+        }
+      }
+      if (failed.length > 0) {
+        zip.file('archivos-no-descargados.txt', failed.join('\n'))
+      }
+
+      // 4) Comprimir y compartir/descargar
+      setBackupProgress('Comprimiendo...')
+      const content = await zip.generateAsync({ type: 'blob' }, meta => {
+        setBackupProgress(`Comprimiendo... ${Math.round(meta.percent)}%`)
+      })
+      const today = localDateISO()
+      const fileName = `diamantev-respaldo-${today}.zip`
+      const file = new File([content], fileName, { type: 'application/zip' })
+
+      let shared = false
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        try {
+          await navigator.share({ files: [file], title: 'Respaldo Diamantev', text: `Respaldo del ${today}` })
+          shared = true
+        } catch (shareErr) {
+          // el usuario canceló el panel de compartir, o no se pudo: cae al método de descarga normal
+          shared = false
+        }
+      }
+
+      if (!shared) {
+        const url = URL.createObjectURL(content)
+        const a = document.createElement('a')
+        a.href = url
+        a.download = fileName
+        document.body.appendChild(a)
+        a.click()
+        document.body.removeChild(a)
+        URL.revokeObjectURL(url)
+      }
+
+      const resumen = `Respaldo listo (${mediaJobs.length - failed.length} de ${mediaJobs.length} archivos incluidos)${failed.length ? `. ${failed.length} no se pudieron descargar, quedaron listados en "archivos-no-descargados.txt" dentro del zip.` : '.'}`
+      alert(shared ? resumen : `${resumen}\n\nSe descargó a tu celular. Para guardarlo en Google Drive u otra app: abre el archivo desde las notificaciones o el gestor de archivos, toca "Compartir" y elige la app que quieras.`)
+    } catch (err) {
+      alert('Error al generar el respaldo: ' + err.message)
+    } finally {
+      setBackupInProgress(false)
+      setBackupProgress('')
+    }
+  }
+
+  function expandByQuantity(list) {
+    return list.flatMap(p => Array(Math.max(1, Number(labelQuantities[p.id]) || 1)).fill(p))
+  }
+
+  async function downloadLabelsPPTX(list) {
+    const uniqueSelected = list.filter(p => selectedLabels.has(p.id))
+    const selected = expandByQuantity(uniqueSelected)
+    if (selected.length === 0) return
+    setSharingNotes(true)
+    try {
+      const pptx = new pptxgen()
+      pptx.defineLayout({ name: 'HOJA_A4', width: 11.69, height: 8.27 })
+      pptx.layout = 'HOJA_A4'
+
+      // Mismas proporciones que la etiqueta en PDF (50mm x 60mm), convertidas a pulgadas.
+      const labelW = 1.9685, labelH = 2.3622, marginX = 0.3937, marginY = 0.3937, gapX = 0.1969, gapY = 0.1969
+      const cols = Math.max(1, Math.floor((pptx.width - marginX * 2 + gapX) / (labelW + gapX)))
+      const rows = Math.max(1, Math.floor((pptx.height - marginY * 2 + gapY) / (labelH + gapY)))
+      const perSlide = cols * rows
+      const bannerH = 0.42
+
+      let slide = null
+      for (let i = 0; i < selected.length; i++) {
+        const p = selected[i]
+        const idxInSlide = i % perSlide
+        if (idxInSlide === 0) slide = pptx.addSlide()
+        const col = idxInSlide % cols
+        const row = Math.floor(idxInSlide / cols)
+        const x = marginX + col * (labelW + gapX)
+        const y = marginY + row * (labelH + gapY)
+
+        slide.addShape('rect', { x, y, w: labelW, h: labelH, fill: { color: 'FFFFFF' }, line: { color: '000000', width: 1 } })
+
+        if (p.image_url) {
+          try {
+            const dataUrl = await urlToDataURL(p.image_url)
+            slide.addImage({ data: dataUrl, x, y: y + bannerH, w: labelW, h: labelH - bannerH })
+          } catch (e) { /* si falla la foto, se deja el recuadro vacío */ }
+        }
+
+        slide.addShape('rect', { x, y, w: labelW, h: bannerH, fill: { color: '1A2E4A' } })
+        slide.addText(p.name.toUpperCase(), {
+          x, y, w: labelW, h: bannerH,
+          align: 'center', valign: 'middle',
+          color: 'FFFFFF', bold: true, fontSize: 11, fontFace: 'Arial',
+        })
+      }
+
+      await pptx.writeFile({ fileName: 'etiquetas-diamantev.pptx' })
+      await markPlantsAction(uniqueSelected.map(p => p.id), 'pdf_generated_at')
+      await addPrintedLabels(uniqueSelected.map(p => ({ id: p.id, qty: Math.max(1, Number(labelQuantities[p.id]) || 1) })))
+    } catch (err) {
+      alert('No se pudo generar el PowerPoint. Intenta de nuevo.')
+    }
+    setSharingNotes(false)
+  }
+
+  async function downloadLabelsPDF(list) {
+    const uniqueSelected = list.filter(p => selectedLabels.has(p.id))
+    const selected = expandByQuantity(uniqueSelected)
+    if (selected.length === 0) return
+    setSharingNotes(true)
+    try {
+      const doc = new jsPDF({ unit: 'mm', format: 'a4' })
+      const labelW = 50, labelH = 60, marginX = 10, marginY = 10, gapX = 5, gapY = 5
+      const cols = Math.max(1, Math.floor((210 - marginX * 2 + gapX) / (labelW + gapX)))
+      const rows = Math.max(1, Math.floor((297 - marginY * 2 + gapY) / (labelH + gapY)))
+      const perPage = cols * rows
+      const bannerH = 10
+
+      for (let i = 0; i < selected.length; i++) {
+        const p = selected[i]
+        const idxInPage = i % perPage
+        if (i > 0 && idxInPage === 0) doc.addPage()
+        const col = idxInPage % cols
+        const row = Math.floor(idxInPage / cols)
+        const x = marginX + col * (labelW + gapX)
+        const y = marginY + row * (labelH + gapY)
+
+        doc.setDrawColor(0, 0, 0)
+        doc.setLineWidth(0.8)
+        doc.rect(x, y, labelW, labelH)
+
+        if (p.image_url) {
+          try {
+            const dataUrl = await urlToDataURL(p.image_url)
+            const mime = (dataUrl.match(/data:image\/(\w+);/) || [])[1] || 'jpeg'
+            const format = mime.toUpperCase() === 'JPG' ? 'JPEG' : mime.toUpperCase()
+            doc.addImage(dataUrl, format, x, y + bannerH, labelW, labelH - bannerH)
+          } catch (e) { /* si falla la foto, se deja el recuadro vacío */ }
+        }
+
+        doc.setFillColor(26, 46, 74)
+        doc.rect(x, y, labelW, bannerH, 'F')
+        doc.setTextColor(255, 255, 255)
+        doc.setFont(undefined, 'bold')
+        doc.setFontSize(13)
+        doc.text(p.name.toUpperCase(), x + labelW / 2, y + bannerH / 2 + 3, { align: 'center', maxWidth: labelW - 4 })
+        doc.setFont(undefined, 'normal')
+      }
+
+      doc.save('etiquetas-diamantev.pdf')
+      await markPlantsAction(uniqueSelected.map(p => p.id), 'pdf_generated_at')
+      await addPrintedLabels(uniqueSelected.map(p => ({ id: p.id, qty: Math.max(1, Number(labelQuantities[p.id]) || 1) })))
+    } catch (err) {
+      alert('No se pudo generar el PDF. Intenta de nuevo.')
+    }
+    setSharingNotes(false)
+  }
+
+  async function shareSelectedPhotos(plantsList) {
+    let selected = plantsList.filter(p => selectedLabels.has(p.id))
+    if (shareOnlyStock) selected = selected.filter(p => p.stock > 0)
+    if (selected.length === 0) return
+    setSharingNotes(true)
+    try {
+      await markSelectedShared(new Set(selected.map(p => p.id)), true)
+      const link = `${window.location.origin}/?shared=1`
+      const shareText = `🌿 Catálogo Diamantev:\n${link}`
+
+      if (navigator.share) {
+        await navigator.share({ title: 'Plantas Diamantev', text: shareText })
+      } else {
+        window.open(`https://wa.me/?text=${encodeURIComponent(shareText)}`, '_blank')
+      }
+      setShareModalOpen(false)
+    } catch (err) {
+      if (err.name !== 'AbortError') alert('No se pudo compartir. Intenta de nuevo.')
+    }
+    setSharingNotes(false)
+  }
+
+  async function loadImageEl(url) {
+    return new Promise(resolve => {
+      const img = new Image()
+      img.crossOrigin = 'anonymous'
+      img.onload = () => resolve(img)
+      img.onerror = () => resolve(null)
+      img.src = url
+    })
+  }
+
+  async function buildCaptionedPhoto(url, name) {
+    const img = await loadImageEl(url)
+    if (!img) return null
+    const width = 720
+    const captionH = 80
+    const imgH = img.height * (width / img.width)
+    const canvas = document.createElement('canvas')
+    canvas.width = width
+    canvas.height = imgH + captionH
+    const ctx = canvas.getContext('2d')
+    ctx.drawImage(img, 0, 0, width, imgH)
+    ctx.fillStyle = '#1a2e4a'
+    ctx.fillRect(0, imgH, width, captionH)
+    ctx.fillStyle = '#fff'
+    ctx.font = '900 36px Georgia, serif'
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+    ctx.fillText(name.toUpperCase(), width / 2, imgH + captionH / 2)
+    return await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.9))
+  }
+
+  async function shareSelectedPhotosDirect(plantsList) {
+    const selected = plantsList.filter(p => selectedLabels.has(p.id))
+    if (selected.length === 0) return
+    setSharingNotes(true)
+    try {
+      const files = []
+      for (const p of selected) {
+        if (!p.image_url) continue
+        const blob = await buildCaptionedPhoto(p.image_url, p.name)
+        if (blob) files.push(new File([blob], `${p.name.replace(/[^a-z0-9-_ ]/gi, '')}.jpg`, { type: 'image/jpeg' }))
+      }
+      if (files.length === 0) {
+        alert('No se pudieron generar las imágenes (revisa que tengan foto).')
+        setSharingNotes(false)
+        return
+      }
+
+      if (navigator.share && navigator.canShare && navigator.canShare({ files })) {
+        await navigator.share({ title: 'Plantas Diamantev', files })
+        await markPlantsAction(selected.map(p => p.id), 'whatsapp_shared_at')
+      } else {
+        files.forEach(f => {
+          const url = URL.createObjectURL(f)
+          const a = document.createElement('a')
+          a.href = url
+          a.download = f.name
+          a.click()
+          URL.revokeObjectURL(url)
+        })
+      }
+    } catch (err) {
+      if (err.name !== 'AbortError') alert('No se pudo compartir. Puede que las fotos no permitan generarse (CORS). Intenta de nuevo.')
+    }
+    setSharingNotes(false)
+  }
+
+  async function urlToFile(url) {
+    try {
+      const res = await fetch(url)
+      const blob = await res.blob()
+      const name = url.split('/').pop().split('?')[0]
+      return new File([blob], name, { type: blob.type })
+    } catch {
+      return null
+    }
+  }
+
+  async function shareLoteNote(lote) {
+    setSharingNotes(true)
+    try {
+      const header = `🧺 Compra #${lote.numero}${lote.proveedor ? ` — ${lote.proveedor}` : ''}`
+      const blocks = lote.content_blocks || []
+      const textBlocks = blocks.filter(b => b.type === 'text').map(b => b.content).join('\n')
+      const shareText = textBlocks ? `${header}:\n${textBlocks}` : header
+      const fileUrls = blocks.filter(b => (b.type === 'photo' || b.type === 'video') && b.url).map(b => b.url)
+      const files = (await Promise.all(fileUrls.map(urlToFile))).filter(Boolean)
+
+      if (navigator.share && files.length > 0 && navigator.canShare && navigator.canShare({ files })) {
+        await navigator.share({ title: 'Nota de compra Diamantev', text: shareText, files })
+      } else if (navigator.share) {
+        await navigator.share({ title: 'Nota de compra Diamantev', text: shareText })
+      } else {
+        window.open(`https://wa.me/?text=${encodeURIComponent(shareText)}`, '_blank')
+      }
+    } catch (err) {
+      if (err.name !== 'AbortError') alert('No se pudo compartir. Intenta de nuevo.')
+    }
+    setSharingNotes(false)
+  }
+
+  async function shareSbNote(batch) {
+    setSharingNotes(true)
+    try {
+      const header = `🌰 ${batch.es_noid ? 'NOID' : (batch.nombre || 'Lote de semillas')}`
+      const blocks = batch.content_blocks || []
+      const textBlocks = blocks.filter(b => b.type === 'text').map(b => b.content).join('\n')
+      const shareText = textBlocks ? `${header}:\n${textBlocks}` : header
+      const fileUrls = blocks.filter(b => (b.type === 'photo' || b.type === 'video') && b.url).map(b => b.url)
+      const files = (await Promise.all(fileUrls.map(urlToFile))).filter(Boolean)
+
+      if (navigator.share && files.length > 0 && navigator.canShare && navigator.canShare({ files })) {
+        await navigator.share({ title: 'Nota de semillas Diamantev', text: shareText, files })
+      } else if (navigator.share) {
+        await navigator.share({ title: 'Nota de semillas Diamantev', text: shareText })
+      } else {
+        window.open(`https://wa.me/?text=${encodeURIComponent(shareText)}`, '_blank')
+      }
+    } catch (err) {
+      if (err.name !== 'AbortError') alert('No se pudo compartir. Intenta de nuevo.')
+    }
+    setSharingNotes(false)
+  }
+
+  async function sharePlantNote(n) {
+    setSharingNotes(true)
+    try {
+      const plant = plants.find(p => p.id === n.plant_id)
+      const header = `🪴 ${plant ? plant.name : 'Planta'} (${new Date(n.created_at).toLocaleDateString()})`
+      const textBlocks = (n.content_blocks || []).filter(b => b.type === 'text').map(b => b.content).join('\n')
+      const shareText = textBlocks ? `${header}:\n${textBlocks}` : header
+      const fileUrls = (n.content_blocks || []).filter(b => (b.type === 'photo' || b.type === 'video') && b.url).map(b => b.url)
+      const files = (await Promise.all(fileUrls.map(urlToFile))).filter(Boolean)
+
+      if (navigator.share && files.length > 0 && navigator.canShare && navigator.canShare({ files })) {
+        await navigator.share({ title: 'Nota de planta Diamantev', text: shareText, files })
+      } else if (navigator.share) {
+        await navigator.share({ title: 'Nota de planta Diamantev', text: shareText })
+      } else {
+        window.open(`https://wa.me/?text=${encodeURIComponent(shareText)}`, '_blank')
+      }
+    } catch (err) {
+      if (err.name !== 'AbortError') alert('No se pudo compartir. Intenta de nuevo.')
+    }
+    setSharingNotes(false)
+  }
+
+  if (checkingSession) {
+    return <p className="status-msg">Cargando...</p>
+  }
+
+  if (recoveryMode) {
+    return (
+      <div className="admin-login">
+        <h2>Crear nueva contraseña</h2>
+        <form onSubmit={handleUpdatePassword}>
+          <input
+            type="password"
+            placeholder="Nueva contraseña"
+            value={newPassword}
+            onChange={e => setNewPassword(e.target.value)}
+            autoComplete="new-password"
+          />
+          <button type="submit" disabled={updatingPassword}>{updatingPassword ? 'Guardando...' : 'Guardar contraseña'}</button>
+        </form>
+      </div>
+    )
+  }
+
+  if (!authed) {
+    if (resetMode) {
+      return (
+        <div className="admin-login">
+          <h2>Recuperar contraseña</h2>
+          {resetSent ? (
+            <p style={{ fontSize: '0.9rem', marginTop: 10 }}>
+              Te enviamos un correo a <strong>{resetEmail}</strong> con un enlace para crear una nueva contraseña. Revisa también la carpeta de spam.
+            </p>
+          ) : (
+            <form onSubmit={handleForgotPassword}>
+              <input
+                type="email"
+                placeholder="Tu correo electrónico"
+                value={resetEmail}
+                onChange={e => setResetEmail(e.target.value)}
+                autoComplete="username"
+              />
+              <button type="submit" disabled={sendingReset}>{sendingReset ? 'Enviando...' : 'Enviar enlace de recuperación'}</button>
+            </form>
+          )}
+          <button
+            type="button"
+            onClick={() => { setResetMode(false); setResetSent(false) }}
+            style={{ background: 'none', border: 'none', color: 'var(--dark)', textDecoration: 'underline', marginTop: 14, cursor: 'pointer' }}
+          >
+            ← Volver a iniciar sesión
+          </button>
+        </div>
+      )
+    }
+    return (
+      <div className="admin-login">
+        <h2>Panel de administrador</h2>
+        <form onSubmit={handleLogin}>
+          <input
+            type="email"
+            placeholder="Correo electrónico"
+            value={email}
+            onChange={e => setEmail(e.target.value)}
+            autoComplete="username"
+          />
+          <input
+            type="password"
+            placeholder="Contraseña"
+            value={password}
+            onChange={e => setPassword(e.target.value)}
+            autoComplete="current-password"
+          />
+          <button type="submit" disabled={loggingIn}>{loggingIn ? 'Entrando...' : 'Entrar'}</button>
+        </form>
+        <button
+          type="button"
+          onClick={() => setResetMode(true)}
+          style={{ background: 'none', border: 'none', color: 'var(--dark)', textDecoration: 'underline', marginTop: 14, cursor: 'pointer' }}
+        >
+          ¿Olvidaste tu contraseña?
+        </button>
+        {failed && (
+          <p style={{ color: '#b03434', fontSize: '0.85rem', marginTop: 10 }}>
+            Correo o contraseña incorrectos.
+          </p>
+        )}
+      </div>
+    )
+  }
+
+  // Lista unificada de ventas + decrementos manuales, para "Ventas y Decrementos"
+  const movimientos = [
+    ...orders.map(o => ({ ...o, _type: 'venta' })),
+    ...decrementos.map(d => ({ ...d, _type: 'decremento' })),
+  ].sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+
+  const movimientosFiltrados = movimientos
+    .filter(m => movTypeFilter === 'all' || m._type === movTypeFilter)
+    .filter(m => movStatusFilter === 'all' || (m._type === 'venta' ? m.status === movStatusFilter : true))
+    .filter(m => {
+      const term = movSearch.toLowerCase()
+      if (!term) return true
+      if (m._type === 'venta') return (m.customer_name || '').toLowerCase().includes(term)
+      return (m.plant_name || '').toLowerCase().includes(term) || (m.motivo || '').toLowerCase().includes(term)
+    })
+
+  // Las ventas manuales (venta_lotes) también deben respetar Buscar / Tipo / Estado.
+  // El estado de una venta se deduce de sus líneas (igual que el color de la tarjeta):
+  // todas entregadas -> 'entregado'; alguna pagada/entregada -> 'pagado'; si no -> 'pedido'.
+  function estadoDeVentaLote(lineas) {
+    if (lineas.length > 0 && lineas.every(l => l.status === 'entregado')) return 'entregado'
+    if (lineas.some(l => l.status === 'pagado' || l.status === 'entregado')) return 'pagado'
+    return 'pedido'
+  }
+  const ventaLotesFiltrados = ventaLotes.filter(lote => {
+    const lineas = decrementos.filter(d => d.lote_id === lote.id)
+    if (lineas.length === 0) return false
+    if (movTypeFilter === 'decremento') return false
+    if (movStatusFilter !== 'all') {
+      if (lote.status === 'cancelada') return false
+      if (estadoDeVentaLote(lineas) !== movStatusFilter) return false
+    }
+    const term = movSearch.trim().toLowerCase()
+    if (term) {
+      const coincide = (lote.cliente || '').toLowerCase().includes(term)
+        || lineas.some(l => (l.plant_name || '').toLowerCase().includes(term) || (l.motivo || '').toLowerCase().includes(term))
+      if (!coincide) return false
+    }
+    return true
+  })
+
+  // Números resumen para las tarjetas de inicio
+  const pedidosPendientes = orders.filter(o => o.status === 'pedido').length
+  const ingresosEnCurso = compras.filter(c => c.status !== 'recibido').length
+
+  const CLIENT_URL = 'https://diamantev.vercel.app'
+
+  function shareClientLink() {
+    const message = encodeURIComponent(`🌿 Visita nuestro catálogo de plantas Diamantev: ${CLIENT_URL}`)
+    window.open(`https://wa.me/?text=${message}`, '_blank')
+  }
+
+
+  const cards = [
+    { key: 'galeria', label: 'Galería', icon: '🪴', count: plants.length },
+    { key: 'categorias', label: 'Categorías', icon: '🏷️', count: categories.length },
+    { key: 'pedidos', label: 'Ventas y Decrementos', icon: '🧾', count: pedidosPendientes },
+    { key: 'ingresos', label: 'Ingresos', icon: '📦', count: ingresosEnCurso },
+    { key: 'tabla', label: 'Tabla completa', icon: '📊', count: 0 },
+    { key: 'notas', label: 'Notas', icon: '📝', count: categoryNotes.length },
+  ]
+
+  const sideMenuItemStyle = {
+    display: 'flex', alignItems: 'center', gap: 10,
+    width: '100%', textAlign: 'left', padding: '12px 14px',
+    background: '#EFE6D0', border: 'none', borderRadius: 10,
+    color: '#4a5d3a', fontWeight: 600, fontSize: 15, cursor: 'pointer',
+  }
+
+  const sheetTitles = {
+    galeria: '🪴 Galería',
+    categorias: '🏷️ Categorías',
+    pedidos: '🧾 Ventas y Decrementos',
+    ingresos: '📦 Ingresos',
+    tabla: '📊 Tabla completa',
+    notas: '📝 Notas',
+  }
+
+  return (
+    <>
+    <div className="admin" style={{
+      minHeight: '100vh', width: '100vw', marginLeft: 'calc(50% - 50vw)',
+      overflowX: 'hidden', boxSizing: 'border-box',
+      display: isWideScreen ? 'flex' : 'block', alignItems: 'flex-start',
+    }}>
+      {(homeMenuOpen || isWideScreen) && (
+        <>
+          {!isWideScreen && (
+            <div
+              onClick={() => setHomeMenuOpen(false)}
+              style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', zIndex: 2000 }}
+            />
+          )}
+          <div style={{
+            position: isWideScreen ? 'sticky' : 'fixed',
+            top: 0, left: 0, alignSelf: 'flex-start', height: '100vh', width: 280, maxWidth: '82vw', flexShrink: 0,
+            background: '#F3ECDD',
+            boxShadow: isWideScreen ? 'none' : '2px 0 16px rgba(0,0,0,0.2)',
+            borderRight: isWideScreen ? '1px solid #E8DFC8' : 'none',
+            zIndex: 2001,
+            padding: '20px 14px', boxSizing: 'border-box', overflowY: 'auto',
+            display: 'flex', flexDirection: 'column', gap: 8,
+          }}>
+            <h3 style={{ margin: '0 0 4px 6px', color: '#4a5d3a', fontSize: '1.3rem' }}>Menú</h3>
+            <hr style={{ border: 'none', borderTop: '1px solid #E8DFC8', margin: '0 0 6px' }} />
+            {cards.map(c => (
+              <button key={c.key} type="button" onClick={() => { setHomeMenuOpen(false); setView(c.key) }} style={sideMenuItemStyle}>
+                <span style={{ fontSize: 18 }}>{c.icon}</span> {c.label}{c.count ? ` (${c.count})` : ''}
+              </button>
+            ))}
+            <button
+              type="button"
+              onClick={() => {
+                setHomeMenuOpen(false)
+                localStorage.setItem('diamantev_view_store', '1')
+                window.location.href = CLIENT_URL
+              }}
+              style={sideMenuItemStyle}
+            >
+              <span style={{ fontSize: 18 }}>🌿</span> Ver tienda
+            </button>
+            <button type="button" onClick={() => { setHomeMenuOpen(false); shareClientLink() }} style={sideMenuItemStyle}>
+              <span style={{ fontSize: 18 }}>💬</span> Compartir catálogo por WhatsApp
+            </button>
+            <hr style={{ border: 'none', borderTop: '1px solid #E8DFC8', margin: '6px 0' }} />
+            <button type="button" onClick={() => { setHomeMenuOpen(false); downloadFullBackup() }} disabled={backupInProgress} style={sideMenuItemStyle}>
+              <span style={{ fontSize: 18 }}>💾</span> {backupInProgress ? backupProgress : 'Respaldo completo'}
+            </button>
+            <button type="button" onClick={() => { setHomeMenuOpen(false); repairPendingPlantLinks() }} style={sideMenuItemStyle}>
+              <span style={{ fontSize: 18 }}>🔧</span> Vincular pendientes
+            </button>
+            <div style={{ flex: 1 }} />
+            <hr style={{ border: 'none', borderTop: '1px solid #E8DFC8', margin: '6px 0' }} />
+            <button type="button" onClick={() => { setHomeMenuOpen(false); handleLogout() }} style={{ ...sideMenuItemStyle, color: '#b03434', fontWeight: 700 }}>
+              <span style={{ fontSize: 18 }}>🚪</span> Cerrar sesión
+            </button>
+          </div>
+        </>
+      )}
+
+      <div style={{ flex: 1, minWidth: 0, maxWidth: '100%', overflowX: 'hidden' }}>
+      <div className="admin-header" style={isWideScreen ? { flexWrap: 'nowrap', overflow: 'hidden', justifyContent: 'flex-start', textAlign: 'left' } : undefined}>
+        {isWideScreen ? (
+          <h1 style={{ textAlign: 'left', lineHeight: 1.2 }}>
+            <span style={{ display: 'block', fontSize: '1.8rem' }}>Diamantev</span>
+            <span style={{ display: 'block', fontSize: '0.95rem', fontWeight: 500, color: '#7a7060' }}>Panel de administrador</span>
+          </h1>
+        ) : (
+          <h1>Panel de administrador — Diamantev</h1>
+        )}
+        {!isWideScreen && (
+          <>
+            <button
+              type="button"
+              onClick={() => {
+                localStorage.setItem('diamantev_view_store', '1')
+                window.location.href = CLIENT_URL
+              }}
+              className="back-to-store"
+            >
+              🌿 Ver tienda
+            </button>
+            <button onClick={handleLogout} className="back-to-store" style={{ background: 'transparent', border: '1px solid #b03434', color: '#b03434' }}>
+              Cerrar sesión
+            </button>
+            <button
+              type="button"
+              onClick={() => setHomeMenuOpen(!homeMenuOpen)}
+              className="back-to-store"
+              style={{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--dark)', padding: '10px 14px' }}
+            >
+              ☰
+            </button>
+          </>
+        )}
+      </div>
+
+      {pendingCount > 0 && (
+        <p className={`offline-banner ${syncing ? 'offline-banner-syncing' : ''}`}>
+          {syncing ? `Sincronizando ${pendingCount} cambio(s)...` : `${pendingCount} cambio(s) guardados sin conexión, pendientes de subir`}
+        </p>
+      )}
+
+      <hr className="admin-divider" />
+
+      {/* ---------- CONTENIDO PRINCIPAL (Galería es la pantalla de aterrizaje) ---------- */}
+      <div style={{ padding: '0 16px 24px', boxSizing: 'border-box' }}>
+          <div className="admin-sheet-header">
+            <h2>{sheetTitles[view]}</h2>
+          </div>
+
+            <div className="admin-sheet-body" style={{ overflow: 'visible', maxHeight: 'none', height: 'auto' }}>
+              {loading && <p className="status-msg">Cargando...</p>}
+              {!loading && view === 'galeria' && (() => {
+                    const galleryPlants = plants
+                      .filter(p => galleryShowHidden || p.active)
+                      .filter(p => galleryFilter === 'all' || p.category_id === galleryFilter || categories.find(c => c.id === p.category_id)?.parent_id === galleryFilter)
+                      .filter(p => p.name.toLowerCase().includes(gallerySearch.trim().toLowerCase()))
+                      .filter(p => {
+                        if (galleryProveedor === 'all') return true
+                        const comprasDePlanta = compras.filter(c => c.plant_id === p.id)
+                        if (galleryProveedor === '__none__') return comprasDePlanta.length === 0
+                        return comprasDePlanta.some(c => c.proveedor === galleryProveedor)
+                      })
+                      .filter(p => {
+                        if (galleryCompraStatus === 'all') return true
+                        return compras.some(c => c.plant_id === p.id && c.status === galleryCompraStatus)
+                      })
+                      .filter(p => {
+                        if (galleryLoteNumero === 'all') return true
+                        return compras.some(c => c.plant_id === p.id && c.lote_id === galleryLoteNumero)
+                      })
+                      .filter(p => {
+                        if (galleryVentaLoteNumero === 'all') return true
+                        return decrementos.some(d => d.plant_id === p.id && d.lote_id === galleryVentaLoteNumero)
+                      })
+                      .filter(p => {
+                        if (galleryVentaStatus === 'all') return true
+                        const enOrdenes = orders.some(o => o.status === galleryVentaStatus && (o.order_items || []).some(it => it.plant_id === p.id))
+                        const enDecrementos = decrementos.some(d => d.plant_id === p.id && d.status === galleryVentaStatus)
+                        return enOrdenes || enDecrementos
+                      })
+                      .filter(p => {
+                        if (galleryActionFilter === 'shared') return p.shared_visible
+                        if (galleryActionFilter === 'printed') return !!p.printed_at
+                        if (galleryActionFilter === 'pdf') return !!p.pdf_generated_at
+                        if (galleryActionFilter === 'whatsapp') return !!p.whatsapp_shared_at
+                        return true
+                      })
+                      .filter(p => {
+                        if (galleryMissingFilters.has('noPhoto') && p.image_url) return false
+                        if (galleryMissingFilters.has('hasPhoto') && !p.image_url) return false
+                        if (galleryMissingFilters.has('noCategory') && p.category_id) return false
+                        if (galleryMissingFilters.has('noPrice') && Number(p.price) > 0) return false
+                        if (galleryMissingFilters.has('noStock') && Number(p.stock) > 0) return false
+                        if (galleryMissingFilters.has('hasStock') && !(Number(p.stock) > 0)) return false
+                        if (galleryMissingFilters.has('flowered') && !floraciones.some(f => f.plant_id === p.id)) return false
+                        if (galleryMissingFilters.has('sold')) {
+                          const vendida = orders.some(o => (o.order_items || []).some(it => it.plant_id === p.id)) || decrementos.some(d => d.plant_id === p.id)
+                          if (!vendida) return false
+                        }
+                        if (galleryMissingFilters.has('hasNotes') && !plantNotes.some(n => n.plant_id === p.id)) return false
+                        if (galleryMissingFilters.has('noNotes') && plantNotes.some(n => n.plant_id === p.id)) return false
+                        if (galleryMissingFilters.has('hasVideo') && !p.video_url) return false
+                        if (galleryMissingFilters.has('noVideo') && p.video_url) return false
+                        if (galleryMissingFilters.has('flagged') && !p.flagged) return false
+                        if (galleryMissingFilters.has('marcadoCliente') && !p.marcado_cliente) return false
+                        if (galleryLabelStatus !== 'all' && labelStatusOf(p) !== galleryLabelStatus) return false
+                        return true
+                      })
+                      .sort((a, b) => {
+                        if (galleryFilter === 'all') {
+                          const catA = categories.find(c => c.id === a.category_id)?.name || 'zzz'
+                          const catB = categories.find(c => c.id === b.category_id)?.name || 'zzz'
+                          const catCompare = catA.localeCompare(catB, 'es', { sensitivity: 'base' })
+                          if (catCompare !== 0) return catCompare
+                        }
+                        return a.name.localeCompare(b.name, 'es', { sensitivity: 'base' })
+                      })
+
+                    const activeChips = []
+                    if (galleryFilter !== 'all') {
+                      const cat = categories.find(c => c.id === galleryFilter)
+                      activeChips.push({ key: 'cat', label: cat ? `${cat.emoji} ${cat.name}` : 'Categoría', onRemove: () => setGalleryFilter('all') })
+                    }
+                    if (galleryProveedor !== 'all') {
+                      activeChips.push({ key: 'prov', label: galleryProveedor === '__none__' ? 'Sin proveedor' : `🚚 ${galleryProveedor}`, onRemove: () => setGalleryProveedor('all') })
+                    }
+                    if (galleryCompraStatus !== 'all') {
+                      activeChips.push({ key: 'cstatus', label: `📦 Compra: ${galleryCompraStatus === 'pedido' ? 'Pedido' : galleryCompraStatus === 'pagado' ? 'Pagado' : 'Recibido'}`, onRemove: () => setGalleryCompraStatus('all') })
+                    }
+                    if (galleryLoteNumero !== 'all') {
+                      const l = lotes.find(x => x.id === galleryLoteNumero)
+                      activeChips.push({ key: 'lote', label: `Compra #${l?.numero ?? '?'}`, onRemove: () => setGalleryLoteNumero('all') })
+                    }
+                    if (galleryVentaLoteNumero !== 'all') {
+                      const vl = ventaLotes.find(x => x.id === galleryVentaLoteNumero)
+                      activeChips.push({ key: 'ventalote', label: `Venta #${vl?.numero ?? '?'}`, onRemove: () => setGalleryVentaLoteNumero('all') })
+                    }
+                    if (galleryVentaStatus !== 'all') {
+                      activeChips.push({ key: 'vstatus', label: `🛒 Venta: ${galleryVentaStatus === 'pedido' ? 'Pedido' : galleryVentaStatus === 'pagado' ? 'Pagado' : 'Entregado'}`, onRemove: () => setGalleryVentaStatus('all') })
+                    }
+                    if (galleryActionFilter !== 'all') {
+                      const actionLabels = { shared: '📤 Compartidas', printed: '🏷️ Impresas', pdf: '📄 En PDF', whatsapp: '📲 Por WhatsApp' }
+                      activeChips.push({ key: 'action', label: actionLabels[galleryActionFilter], onRemove: () => setGalleryActionFilter('all') })
+                    }
+                    if (galleryLabelStatus !== 'all') {
+                      const labelStatusLabels = { disponible: '🟢 Etiqueta: Nunca impresa', sobrante: '📦 Etiqueta: De sobra sin pegar', colocada: '✅ Etiqueta: Todo colocado' }
+                      activeChips.push({ key: 'labelstatus', label: labelStatusLabels[galleryLabelStatus], onRemove: () => setGalleryLabelStatus('all') })
+                    }
+                    const missingLabels = {
+                      noPhoto: '🖼️ Sin foto', hasPhoto: '🖼️ Con foto',
+                      noCategory: 'Sin categoría', noPrice: 'Sin precio',
+                      noStock: '📦 Sin stock', hasStock: '📦 Con stock',
+                      flowered: '🌸 Floreció', sold: '🛒 Se vendió',
+                      hasNotes: '📓 Con notas', noNotes: '📓 Sin notas',
+                      hasVideo: '🎥 Con video', noVideo: '🎥 Sin video',
+                      flagged: '🚩 Para revisar',
+                      marcadoCliente: '🟢 Marcadas para cliente',
+                    }
+                    galleryMissingFilters.forEach(key => {
+                      activeChips.push({ key, label: missingLabels[key] || key, onRemove: () => toggleGalleryMissingFilter(key) })
+                    })
+
+                    function clearAllGalleryFilters() {
+                      setGalleryFilter('all')
+                      setGalleryProveedor('all')
+                      setGalleryCompraStatus('all')
+                      setGalleryLoteNumero('all')
+                      setGalleryVentaLoteNumero('all')
+                      setGalleryVentaStatus('all')
+                      setGalleryActionFilter('all')
+                      setGalleryLabelStatus('all')
+                      setGalleryMissingFilters(new Set())
+                    }
+
+                    const filteredCats = categories.filter(c => c.name.toLowerCase().includes(catFilterSearch.trim().toLowerCase()))
+                    const provList = [...new Set(compras.map(c => c.proveedor).filter(Boolean))].sort()
+                    const filteredProvs = provList.filter(p => p.toLowerCase().includes(provFilterSearch.trim().toLowerCase()))
+                    const loteList = lotes.slice().sort((a, b) => (b.numero || 0) - (a.numero || 0))
+                    const filteredLotes = loteList.filter(l => `${l.numero}${l.proveedor || ''}`.toLowerCase().includes(loteFilterSearch.trim().toLowerCase()))
+                    const ventaLoteList = ventaLotes.slice().sort((a, b) => (b.numero || 0) - (a.numero || 0))
+                    const filteredVentaLotes = ventaLoteList.filter(l => `${l.numero}${l.cliente || ''}`.toLowerCase().includes(ventaLoteFilterSearch.trim().toLowerCase()))
+
+                    const verActivo = galleryFilter !== 'all' || galleryCompraStatus !== 'all' || galleryVentaStatus !== 'all' || galleryShowHidden
+
+                    return (
+                      <>
+                        <div style={{ position: 'sticky', top: 0, zIndex: 40, background: '#F8F1E1', paddingTop: 4, paddingBottom: 6, marginBottom: 4 }}>
+                        <div className="filter-bar" style={{ flexWrap: 'wrap', rowGap: 8 }}>
+                          <input
+                            className="order-search"
+                            placeholder="🔍 Buscar planta por nombre..."
+                            value={gallerySearch}
+                            onChange={e => setGallerySearch(e.target.value)}
+                            style={{ flex: '1 1 220px' }}
+                          />
+                          <button type="button" onClick={() => setVerMenuOpen(o => !o)}
+                            style={{
+                              display: 'flex', alignItems: 'center', gap: 6,
+                              background: verActivo ? QUICK_FILTER_TONES.cream.active : QUICK_FILTER_TONES.cream.bg,
+                              border: `1px solid ${QUICK_FILTER_TONES.cream.border}`, borderRadius: 18,
+                              padding: '9px 14px', fontWeight: verActivo ? 700 : 600,
+                              color: '#5B4636', fontSize: 13.5, cursor: 'pointer', whiteSpace: 'nowrap',
+                            }}>
+                            <span style={{ fontSize: 16 }}>👁️</span>
+                            Ver
+                            <span style={{ fontSize: 11, opacity: 0.6 }}>⌄</span>
+                          </button>
+                          <button
+                            type="button"
+                            className={activeChips.length > 0 ? 'filter-trigger-btn has-filters' : 'filter-trigger-btn'}
+                            onClick={() => setGalleryFiltersOpen(true)}
+                          >
+                            🎛️ Filtros{activeChips.length > 0 ? ` (${activeChips.length})` : ''}
+                          </button>
+                        </div>
+
+                        {verMenuOpen && (
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, margin: '8px 0' }}>
+                            <button type="button" onClick={() => openSelector('categoria')}
+                              style={{
+                                display: 'flex', alignItems: 'center', gap: 6,
+                                background: galleryFilter !== 'all' ? QUICK_FILTER_TONES.cream.active : QUICK_FILTER_TONES.cream.bg,
+                                border: `1px solid ${QUICK_FILTER_TONES.cream.border}`, borderRadius: 18,
+                                padding: '9px 14px', fontWeight: galleryFilter !== 'all' ? 700 : 600,
+                                color: '#5B4636', fontSize: 13.5, cursor: 'pointer', whiteSpace: 'nowrap',
+                              }}>
+                              <span style={{ fontSize: 16 }}>🏷️</span>
+                              {galleryFilter === 'all' ? 'Categoría: Todas' : (() => { const c = categories.find(x => x.id === galleryFilter); return c ? `${c.emoji} ${c.name}` : 'Categoría' })()}
+                              <span style={{ fontSize: 11, opacity: 0.6 }}>⌄</span>
+                            </button>
+                            <QuickFilterButton
+                              icon="📦" label="Compra" tone="sage"
+                              value={galleryCompraStatus}
+                              onChange={v => setGalleryCompraStatus(v)}
+                              options={[
+                                { value: 'all', label: 'Todos' },
+                                { value: 'pedido', label: 'Pedido', shortLabel: 'Pedido' },
+                                { value: 'pagado', label: 'Pagado', shortLabel: 'Pagado' },
+                                { value: 'recibido', label: 'Recibido', shortLabel: 'Recibido' },
+                              ]}
+                            />
+                            <QuickFilterButton
+                              icon="🛒" label="Venta" tone="rose"
+                              value={galleryVentaStatus}
+                              onChange={v => setGalleryVentaStatus(v)}
+                              options={[
+                                { value: 'all', label: 'Todos' },
+                                { value: 'pedido', label: 'Pedido', shortLabel: 'Pedido' },
+                                { value: 'pagado', label: 'Pagado', shortLabel: 'Pagado' },
+                                { value: 'entregado', label: 'Entregado', shortLabel: 'Entregado' },
+                              ]}
+                            />
+                            <ToggleFilterButton icon="👁️" label="Mostrar también ocultas" tone="sky"
+                              active={galleryShowHidden}
+                              onClick={() => setGalleryShowHidden(v => !v)} />
+                          </div>
+                        )}
+
+                        {activeChips.length > 0 && (
+                          <div className="filter-chips-row">
+                            {activeChips.map(chip => (
+                              <span key={chip.key} className="filter-chip">
+                                {chip.label}
+                                <button type="button" onClick={chip.onRemove}>✕</button>
+                              </span>
+                            ))}
+                            <button type="button" className="filter-chip filter-chip-clear" onClick={clearAllGalleryFilters}>Limpiar todo</button>
+                          </div>
+                        )}
+                        </div>
+
+                        {galleryFiltersOpen && (
+                          <div className="filter-sheet-overlay" onClick={() => setGalleryFiltersOpen(false)}>
+                            <div className="filter-sheet" onClick={e => e.stopPropagation()}>
+                              <div className="filter-sheet-header">
+                                <h3>🎛️ Filtros</h3>
+                                <button type="button" onClick={() => setGalleryFiltersOpen(false)}>✕</button>
+                              </div>
+
+                              <div className="filter-sheet-body">
+                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                                  <MultiCheckFilterButton
+                                    icon="🚩" label="Revisar" tone="sky"
+                                    checked={galleryMissingFilters}
+                                    onToggle={toggleGalleryMissingFilter}
+                                    options={[
+                                      { value: 'noCategory', label: 'Sin categoría' },
+                                      { value: 'noPrice', label: 'Sin precio' },
+                                      { value: 'noPhoto', label: 'Sin foto' },
+                                      { value: 'noVideo', label: 'Sin video' },
+                                      { value: 'flagged', label: 'Marcadas para revisar' },
+                                      { value: 'marcadoCliente', label: 'Marcadas para cliente' },
+                                    ]}
+                                  />
+                                  <QuickFilterButton
+                                    icon="🏷️" label="Etiquetas" tone="cream"
+                                    value={galleryLabelStatus}
+                                    onChange={v => setGalleryLabelStatus(v)}
+                                    options={[
+                                      { value: 'all', label: 'Todas' },
+                                      { value: 'disponible', label: '🟢 Nunca impresa', shortLabel: 'Nunca impresa' },
+                                      { value: 'sobrante', label: '📦 De sobra sin pegar', shortLabel: 'De sobra' },
+                                      { value: 'colocada', label: '✅ Todo colocado', shortLabel: 'Colocado' },
+                                    ]}
+                                  />
+                                  <button type="button" onClick={() => openSelector('proveedor')}
+                                    style={{
+                                      display: 'flex', alignItems: 'center', gap: 6,
+                                      background: galleryProveedor !== 'all' ? QUICK_FILTER_TONES.sky.active : QUICK_FILTER_TONES.sky.bg,
+                                      border: `1px solid ${QUICK_FILTER_TONES.sky.border}`, borderRadius: 18,
+                                      padding: '9px 14px', fontWeight: galleryProveedor !== 'all' ? 700 : 600,
+                                      color: '#5B4636', fontSize: 13.5, cursor: 'pointer',
+                                    }}>
+                                    <span style={{ fontSize: 16 }}>🚚</span>
+                                    {galleryProveedor === 'all' ? 'Proveedor: Todos' : galleryProveedor === '__none__' ? 'Sin proveedor' : galleryProveedor}
+                                    <span style={{ fontSize: 11, opacity: 0.6 }}>⌄</span>
+                                  </button>
+                                  <button type="button" onClick={() => openSelector('compra')}
+                                    style={{
+                                      display: 'flex', alignItems: 'center', gap: 6,
+                                      background: galleryLoteNumero !== 'all' ? QUICK_FILTER_TONES.sage.active : QUICK_FILTER_TONES.sage.bg,
+                                      border: `1px solid ${QUICK_FILTER_TONES.sage.border}`, borderRadius: 18,
+                                      padding: '9px 14px', fontWeight: galleryLoteNumero !== 'all' ? 700 : 600,
+                                      color: '#5B4636', fontSize: 13.5, cursor: 'pointer',
+                                    }}>
+                                    <span style={{ fontSize: 16 }}>🧾</span>
+                                    {galleryLoteNumero === 'all' ? 'N° de compra: Cualquiera' : (() => { const l = lotes.find(x => x.id === galleryLoteNumero); return l ? `Compra #${l.numero}${l.proveedor ? ` — ${l.proveedor}` : ''}` : 'Compra' })()}
+                                    <span style={{ fontSize: 11, opacity: 0.6 }}>⌄</span>
+                                  </button>
+                                  <button type="button" onClick={() => openSelector('ventaLote')}
+                                    style={{
+                                      display: 'flex', alignItems: 'center', gap: 6,
+                                      background: galleryVentaLoteNumero !== 'all' ? QUICK_FILTER_TONES.rose.active : QUICK_FILTER_TONES.rose.bg,
+                                      border: `1px solid ${QUICK_FILTER_TONES.rose.border}`, borderRadius: 18,
+                                      padding: '9px 14px', fontWeight: galleryVentaLoteNumero !== 'all' ? 700 : 600,
+                                      color: '#5B4636', fontSize: 13.5, cursor: 'pointer',
+                                    }}>
+                                    <span style={{ fontSize: 16 }}>🧾</span>
+                                    {galleryVentaLoteNumero === 'all' ? 'N° de venta: Cualquiera' : (() => { const vl = ventaLotes.find(x => x.id === galleryVentaLoteNumero); return vl ? `Venta #${vl.numero}${vl.cliente ? ` — ${vl.cliente}` : ''}` : 'Venta' })()}
+                                    <span style={{ fontSize: 11, opacity: 0.6 }}>⌄</span>
+                                  </button>
+                                </div>
+                              </div>
+
+
+                              <div className="filter-sheet-footer">
+
+                                <button type="button" className="clear-btn" onClick={clearAllGalleryFilters}>Limpiar todo</button>
+                                <button type="button" className="apply-btn" onClick={() => setGalleryFiltersOpen(false)}>
+                                  Aplicar filtros ({galleryPlants.length} resultado{galleryPlants.length === 1 ? '' : 's'})
+                                </button>
+                              </div>
+                            </div>
+
+                          </div>
+                        )}
+                        {activeSelector && (() => {
+                              const config = {
+                                categoria: {
+                                  title: 'Seleccionar categoría',
+                                  placeholder: 'Buscar categoría...',
+                                  search: catFilterSearch,
+                                  setSearch: setCatFilterSearch,
+                                  currentValue: galleryFilter,
+                                  options: [
+                                    { value: 'all', label: 'Todas las categorías' },
+                                    ...(() => {
+                                      const term = catFilterSearch.trim().toLowerCase()
+                                      const result = []
+                                      categories.filter(c => !c.parent_id).forEach(parent => {
+                                        const children = categories.filter(c => c.parent_id === parent.id)
+                                        const parentMatches = parent.name.toLowerCase().includes(term)
+                                        const matchingChildren = children.filter(ch => term === '' || ch.name.toLowerCase().includes(term))
+                                        if (term === '' || parentMatches || matchingChildren.length > 0) {
+                                          if (children.length === 0) {
+                                            result.push({ value: parent.id, label: `${parent.emoji} ${parent.name}` })
+                                          } else {
+                                            const expanded = term !== '' || expandedCategoryGroups.has(parent.id)
+                                            result.push({
+                                              value: parent.id,
+                                              label: `${expanded ? '▾' : '▸'} ${parent.emoji} ${parent.name} (${children.length})`,
+                                              isGroupHeader: true,
+                                            })
+                                            if (expanded) {
+                                              const childrenToShow = parentMatches ? children : matchingChildren
+                                              childrenToShow.forEach(ch => result.push({ value: ch.id, label: `　↳ ${ch.emoji} ${ch.name}` }))
+                                            }
+                                          }
+                                        }
+                                      })
+                                      return result
+                                    })(),
+                                  ],
+                                },
+                                proveedor: {
+                                  title: 'Seleccionar proveedor',
+                                  placeholder: 'Buscar proveedor...',
+                                  search: provFilterSearch,
+                                  setSearch: setProvFilterSearch,
+                                  currentValue: galleryProveedor,
+                                  options: [
+                                    { value: 'all', label: 'Todos los proveedores' },
+                                    { value: '__none__', label: 'Sin proveedor registrado' },
+                                    ...filteredProvs.map(p => ({ value: p, label: p })),
+                                  ],
+                                },
+                                compra: {
+                                  title: 'Seleccionar compra',
+                                  placeholder: 'Buscar compra...',
+                                  search: loteFilterSearch,
+                                  setSearch: setLoteFilterSearch,
+                                  currentValue: galleryLoteNumero,
+                                  options: [
+                                    { value: 'all', label: 'Cualquier compra' },
+                                    ...filteredLotes.map(l => ({ value: l.id, label: `Compra #${l.numero}${l.proveedor ? ` — ${l.proveedor}` : ''}` })),
+                                  ],
+                                },
+                                ventaLote: {
+                                  title: 'Seleccionar venta',
+                                  placeholder: 'Buscar venta...',
+                                  search: ventaLoteFilterSearch,
+                                  setSearch: setVentaLoteFilterSearch,
+                                  currentValue: galleryVentaLoteNumero,
+                                  options: [
+                                    { value: 'all', label: 'Cualquier venta' },
+                                    ...filteredVentaLotes.map(l => ({ value: l.id, label: `Venta #${l.numero}${l.cliente ? ` — ${l.cliente}` : ''}` })),
+                                  ],
+                                },
+                              }[activeSelector]
+
+                              return createPortal(
+                                <div
+                                  className="sub-sheet-overlay"
+                                  onClick={() => setActiveSelector(null)}
+                                  style={{ position: 'fixed', inset: 0, zIndex: 3000, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}
+                                >
+                                  <div className="sub-sheet" onClick={e => e.stopPropagation()} style={{ width: '100%', maxWidth: 480 }}>
+                                    <div className="sub-sheet-handle" />
+                                    <h4 className="sub-sheet-title">{config.title}</h4>
+                                    <div className="sub-sheet-search">
+                                      <span>🔍</span>
+                                      <input
+                                        placeholder={config.placeholder}
+                                        value={config.search}
+                                        onChange={e => config.setSearch(e.target.value)}
+                                        autoFocus
+                                      />
+                                    </div>
+                                    <div className="sub-sheet-list">
+                                      {config.options.map(opt => (
+                                        <div
+                                          key={opt.value}
+                                          className={config.currentValue === opt.value ? 'sub-sheet-option selected' : 'sub-sheet-option'}
+                                          onClick={() => opt.isGroupHeader ? toggleCategoryGroupExpanded(opt.value) : selectAndClose(activeSelector, opt.value)}
+                                          style={{ cursor: 'pointer', fontWeight: opt.isGroupHeader ? 700 : undefined }}
+                                        >
+                                          {!opt.isGroupHeader && config.currentValue === opt.value ? '✓ ' : ''}<span>{opt.label}</span>
+                                        </div>
+                                      ))}
+                                      {config.options.length === 1 && (
+                                        <p className="status-msg" style={{ padding: '10px 14px' }}>Sin resultados</p>
+                                      )}
+                                    </div>
+                                  </div>
+                                </div>,
+                                document.body
+                              )
+                            })()}
+
+                        <div className="label-select-bar" style={{ marginTop: 14, paddingTop: 10, borderTop: '1px solid #E8DFC8' }}>
+                          <div style={{ position: 'relative', display: 'inline-block' }}>
+                            <button type="button" onClick={() => setLabelSelectMenuOpen(o => !o)}>
+                              Seleccionar ⌄
+                            </button>
+                            {labelSelectMenuOpen && (
+                              <>
+                                <div onClick={() => setLabelSelectMenuOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 19 }} />
+                                <div style={{
+                                  position: 'absolute', top: '100%', left: 0, marginTop: 4, zIndex: 20,
+                                  background: '#fff', border: '1px solid #E8DFC8', borderRadius: 10,
+                                  minWidth: 140, boxShadow: '0 4px 12px rgba(0,0,0,0.15)', overflow: 'hidden',
+                                }}>
+                                  <div className="sub-sheet-option" style={{ cursor: 'pointer' }} onClick={() => { selectAllLabels(galleryPlants); setLabelSelectMenuOpen(false) }}>
+                                    Todas
+                                  </div>
+                                  <div className="sub-sheet-option" style={{ cursor: 'pointer' }} onClick={() => { clearLabels(); setLabelSelectMenuOpen(false) }}>
+                                    Ninguna
+                                  </div>
+                                </div>
+                              </>
+                            )}
+                          </div>
+                          {selectedLabels.size > 0 && (
+                            <>
+                              <button type="button" className="print-btn" onClick={() => { setLabelQuantities(prev => { const next = { ...prev }; selectedLabels.forEach(id => { if (!next[id]) next[id] = 1 }); return next }); setPendingLabelAction('print'); setLabelQtyModalOpen(true) }}>
+                                🏷️ Imprimir ({selectedLabels.size})
+                              </button>
+                              <button type="button" className="print-btn" onClick={() => { setLabelQuantities(prev => { const next = { ...prev }; selectedLabels.forEach(id => { if (!next[id]) next[id] = 1 }); return next }); setPendingLabelAction('pdf'); setLabelQtyModalOpen(true) }} disabled={sharingNotes}>
+                                {sharingNotes ? 'Generando...' : `📄 Descargar PDF (${selectedLabels.size})`}
+                              </button>
+                              <button type="button" className="print-btn" onClick={() => { setLabelQuantities(prev => { const next = { ...prev }; selectedLabels.forEach(id => { if (!next[id]) next[id] = 1 }); return next }); setPendingLabelAction('pptx'); setLabelQtyModalOpen(true) }} disabled={sharingNotes}>
+                                {sharingNotes ? 'Generando...' : `📽️ Descargar PowerPoint (${selectedLabels.size})`}
+                              </button>
+                              <button type="button" className="print-btn" onClick={() => setShareModalOpen(true)}>
+                                📤 Compartir/Enviar ({selectedLabels.size})
+                              </button>
+                              <button type="button" className="print-btn" onClick={() => shareSelectedPhotosDirect(galleryPlants)} disabled={sharingNotes}>
+                                {sharingNotes ? 'Preparando...' : `📲 Enviar fotos (${selectedLabels.size})`}
+                              </button>
+                              <button type="button" className="print-btn" onClick={() => markAllPlacedForSelected(Array.from(selectedLabels))}>
+                                ✅ Marcar todo colocado ({selectedLabels.size})
+                              </button>
+                              <button type="button" className="print-btn" onClick={() => applyBulkDiscount(Array.from(selectedLabels))}>
+                                🏷️ Aplicar descuento ({selectedLabels.size})
+                              </button>
+                              <button type="button" className="print-btn" onClick={() => markSelectedCliente(selectedLabels, true)}>
+                                🟢 Marcar para cliente ({selectedLabels.size})
+                              </button>
+                              <button type="button" className="print-btn" onClick={() => markSelectedCliente(selectedLabels, false)}>
+                                ⚪ Quitar de cliente ({selectedLabels.size})
+                              </button>
+                            </>
+                          )}
+                        </div>
+                        {galleryPlants.length === 0 ? (
+                          <p className="status-msg">No se encontraron plantas con esos criterios.</p>
+                        ) : (
+                          <>
+                          <style>{`
+                            .gallery-item > button.gallery-client-btn {
+                              position: absolute !important; top: 28px !important; left: 3px !important; right: auto !important; bottom: auto !important;
+                              z-index: 5 !important; display: flex !important; align-items: center !important; justify-content: center !important;
+                              width: 22px !important; height: 22px !important; min-width: 0 !important; min-height: 0 !important;
+                              padding: 0 !important; margin: 0 !important; border-radius: 50% !important;
+                              font-size: 12px !important; font-weight: 800 !important; line-height: 1 !important; font-family: inherit !important;
+                              color: #fff !important; cursor: pointer !important; opacity: 1 !important; visibility: visible !important; transform: none !important;
+                              background: rgba(90, 90, 90, 0.5) !important; border: 1.5px solid rgba(255, 255, 255, 0.85) !important;
+                              box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3) !important; transition: background 0.15s;
+                            }
+                            .gallery-item > button.gallery-client-btn[data-active="1"] {
+                              background: #2E8B57 !important; border: 2px solid #fff !important; box-shadow: 0 1px 5px rgba(0, 0, 0, 0.45) !important;
+                            }
+                          `}</style>
+                          <div className="gallery-grid">
+                            {galleryPlants.map(p => (
+                              <div key={p.id} className="gallery-item" style={{ position: 'relative' }}>
+                                <label className="gallery-checkbox">
+                                  <input
+                                    type="checkbox"
+                                    checked={selectedLabels.has(p.id)}
+                                    onChange={() => toggleLabelSelect(p.id)}
+                                  />
+                                </label>
+                                <button
+                                  type="button"
+                                  className="gallery-client-btn"
+                                  data-active={p.marcado_cliente ? '1' : '0'}
+                                  aria-pressed={!!p.marcado_cliente}
+                                  aria-label={p.marcado_cliente ? 'Quitar marca de cliente' : 'Marcar para cliente'}
+                                  title={p.marcado_cliente ? 'Marcada para cliente (toca para quitar)' : 'Marcar para cliente'}
+                                  onClick={e => { e.stopPropagation(); toggleMarcadoCliente(p.id, p.marcado_cliente) }}
+                                >
+                                  C
+                                </button>
+                                {p.coming_soon && <span title="Próximamente" style={{ position: 'absolute', top: 4, left: 4, zIndex: 2 }}>🔜</span>}
+                                {p.flagged && <span title={p.flag_comment || 'Marcada para revisar'} style={{ position: 'absolute', top: 4, right: 4, zIndex: 2, fontSize: '1.1rem' }}>🚩</span>}
+                                <div onClick={() => { setPhotoModalPlantId(p.id); setPhotoModalIndex(0); setPhotoModalMenuOpen(false); setPhotoModalSection('fotos') }} style={{ cursor: 'pointer' }}>
+                                  {p.image_url ? <img src={p.image_url} alt={p.name} /> : <div className="no-img-sm">Sin foto</div>}
+                                </div>
+                                <span>{p.name}{!p.active ? ' (oculta)' : ''}</span>
+                              </div>
+                            ))}
+                          </div>
+                          </>
+                        )}
+
+                        {shareModalOpen && (() => {
+                          let toSend = galleryPlants.filter(p => selectedLabels.has(p.id))
+                          if (shareOnlyStock) toSend = toSend.filter(p => p.stock > 0)
+                          return createPortal(
+                            <div
+                              className="admin-sheet-overlay"
+                              onClick={() => setShareModalOpen(false)}
+                              style={{ position: 'fixed', inset: 0, zIndex: 3000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                            >
+                              <div className="free-note-modal" onClick={e => e.stopPropagation()}>
+                                <div className="free-note-modal-header">
+                                  <h4>Marcar y enviar link</h4>
+                                  <button type="button" className="modal-close-btn" onClick={() => setShareModalOpen(false)}>✕</button>
+                                </div>
+                                <div className="free-note-sheet">
+                                  <p className="status-msg">Estas plantas se marcarán como disponibles en el link compartido y se enviará solo el enlace por WhatsApp (el cliente ve fotos, precio y stock al abrirlo).</p>
+                                  <label style={{ display: 'block', marginBottom: 10 }}>
+                                    <input type="checkbox" checked={shareOnlyStock} onChange={e => setShareOnlyStock(e.target.checked)} /> Solo las que tienen stock
+                                  </label>
+
+                                  <div className="admin-list">
+                                    {toSend.length === 0 && <p className="status-msg">Ninguna planta seleccionada cumple el filtro.</p>}
+                                    {toSend.map(p => (
+                                      <div key={p.id} className="admin-item">
+                                        {p.image_url ? <img src={p.image_url} alt={p.name} /> : <div className="no-img-sm">Sin foto</div>}
+                                        <div className="admin-item-info">
+                                          <strong>{p.name}</strong>
+                                          <span>${Number(p.price).toFixed(2)}</span>
+                                        </div>
+                                      </div>
+                                    ))}
+                                  </div>
+
+                                  <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+                                    <button type="button" onClick={copySharedLink} style={{ flex: 1 }}>
+                                      🔗 Copiar link
+                                    </button>
+                                    <button type="button" className="save-note-btn-inline" onClick={() => shareSelectedPhotos(galleryPlants)} disabled={sharingNotes || toSend.length === 0} style={{ flex: 1 }}>
+                                      {sharingNotes ? 'Preparando...' : `📲 Marcar y enviar (${toSend.length})`}
+                                    </button>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>,
+                            document.body
+                          )
+                        })()}
+                      </>
+                    )
+                  })()}
+
+              {!loading && view === 'categorias' && (
+                <>
+                  <form className="admin-form" onSubmit={addCategory}>
+                    <h3>Agregar categoría nueva</h3>
+                    <input placeholder="Nombre de la categoría" value={newCatName} onChange={e => setNewCatName(e.target.value)} />
+                    <input placeholder="Emoji (ej: 🌷)" value={newCatEmoji} onChange={e => setNewCatEmoji(e.target.value)} />
+                    <select value={newCatParentId} onChange={e => setNewCatParentId(e.target.value)}>
+                      <option value="">Sin agrupar (categoría normal)</option>
+                      {categories.filter(c => !c.parent_id).map(c => (
+                        <option key={c.id} value={c.id}>Agrupar dentro de: {c.emoji} {c.name}</option>
+                      ))}
+                    </select>
+                    <button type="submit">Agregar categoría</button>
+                  </form>
+                  <input
+                    className="order-search"
+                    placeholder="Buscar categoría por nombre..."
+                    value={categoriesSearch}
+                    onChange={e => setCategoriesSearch(e.target.value)}
+                  />
+                  <div className="admin-list">
+                    {categories
+                      .filter(c => !c.parent_id)
+                      .filter(parentCat =>
+                        parentCat.name.toLowerCase().includes(categoriesSearch.trim().toLowerCase()) ||
+                        categories.some(child => child.parent_id === parentCat.id && child.name.toLowerCase().includes(categoriesSearch.trim().toLowerCase()))
+                      )
+                      .map(c => {
+                        const children = categories.filter(child => child.parent_id === c.id)
+                        return (
+                          <div key={c.id}>
+                            <div className="admin-item">
+                              {c.image_url ? <img src={c.image_url} alt={c.name} /> : <div className="no-img-sm">{c.emoji}</div>}
+                              <div className="admin-item-info">
+                                <input defaultValue={c.name} onBlur={e => updateCategoryName(c.id, e.target.value)} style={{ fontWeight: 'bold', fontSize: '1rem', width: '100%', boxSizing: 'border-box' }} />
+                                <label>Emoji: <input defaultValue={c.emoji} onBlur={e => updateCategoryEmoji(c.id, e.target.value)} style={{ width: 50 }} /></label>
+                                <label className="file-label" title="Subir imagen de categoría" style={{ background: 'transparent', color: 'inherit', border: '1px solid #ccc', display: 'inline-block' }}>
+                                  📷 Imagen
+                                  <input
+                                    type="file"
+                                    accept="image/*"
+                                    style={{ display: 'none' }}
+                                    onChange={e => { uploadCategoryImage(c.id, e.target.files[0]); e.target.value = '' }}
+                                  />
+                                </label>
+                                <button type="button" className="danger" onClick={() => deleteCategory(c.id)} style={{ marginLeft: 6 }}>🗑️ Borrar</button>
+                                {children.length > 0 ? (
+                                  <p style={{ fontSize: 12, color: '#7a7060', margin: '4px 0 0' }}>
+                                    📁 Agrupa: {children.map(ch => ch.name).join(', ')} — no se puede asignar directo a una planta
+                                  </p>
+                                ) : (
+                                  <label>Grupo:
+                                    <select value="" onChange={e => updateCategoryParent(c.id, e.target.value)}>
+                                      <option value="">Sin agrupar</option>
+                                      {categories.filter(x => !x.parent_id && x.id !== c.id).map(x => (
+                                        <option key={x.id} value={x.id}>{x.emoji} {x.name}</option>
+                                      ))}
+                                    </select>
+                                  </label>
+                                )}
+                              </div>
+                            </div>
+                            {children
+                              .filter(child => categoriesSearch.trim() === '' || child.name.toLowerCase().includes(categoriesSearch.trim().toLowerCase()))
+                              .map(child => (
+                                <div key={child.id} className="admin-item" style={{ marginLeft: 24, borderLeft: '2px solid #E8DFC8' }}>
+                                  {child.image_url ? <img src={child.image_url} alt={child.name} /> : <div className="no-img-sm">{child.emoji}</div>}
+                                  <div className="admin-item-info">
+                                    <input defaultValue={child.name} onBlur={e => updateCategoryName(child.id, e.target.value)} style={{ fontWeight: 'bold', fontSize: '1rem', width: '100%', boxSizing: 'border-box' }} />
+                                    <label>Emoji: <input defaultValue={child.emoji} onBlur={e => updateCategoryEmoji(child.id, e.target.value)} style={{ width: 50 }} /></label>
+                                    <label className="file-label" title="Subir imagen de categoría" style={{ background: 'transparent', color: 'inherit', border: '1px solid #ccc', display: 'inline-block' }}>
+                                      📷 Imagen
+                                      <input
+                                        type="file"
+                                        accept="image/*"
+                                        style={{ display: 'none' }}
+                                        onChange={e => { uploadCategoryImage(child.id, e.target.files[0]); e.target.value = '' }}
+                                      />
+                                    </label>
+                                    <label>Grupo:
+                                      <select value={child.parent_id || ''} onChange={e => updateCategoryParent(child.id, e.target.value)}>
+                                        <option value="">Sin agrupar</option>
+                                        {categories.filter(x => !x.parent_id && x.id !== child.id).map(x => (
+                                          <option key={x.id} value={x.id}>{x.emoji} {x.name}</option>
+                                        ))}
+                                      </select>
+                                    </label>
+                                    <button type="button" className="danger" onClick={() => deleteCategory(child.id)} style={{ marginLeft: 6 }}>🗑️ Borrar</button>
+                                  </div>
+                                </div>
+                              ))}
+                          </div>
+                        )
+                      })}
+                  </div>
+                </>
+              )}
+
+              {photoModalPlantId && (() => {
+                const p = plants.find(pl => pl.id === photoModalPlantId)
+                if (!p) return null
+                const notesForPlant = plantNotes.filter(n => n.plant_id === p.id)
+                const nameNormalized = p.name.trim().toLowerCase()
+                const comprasDeEstaPlanta = compras
+                  .filter(c => c.plant_id === p.id || (!c.plant_id && c.plant_name && c.plant_name.trim().toLowerCase() === nameNormalized))
+                  .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+                const ventasWebDeEstaPlanta = orders.flatMap(o =>
+                  (o.order_items || [])
+                    .filter(it => it.plant_id === p.id)
+                    .map(it => ({ id: `o-${o.id}-${it.id}`, cantidad: it.quantity, cliente: o.customer_name, fecha: o.created_at, motivo: null }))
+                )
+                const ventasManualesDeEstaPlanta = decrementos
+                  .filter(d => d.plant_id === p.id)
+                  .map(d => ({ id: `d-${d.id}`, cantidad: d.quantity, cliente: d.lote_id ? (ventaLotes.find(vl => vl.id === d.lote_id)?.cliente || '') : '', fecha: d.created_at, motivo: d.motivo }))
+                const ventasDeEstaPlanta = [...ventasWebDeEstaPlanta, ...ventasManualesDeEstaPlanta]
+                  .sort((a, b) => new Date(b.fecha) - new Date(a.fecha))
+                const floracionesDeEstaPlanta = floraciones.filter(f => f.plant_id === p.id)
+                const pupsDeEstaPlanta = pups.filter(x => x.plant_id === p.id).sort((a, b) => new Date(b.fecha) - new Date(a.fecha))
+                const hijosDisponibles = hijosEnDesarrollo(p.id)
+                // Panel "Compra e inventario" (datos leídos de la BD al abrir el modal)
+                const inv = plantInv && plantInv.plantId === p.id ? plantInv : null
+                const invDraft = plantInvDraft && plantInvDraft.plantId === p.id ? plantInvDraft : null
+                const invCompra = inv && invDraft ? inv.compras.find(c => String(c.id) === String(invDraft.compraId)) : null
+                const invLote = invCompra && invCompra.lote_id ? inv.lotes.find(l => l.id === invCompra.lote_id) : null
+                const invDirty = !!(invDraft && plantInvBase && JSON.stringify(invDraft) !== JSON.stringify(plantInvBase))
+                const setInvDraft = patch => setPlantInvDraft(d => ({ ...d, ...patch }))
+                const proveedoresSugeridos = [...new Set([...lotes.map(l => l.proveedor), ...compras.map(c => c.proveedor)].filter(Boolean))].sort((a, b) => String(a).localeCompare(String(b)))
+                const invInputStyle = { width: '100%', boxSizing: 'border-box' }
+                const invGridStyle = { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 8, margin: '6px 0' }
+                const invField = (label, control, hint) => (
+                  <label style={{ display: 'flex', flexDirection: 'column', gap: 3, fontSize: 12, color: '#5B4636' }}>
+                    {label}
+                    {control}
+                    {hint && <span style={{ fontSize: 11, color: '#888' }}>{hint}</span>}
+                  </label>
+                )
+                const slides = [
+                  { type: 'image', url: p.image_url, label: 'Foto 1', onUpload: f => updatePlantImage(p.id, f) },
+                  { type: 'image', url: p.extra_image_1, label: 'Foto 2', onUpload: f => updatePlantExtraImage(p.id, 'extra_image_1', f) },
+                  { type: 'image', url: p.extra_image_2, label: 'Foto 3', onUpload: f => updatePlantExtraImage(p.id, 'extra_image_2', f) },
+                  { type: 'video', url: p.video_url, label: 'Video', onUpload: f => updatePlantVideo(p.id, f) },
+                ]
+                const current = slides[photoModalIndex] || slides[0]
+                return createPortal(
+                  <div
+                    className="admin-sheet-overlay"
+                    onClick={() => { setPhotoModalPlantId(null); setPhotoModalMenuOpen(false); setPhotoModalSection('fotos') }}
+                    style={{ position: 'fixed', inset: 0, zIndex: 3000 }}
+                  >
+                    <div className="free-note-modal" onClick={e => e.stopPropagation()} style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, width: '100%', height: '100%', maxWidth: 'none', maxHeight: 'none', borderRadius: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+                      <div className="free-note-modal-header" style={{ flexShrink: 0 }}>
+                        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                          <button type="button" onClick={() => setPhotoModalMenuOpen(!photoModalMenuOpen)}>☰</button>
+                          <h4>{p.name}</h4>
+                        </div>
+                        <button type="button" className="modal-close-btn" onClick={() => { setPhotoModalPlantId(null); setPhotoModalMenuOpen(false); setPhotoModalSection('fotos') }}>✕</button>
+                      </div>
+
+                      {photoModalMenuOpen && (
+                        <>
+                          <div className="photo-modal-menu-overlay" onClick={() => setPhotoModalMenuOpen(false)} />
+                          <div className="photo-modal-side-menu">
+                            <button type="button" onClick={() => { setPhotoModalSection('fotos'); setPhotoModalMenuOpen(false); if (photoModalSheetRef.current) photoModalSheetRef.current.scrollTop = 0 }}>🖼️ Fotos</button>
+                            <button type="button" onClick={() => { setPhotoModalSection('notas'); setPhotoModalMenuOpen(false); if (photoModalSheetRef.current) photoModalSheetRef.current.scrollTop = 0 }}>📓 Notas ({notesForPlant.length})</button>
+                            <button type="button" onClick={() => { setPhotoModalSection('compras'); setPhotoModalMenuOpen(false); if (photoModalSheetRef.current) photoModalSheetRef.current.scrollTop = 0 }}>📦 Compras</button>
+                            <button type="button" onClick={() => { setPhotoModalSection('ventas'); setPhotoModalMenuOpen(false); if (photoModalSheetRef.current) photoModalSheetRef.current.scrollTop = 0 }}>🛒 Ventas</button>
+                            <button type="button" onClick={() => { setPhotoModalSection('floraciones'); setPhotoModalMenuOpen(false); if (photoModalSheetRef.current) photoModalSheetRef.current.scrollTop = 0 }}>🌸 Floraciones</button>
+                            <button type="button" onClick={() => { setPhotoModalSection('hijos'); setPhotoModalMenuOpen(false); if (photoModalSheetRef.current) photoModalSheetRef.current.scrollTop = 0 }}>🌱 Hijos</button>
+                          </div>
+                        </>
+                      )}
+
+                      <div ref={photoModalSheetRef} className="free-note-sheet" style={{ flex: 1, overflowY: 'auto', WebkitOverflowScrolling: 'touch' }}>
+                        {photoModalSection === 'fotos' && (
+                          <>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                              <button type="button" onClick={() => setPhotoModalIndex((photoModalIndex + slides.length - 1) % slides.length)}>‹</button>
+                              <div style={{ flex: 1, textAlign: 'center' }}>
+                                {current.type === 'image' ? (
+                                  current.url ? <img src={current.url} alt={current.label} style={{ width: '100%', maxHeight: '55vh', objectFit: 'contain', borderRadius: 8 }} /> : <div className="no-img-sm" style={{ height: 200 }}>Sin foto</div>
+                                ) : (
+                                  current.url ? <video src={current.url} controls className="note-video" style={{ width: '100%', maxHeight: '55vh' }} /> : <div className="no-img-sm" style={{ height: 200 }}>Sin video</div>
+                                )}
+                                <div style={{ marginTop: 4, fontSize: 13, color: '#888' }}>{current.label} ({photoModalIndex + 1}/{slides.length})</div>
+                                <label className="file-label" style={{ display: 'inline-block', marginTop: 4, background: 'transparent', color: 'inherit', border: '1px solid #ccc' }}>
+                                  {current.url ? `Cambiar ${current.label}` : `Subir ${current.label}`}
+                                  <input
+                                    type="file"
+                                    accept={current.type === 'video' ? 'video/*' : 'image/*'}
+                                    style={{ display: 'none' }}
+                                    onChange={e => { current.onUpload(e.target.files[0]); e.target.value = '' }}
+                                  />
+                                </label>
+                              </div>
+                              <button type="button" onClick={() => setPhotoModalIndex((photoModalIndex + 1) % slides.length)}>›</button>
+                            </div>
+
+                            <div className="plant-quick-edit">
+                              <input
+                                key={p.id}
+                                defaultValue={p.name}
+                                placeholder="Nombre de la planta"
+                                onBlur={e => updatePlantName(p.id, e.target.value)}
+                                style={{ width: '100%', fontWeight: 700, fontSize: '1.05rem', marginBottom: 8 }}
+                              />
+                              <div className="plant-quick-edit-prices">
+                                <label>$<input type="number" step="0.01" defaultValue={p.price} onBlur={e => updatePrice(p.id, Number(e.target.value))} /></label>
+                                <label>Altura: <input key={p.id} type="text" placeholder="ej: 90 cm" defaultValue={p.height || ''} onBlur={e => updatePlantHeight(p.id, e.target.value)} style={{ width: 80 }} /></label>
+                                <label>Descuento: <input key={p.id} type="number" min="0" max="100" placeholder="0" defaultValue={p.discount_percent || ''} onBlur={e => updatePlantDiscount(p.id, e.target.value)} style={{ width: 60 }} />%</label>
+                              </div>
+                              <div className="plant-quick-edit-actions">
+                                <button type="button" className={!p.active ? 'hide-btn' : ''} onClick={() => toggleActive(p.id, p.active)}>{p.active ? 'Ocultar' : 'Mostrar'}</button>
+                                <button type="button" className={p.is_new ? 'active' : ''} onClick={() => toggleIsNew(p.id, p.is_new)}>{p.is_new ? '🌱 Nueva ✓' : 'Marcar como nueva'}</button>
+                                <button type="button" className={p.on_sale ? 'active' : ''} onClick={() => toggleOnSale(p.id, p.on_sale)}>{p.on_sale ? '🏷️ En descuento ✓' : 'Marcar en descuento'}</button>
+                                <button type="button" className={p.coming_soon ? 'active' : ''} onClick={() => toggleComingSoon(p.id, p.coming_soon)}>{p.coming_soon ? '🔜 Próximamente ✓' : 'Marcar como próximamente'}</button>
+                                <button
+                                  type="button"
+                                  className="danger"
+                                  onClick={() => deletePlant(p.id, () => { setPhotoModalPlantId(null); setPhotoModalMenuOpen(false); setPhotoModalSection('fotos') })}
+                                >
+                                  🗑️ Borrar planta permanentemente
+                                </button>
+                              </div>
+                            </div>
+
+                            <div className="plant-quick-edit" style={{ marginTop: 12 }}>
+                              <h4 style={{ margin: '0 0 8px', fontSize: '0.9rem', color: 'var(--sage-dark)' }}>📦 Compra e inventario</h4>
+                              {!invDraft || !inv ? (
+                                <p className="status-msg">Cargando datos de la planta…</p>
+                              ) : (
+                                <>
+                                  <div style={{ fontSize: 12, fontWeight: 700, color: '#5B4636', margin: '2px 0' }}>Datos de compra</div>
+                                  {inv.compras.length === 0 ? (
+                                    <>
+                                      <p className="historial-empty" style={{ margin: '4px 0' }}>Esta planta todavía no tiene una compra registrada.</p>
+                                      <button
+                                        type="button"
+                                        className="historial-link-btn"
+                                        onClick={() => { setPhotoModalSection('compras'); setShowRetroCompraForm(true); if (photoModalSheetRef.current) photoModalSheetRef.current.scrollTop = 0 }}
+                                      >
+                                        + Agregar dato de compra
+                                      </button>
+                                    </>
+                                  ) : (
+                                    <>
+                                      {inv.compras.length > 1 && (
+                                        <div style={{ margin: '6px 0' }}>
+                                          {invField('Compra a editar', (
+                                            <select
+                                              value={invDraft.compraId}
+                                              onChange={e => setInvDraft(invCompraFields(inv.compras, inv.lotes, e.target.value))}
+                                              style={invInputStyle}
+                                            >
+                                              {inv.compras.map(c => {
+                                                const l = c.lote_id ? inv.lotes.find(x => x.id === c.lote_id) : null
+                                                return (
+                                                  <option key={c.id} value={c.id}>
+                                                    {l ? `Compra #${l.numero ?? '—'}` : 'Compra manual'} · {new Date((l || c).created_at).toLocaleDateString()} · {c.quantity} u.
+                                                  </option>
+                                                )
+                                              })}
+                                            </select>
+                                          ))}
+                                        </div>
+                                      )}
+                                      <div style={invGridStyle}>
+                                        {invField('N.° de compra', (
+                                          <input
+                                            type="number"
+                                            min="1"
+                                            step="1"
+                                            inputMode="numeric"
+                                            value={invDraft.numero}
+                                            disabled={!invLote}
+                                            placeholder={invLote ? '' : '—'}
+                                            onChange={e => setInvDraft({ numero: e.target.value })}
+                                            style={invInputStyle}
+                                          />
+                                        ), invLote ? null : 'Compra registrada a mano (sin N.°)')}
+                                        {invField('Fecha de compra', (
+                                          <input type="date" value={invDraft.fecha} onChange={e => setInvDraft({ fecha: e.target.value })} style={invInputStyle} />
+                                        ))}
+                                        {invField('Proveedor', (
+                                          <>
+                                            <input
+                                              type="text"
+                                              list={`proveedores-sugeridos-${p.id}`}
+                                              placeholder="Proveedor"
+                                              value={invDraft.proveedor}
+                                              onChange={e => setInvDraft({ proveedor: e.target.value })}
+                                              style={invInputStyle}
+                                            />
+                                            <datalist id={`proveedores-sugeridos-${p.id}`}>
+                                              {proveedoresSugeridos.map(nombre => <option key={nombre} value={nombre} />)}
+                                            </datalist>
+                                          </>
+                                        ))}
+                                      </div>
+                                      {invLote && (
+                                        <p style={{ fontSize: 11, color: '#888', margin: '2px 0 6px' }}>
+                                          Estos datos son de la compra #{invLote.numero ?? '—'} completa ({compras.filter(c => c.lote_id === invLote.id).length} líneas): al guardar se actualizan para todas sus plantas.
+                                        </p>
+                                      )}
+                                    </>
+                                  )}
+
+                                  <div style={{ fontSize: 12, fontWeight: 700, color: '#5B4636', margin: '10px 0 2px' }}>Inventario</div>
+                                  <div style={invGridStyle}>
+                                    {invField('Categoría', (
+                                      <select
+                                        value={invDraft.categoryId || ''}
+                                        onChange={e => {
+                                          if (e.target.value === '__new__') { setShowInlineNewCategory(true); return }
+                                          setInvDraft({ categoryId: e.target.value })
+                                        }}
+                                        style={invInputStyle}
+                                      >
+                                        <option value="">Sin categoría</option>
+                                        {assignableCategories().map(cat => (
+                                          <option key={cat.id} value={cat.id}>{cat.emoji} {cat.name}</option>
+                                        ))}
+                                        <option value="__new__">➕ Crear nueva categoría...</option>
+                                      </select>
+                                    ))}
+                                    {invField('Stock actual', (
+                                      <input type="number" min="0" step="1" inputMode="numeric" value={invDraft.stock} onChange={e => setInvDraft({ stock: e.target.value })} style={invInputStyle} />
+                                    ))}
+                                  </div>
+                                  {showInlineNewCategory && (
+                                    <div className="seed-form" style={{ marginTop: 8 }}>
+                                      <div style={{ display: 'flex', gap: 8 }}>
+                                        <input
+                                          placeholder="Emoji"
+                                          value={inlineNewCategoryEmoji}
+                                          onChange={e => setInlineNewCategoryEmoji(e.target.value)}
+                                          style={{ width: 50, textAlign: 'center' }}
+                                        />
+                                        <input
+                                          placeholder="Nombre de la categoría (ej: Orq. Phalenopsis)"
+                                          value={inlineNewCategoryName}
+                                          onChange={e => setInlineNewCategoryName(e.target.value)}
+                                          style={{ flex: 1 }}
+                                        />
+                                      </div>
+                                      <div className="admin-item-actions">
+                                        <button type="button" onClick={createCategoryForPlantInv}>Crear y elegir</button>
+                                        <button type="button" onClick={() => { setShowInlineNewCategory(false); setInlineNewCategoryName('') }}>Cancelar</button>
+                                      </div>
+                                    </div>
+                                  )}
+                                  <div style={{ display: 'flex', alignItems: 'flex-end', gap: 10, flexWrap: 'wrap', margin: '6px 0' }}>
+                                    <span style={{ fontSize: 13, color: '#5B4636', alignSelf: 'center' }}>🏷️ Etiquetas:</span>
+                                    <label style={{ fontSize: 12, color: '#5B4636' }}>Impresas<br /><input type="number" min="0" step="1" inputMode="numeric" value={invDraft.printed} onChange={e => setInvDraft({ printed: e.target.value })} style={{ width: 70 }} /></label>
+                                    <label style={{ fontSize: 12, color: '#5B4636' }}>Colocadas<br /><input type="number" min="0" step="1" inputMode="numeric" max={parseInt(invDraft.printed, 10) || 0} value={invDraft.placed} onChange={e => setInvDraft({ placed: e.target.value })} style={{ width: 70 }} /></label>
+                                    {(parseInt(invDraft.printed, 10) || 0) > (parseInt(invDraft.placed, 10) || 0) && (
+                                      <button type="button" onClick={() => setInvDraft({ placed: String((parseInt(invDraft.placed, 10) || 0) + 1) })}>
+                                        +1 colocada ({(parseInt(invDraft.printed, 10) || 0) - (parseInt(invDraft.placed, 10) || 0)} de sobra)
+                                      </button>
+                                    )}
+                                  </div>
+
+                                  <div className="admin-item-actions" style={{ marginTop: 10, alignItems: 'center' }}>
+                                    <button type="button" className="full-form-btn" onClick={savePlantInv} disabled={savingPlantInv || !invDirty}>
+                                      {savingPlantInv ? 'Guardando…' : '💾 Guardar cambios'}
+                                    </button>
+                                    {invDirty && !savingPlantInv && (
+                                      <button type="button" onClick={() => setPlantInvDraft(plantInvBase)}>↩ Descartar</button>
+                                    )}
+                                  </div>
+                                  {invDirty && !savingPlantInv && <p style={{ fontSize: 12, color: '#b07a1f', margin: '4px 0 0' }}>Hay cambios sin guardar.</p>}
+                                  {plantInvMsg && <p style={{ fontSize: 12, color: '#4a7a3a', margin: '4px 0 0' }}>{plantInvMsg}</p>}
+                                </>
+                              )}
+                            </div>
+
+                            <div className="plant-quick-edit" style={{ marginTop: 12 }}>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                <h4 style={{ margin: 0, fontSize: '0.9rem', color: p.flagged ? '#b03434' : 'var(--sage-dark)' }}>🚩 Marcar para revisar</h4>
+                                <button type="button" className={p.flagged ? 'hide-btn' : ''} onClick={() => toggleFlag(p.id, p.flagged)}>
+                                  {p.flagged ? 'Quitar marca' : 'Marcar'}
+                                </button>
+                              </div>
+                              {p.flagged && (
+                                <textarea
+                                  className="plant-description-input"
+                                  placeholder="¿Qué hay que revisar o corregir aquí?"
+                                  defaultValue={p.flag_comment || ''}
+                                  rows={2}
+                                  style={{ marginTop: 8 }}
+                                  onBlur={e => updateFlagComment(p.id, e.target.value)}
+                                />
+                              )}
+                            </div>
+
+                            <div className="plant-quick-edit" style={{ marginTop: 12 }}>
+                              <h4 style={{ margin: '0 0 8px', fontSize: '0.9rem', color: 'var(--sage-dark)' }}>📝 Descripción</h4>
+                              <textarea
+                                key={p.id}
+                                className="plant-description-input"
+                                placeholder="Escribe una descripción para esta planta…"
+                                defaultValue={p.description || ''}
+                                rows={4}
+                                onBlur={e => updatePlantDescription(p.id, e.target.value)}
+                                onInput={e => { e.target.style.height = 'auto'; e.target.style.height = e.target.scrollHeight + 'px' }}
+                                ref={el => { if (el) { el.style.height = 'auto'; el.style.height = el.scrollHeight + 'px' } }}
+                                style={{ overflow: 'hidden', resize: 'none', minHeight: 90, width: '100%', boxSizing: 'border-box' }}
+                              />
+                            </div>
+                          </>
+                        )}
+
+                        {photoModalSection === 'notas' && (
+                          <div className="plant-notes-panel">
+                            <button type="button" className="full-form-btn" onClick={() => openNewPlantNote(p.id)}>📝 Nueva nota</button>
+                            {notesForPlant.length === 0 && <p className="status-msg">Todavía no hay notas para esta planta.</p>}
+                            {notesForPlant.map((n, i) => (
+                              <div key={n.id} className={`note-blocks-view plant-note-entry pastel-${i % 5}`}>
+                                <div className="day-task-row">
+                                  <span className="task-note">{new Date(n.created_at).toLocaleDateString()}</span>
+                                  <button type="button" className="task-edit-btn" onClick={() => openEditPlantNote(n)}>✏️</button>
+                                  <button type="button" className="task-edit-btn" onClick={() => sharePlantNote(n)} disabled={sharingNotes} title="Compartir por WhatsApp">📲</button>
+                                  <button type="button" className="task-delete-btn" onClick={() => deletePlantNote(n.id)}>✕</button>
+                                </div>
+                                {(n.content_blocks || []).map((b, i) => (
+                                  <div key={i}>
+                                    {b.type === 'text' && <p className="task-note">{b.content}</p>}
+                                    {b.type === 'photo' && <img src={b.url} alt="" className="note-block-photo" />}
+                                    {b.type === 'video' && <video src={b.url} controls className="note-video" />}
+                                  </div>
+                                ))}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
+                        {photoModalSection === 'compras' && (
+                          <div className="historial-block">
+                            <h4>📦 Compras</h4>
+                            {comprasDeEstaPlanta.length === 0 ? (
+                              <p className="historial-empty">Sin compras registradas.</p>
+                            ) : (
+                              comprasDeEstaPlanta.map(c => (
+                                <p key={c.id} className="historial-entry">
+                                  Compra #{lotes.find(l => l.id === c.lote_id)?.numero ?? '—'} · {c.proveedor || 'Sin proveedor'} · {new Date((lotes.find(l => l.id === c.lote_id) || c).created_at).toLocaleDateString()} · {c.quantity} u. · ${Number(c.unit_cost).toFixed(2)} c/u
+                                </p>
+                              ))
+                            )}
+                            <button
+                              type="button"
+                              className="historial-link-btn"
+                              onClick={() => setShowRetroCompraForm(!showRetroCompraForm)}
+                            >
+                              {showRetroCompraForm ? '✕ Cancelar' : '+ Agregar dato de compra'}
+                            </button>
+                            {showRetroCompraForm && (
+                              <div className="historial-retro-form">
+                                <input
+                                  placeholder="Proveedor (opcional)"
+                                  value={retroCompraForm.proveedor}
+                                  onChange={e => setRetroCompraForm({ ...retroCompraForm, proveedor: e.target.value })}
+                                />
+                                <input
+                                  type="date"
+                                  value={retroCompraForm.fecha}
+                                  onChange={e => setRetroCompraForm({ ...retroCompraForm, fecha: e.target.value })}
+                                />
+                                <input
+                                  placeholder="Cantidad"
+                                  type="number"
+                                  value={retroCompraForm.quantity}
+                                  onChange={e => setRetroCompraForm({ ...retroCompraForm, quantity: e.target.value })}
+                                />
+                                <input
+                                  placeholder="Precio de compra (por unidad, opcional)"
+                                  type="number"
+                                  step="0.01"
+                                  value={retroCompraForm.unit_cost}
+                                  onChange={e => setRetroCompraForm({ ...retroCompraForm, unit_cost: e.target.value })}
+                                />
+                                <button type="button" onClick={() => addRetroCompra(p, retroCompraForm)}>
+                                  Guardar
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        {photoModalSection === 'ventas' && (
+                          <div className="historial-block">
+                            <h4>🛒 Ventas</h4>
+                            {ventasDeEstaPlanta.length === 0 ? (
+                              <p className="historial-empty">Todavía no se vendió ninguna.</p>
+                            ) : (
+                              ventasDeEstaPlanta.map(v => (
+                                <p key={v.id} className="historial-entry">
+                                  {v.cantidad} u.{v.cliente ? ` — ${v.cliente}` : ''} · {new Date(v.fecha).toLocaleDateString()}{v.motivo ? ` · ${v.motivo}` : ''}
+                                </p>
+                              ))
+                            )}
+                          </div>
+                        )}
+
+                        {photoModalSection === 'floraciones' && (
+                          <div className="historial-block">
+                            <h4>🌸 Floraciones</h4>
+                            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center', marginBottom: 8 }}>
+                              <button type="button" onClick={() => addFloracion(p.id, localDateISO())}>
+                                🌸 Registrar floración de hoy
+                              </button>
+                              <button
+                                type="button"
+                                className="historial-link-btn"
+                                onClick={() => setShowCustomFloracionDate(!showCustomFloracionDate)}
+                              >
+                                Elegir otra fecha
+                              </button>
+                            </div>
+                            {showCustomFloracionDate && (
+                              <div style={{ display: 'flex', gap: 8, marginBottom: 10, alignItems: 'center' }}>
+                                <input type="date" value={customFloracionDate} onChange={e => setCustomFloracionDate(e.target.value)} />
+                                <button type="button" onClick={() => customFloracionDate && addFloracion(p.id, customFloracionDate)} disabled={!customFloracionDate}>
+                                  Guardar
+                                </button>
+                              </div>
+                            )}
+                            {floracionesDeEstaPlanta.length === 0 ? (
+                              <p className="historial-empty">Sin floraciones registradas.</p>
+                            ) : (
+                              floracionesDeEstaPlanta.map(f => (
+                                <div key={f.id} className="day-task-row">
+                                  <span className="task-note">🌸 {new Date(f.fecha + 'T00:00:00').toLocaleDateString()}</span>
+                                  <button type="button" className="task-delete-btn" onClick={() => deleteFloracion(f.id)}>✕</button>
+                                </div>
+                              ))
+                            )}
+                          </div>
+                        )}
+
+                        {photoModalSection === 'hijos' && (
+                          <div className="historial-block">
+                            <h4>🌱 Hijos</h4>
+                            <p className="historial-entry" style={{ fontWeight: 'bold', border: 'none' }}>
+                              {hijosDisponibles} hijo{hijosDisponibles === 1 ? '' : 's'} en desarrollo
+                            </p>
+
+                            <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 8, marginBottom: 4 }}>
+                              <input
+                                type="number"
+                                placeholder="Cantidad"
+                                value={newPupCantidad}
+                                onChange={e => setNewPupCantidad(e.target.value)}
+                                style={{ width: 90 }}
+                              />
+                              <button type="button" onClick={() => addPupRegistro(p.id, localDateISO(), newPupCantidad)}>
+                                🌱 Separé hijos hoy
+                              </button>
+                            </div>
+                            <button
+                              type="button"
+                              className="historial-link-btn"
+                              onClick={() => setShowCustomPupDate(!showCustomPupDate)}
+                            >
+                              Elegir otra fecha
+                            </button>
+                            {showCustomPupDate && (
+                              <div style={{ display: 'flex', gap: 8, marginTop: 8, marginBottom: 10, alignItems: 'center' }}>
+                                <input type="date" value={customPupDate} onChange={e => setCustomPupDate(e.target.value)} />
+                                <button type="button" onClick={() => customPupDate && addPupRegistro(p.id, customPupDate, newPupCantidad)} disabled={!customPupDate}>
+                                  Guardar
+                                </button>
+                              </div>
+                            )}
+
+                            <div style={{ marginTop: 14, marginBottom: 4 }}>
+                              <button
+                                type="button"
+                                className="historial-link-btn"
+                                onClick={() => setShowMoverPupsForm(!showMoverPupsForm)}
+                                disabled={hijosDisponibles <= 0}
+                              >
+                                {showMoverPupsForm ? '✕ Cancelar' : '➡️ Pasar a stock'}
+                              </button>
+                            </div>
+                            {showMoverPupsForm && (
+                              <div style={{ display: 'flex', gap: 8, marginBottom: 10, alignItems: 'center' }}>
+                                <input
+                                  type="number"
+                                  placeholder={`Máx. ${hijosDisponibles}`}
+                                  value={moverPupsCantidad}
+                                  onChange={e => setMoverPupsCantidad(e.target.value)}
+                                  style={{ width: 100 }}
+                                />
+                                <button type="button" onClick={() => moverPupsAStock(p, moverPupsCantidad)}>
+                                  Confirmar
+                                </button>
+                              </div>
+                            )}
+
+                            {pupsDeEstaPlanta.length === 0 ? (
+                              <p className="historial-empty">Sin registros de hijos.</p>
+                            ) : (
+                              pupsDeEstaPlanta.map(x => (
+                                <div key={x.id} className="day-task-row">
+                                  <span className="task-note">
+                                    {x.tipo === 'movido' ? '➡️' : '🌱'} {new Date(x.fecha + 'T00:00:00').toLocaleDateString()} · {x.tipo === 'movido' ? `Pasó ${x.cantidad} a stock` : `Separó ${x.cantidad}`}
+                                  </span>
+                                  <button type="button" className="task-delete-btn" onClick={() => deletePup(x.id)}>✕</button>
+                                </div>
+                              ))
+                            )}
+                          </div>
+                        )}
+                      </div>
+
+                    </div>
+                  </div>,
+                  document.body
+                )
+              })()}
+
+              {plantNoteModalOpen && createPortal(
+                <div className="admin-sheet-overlay" style={{ position: 'fixed', inset: 0, zIndex: 3000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <div className="free-note-modal" onClick={e => e.stopPropagation()}>
+                    <div className="free-note-modal-header">
+                      <h4>{editingPlantNoteId ? 'Editar nota' : 'Nota'} — {plants.find(p => p.id === currentNotePlantId)?.name || ''}</h4>
+                      <button
+                        type="button"
+                        className="modal-close-btn"
+                        onClick={() => {
+                          const hasUnsaved = plantNoteCurrentText.trim().length > 0
+                          if (hasUnsaved && !confirm('¿Cerrar sin guardar? Perderás lo que escribiste.')) return
+                          setPlantNoteModalOpen(false)
+                          setEditingPlantNoteId(null)
+                        }}
+                      >✕</button>
+                    </div>
+                    <div className="free-note-sheet">
+                      {plantNoteBlocks.map((b, i) => (
+                        <div key={i} className="note-sheet-block">
+                          {b.type === 'text' && <p>{b.content}</p>}
+                          {b.type === 'photo' && <img src={b.url || URL.createObjectURL(b.file)} alt="" className="note-sheet-photo" />}
+                          {b.type === 'video' && (
+                            <video src={b.url || URL.createObjectURL(b.file)} controls className="note-video" />
+                          )}
+                        </div>
+                      ))}
+                      <textarea
+                        className="note-sheet-textarea"
+                        placeholder={plantNoteBlocks.length > 0 ? 'Sigue escribiendo...' : 'Escribe una nota para esta planta...'}
+                        rows={plantNoteBlocks.length > 0 ? 2 : 4}
+                        value={plantNoteCurrentText}
+                        onChange={e => setPlantNoteCurrentText(e.target.value)}
+                        autoFocus
+                      />
+                      <div className="note-sheet-toolbar">
+                        <label className="icon-btn" title="Elegir foto de galería">
+                          🖼️
+                          <input
+                            type="file"
+                            accept="image/*"
+                            style={{ display: 'none' }}
+                            onChange={e => { insertPhotoBlockToPlantNote(e.target.files[0]); e.target.value = '' }}
+                          />
+                        </label>
+                        <label className="icon-btn" title="Tomar foto">
+                          📷
+                          <input
+                            type="file"
+                            accept="image/*"
+                            capture="environment"
+                            style={{ display: 'none' }}
+                            onChange={e => { insertPhotoBlockToPlantNote(e.target.files[0]); e.target.value = '' }}
+                          />
+                        </label>
+                        <label className="icon-btn" title="Insertar video aquí">
+                          🎥
+                          <input
+                            type="file"
+                            accept="video/*"
+                            style={{ display: 'none' }}
+                            onChange={e => { insertVideoBlockToPlantNote(e.target.files[0]); e.target.value = '' }}
+                          />
+                        </label>
+                        <button
+                          type="button"
+                          className="icon-btn"
+                          title={isDictatingPlantNote ? 'Detener dictado' : 'Dictar por voz'}
+                          onClick={togglePlantNoteDictation}
+                          style={isDictatingPlantNote ? { background: '#D32F2F', color: '#fff', borderRadius: '50%' } : undefined}
+                        >
+                          {isDictatingPlantNote ? '⏹️' : '🎤'}
+                        </button>
+                        {plantNoteBlocks.length > 0 && (
+                          <button type="button" className="icon-btn-text" onClick={removeLastPlantNoteBlock}>Deshacer</button>
+                        )}
+                        {editingPlantNoteId && (
+                          <button
+                            type="button"
+                            className="icon-btn"
+                            title="Compartir por WhatsApp"
+                            disabled={sharingNotes}
+                            onClick={() => sharePlantNote(plantNotes.find(n => n.id === editingPlantNoteId))}
+                          >
+                            📲
+                          </button>
+                        )}
+                        <button type="button" className="save-note-btn-inline" onClick={savePlantNote} disabled={savingPlantNote}>
+                          {savingPlantNote ? 'Guardando...' : 'Guardar'}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>,
+                document.body
+              )}
+
+              {!loading && view === 'pedidos' && (
+                <>
+                  <button type="button" onClick={() => setVentaLoteBuilderOpen(true)} style={{ marginBottom: 10 }}>
+                    🧾 Nueva venta (factura)
+                  </button>
+
+                  {ventaLoteBuilderOpen && (
+                    <div className="admin-form" style={{ marginBottom: 12 }}>
+                      <h3>Nueva venta</h3>
+                      <input placeholder="Cliente (opcional)" list="clientes-list" value={ventaLoteCliente} onChange={e => setVentaLoteCliente(e.target.value)} />
+                      <datalist id="clientes-list">
+                        {[...new Set(ventaLotes.map(l => l.cliente).filter(Boolean))].map(cli => (
+                          <option key={cli} value={cli} />
+                        ))}
+                      </datalist>
+
+                      <select className="gallery-select" value={decPlantCategory} onChange={e => setDecPlantCategory(e.target.value)}>
+                        <option value="all">Todas las categorías</option>
+                        {categories.map(c => <option key={c.id} value={c.id}>{c.emoji} {c.name}</option>)}
+                      </select>
+                      <input
+                        className="order-search"
+                        placeholder="Buscar planta por nombre..."
+                        value={decPlantSearch}
+                        onChange={e => setDecPlantSearch(e.target.value)}
+                      />
+                      {(decPlantSearch.trim() || decPlantCategory !== 'all') ? (
+                        <PlantPicker
+                          list={[
+                            ...plants
+                              .filter(p => decPlantCategory === 'all' || p.category_id === decPlantCategory)
+                              .filter(p => p.name.toLowerCase().includes(decPlantSearch.trim().toLowerCase()))
+                              .map(p => ({ id: p.id, name: p.name })),
+                            ...seedBatches
+                              .filter(sb => (sb.stock || 0) > 0)
+                              .filter(sb => decPlantCategory === 'all' || sb.category_id === decPlantCategory)
+                              .filter(sb => seedBatchDisplayName(sb).toLowerCase().includes(decPlantSearch.trim().toLowerCase()))
+                              .map(sb => ({ id: `seed:${sb.id}`, name: `${seedBatchDisplayName(sb)} — ${sb.stock || 0} disponibles` })),
+                          ]}
+                          selectedId={ventaLineForm.plant_id}
+                          onSelect={id => setVentaLineForm({ ...ventaLineForm, plant_id: id })}
+                        />
+                      ) : (
+                        <p className="status-msg" style={{ margin: '4px 0' }}>
+                          {ventaLineForm.plant_id ? `✓ ${resolveVentaTarget(ventaLineForm.plant_id).isSeed ? seedBatchDisplayName(resolveVentaTarget(ventaLineForm.plant_id).seedBatch) : (resolveVentaTarget(ventaLineForm.plant_id).plant?.name || '')}` : 'Elige una categoría o escribe para buscar'}
+                        </p>
+                      )}
+                      <input placeholder="Cantidad" type="number" value={ventaLineForm.quantity} onChange={e => setVentaLineForm({ ...ventaLineForm, quantity: e.target.value })} />
+                      <select
+                        value={ventaLineForm.motivo}
+                        onChange={e => {
+                          const motivo = e.target.value
+                          const autoZero = motivo === 'Planta muerta / Pérdida' || motivo === 'Regalo / Obsequio'
+                          setVentaLineForm({ ...ventaLineForm, motivo, unit_price: autoZero ? '0' : ventaLineForm.unit_price })
+                        }}
+                      >
+                        <option value="Venta manual (con precio)">Venta manual (con precio)</option>
+                        <option value="Planta muerta / Pérdida">Planta muerta / Pérdida</option>
+                        <option value="Regalo / Obsequio">Regalo / Obsequio</option>
+                      </select>
+                      <input
+                        placeholder="Precio unitario"
+                        type="number"
+                        step="0.01"
+                        value={ventaLineForm.unit_price}
+                        onChange={e => setVentaLineForm({ ...ventaLineForm, unit_price: e.target.value })}
+                        disabled={ventaLineForm.motivo === 'Planta muerta / Pérdida' || ventaLineForm.motivo === 'Regalo / Obsequio'}
+                      />
+                      <button type="button" onClick={addLineToVentaLote}>➕ Agregar planta a la factura</button>
+
+                      {ventaLoteLines.length > 0 && (
+                        <div className="admin-list" style={{ marginTop: 8 }}>
+                          {ventaLoteLines.map((l, i) => (
+                            <div key={i} className="admin-item">
+                              <div className="admin-item-info">
+                                <strong>{l.plant_name}</strong>
+                                <span>{l.motivo} — Cant: {l.quantity} — $ {Number(l.unit_price).toFixed(2)} c/u</span>
+                                <button type="button" onClick={() => removeVentaLoteLine(i)} className="danger">Quitar</button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      <div className="admin-item-actions" style={{ marginTop: 8 }}>
+                        <button
+                          type="button"
+                          onClick={saveVentaLote}
+                          disabled={savingVentaLote}
+                          style={{ background: '#4a5d3a', color: '#fff', border: 'none', padding: '10px 16px', borderRadius: 8, fontWeight: 600 }}
+                        >
+                          {savingVentaLote ? 'Guardando...' : 'Guardar venta'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => { setVentaLoteBuilderOpen(false); setVentaLoteLines([]); setVentaLoteCliente('') }}
+                          style={{ background: '#fff', color: '#4a5d3a', border: '1px solid #4a5d3a', padding: '10px 16px', borderRadius: 8, fontWeight: 600 }}
+                        >
+                          Cancelar
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  <button type="button" onClick={() => setMovMenuOpen(!movMenuOpen)} style={{ marginBottom: 10 }}>
+                    ☰ Buscar / filtrar
+                  </button>
+                  {movMenuOpen && (
+                    <div className="admin-form" style={{ marginBottom: 10 }}>
+                      <input
+                        className="order-search"
+                        placeholder="Buscar por cliente, planta o motivo..."
+                        value={movSearch}
+                        onChange={e => setMovSearch(e.target.value)}
+                      />
+                      <div className="mov-filters">
+                        <select className="gallery-select" value={movTypeFilter} onChange={e => setMovTypeFilter(e.target.value)}>
+                          <option value="all">Ventas y decrementos</option>
+                          <option value="venta">Solo ventas</option>
+                          <option value="decremento">Solo decrementos</option>
+                        </select>
+                        <select className="gallery-select" value={movStatusFilter} onChange={e => setMovStatusFilter(e.target.value)}>
+                          <option value="all">Todos los estados</option>
+                          <option value="pedido">Pedido</option>
+                          <option value="pagado">Pagado</option>
+                          <option value="entregado">Entregado</option>
+                        </select>
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="admin-list">
+                    {ventaLotesFiltrados.map(lote => {
+                      const lineas = decrementos.filter(d => d.lote_id === lote.id)
+                      if (lineas.length === 0) return null
+                      const { subtotal, lineas: lineasConProrrateo, total: totalLote } = ventaLoteProration(lote, lineas)
+                      const editingV = editingVentaLoteId === lote.id
+                      return (
+                        <div key={`vl-${lote.id}`} className="admin-item lote-group" style={{ width: '100%', maxWidth: '100%', minWidth: 0, overflow: 'hidden', boxSizing: 'border-box', opacity: lote.status === 'cancelada' ? 0.6 : 1, background: statusPastelBg(lineas, 'entregado') }}>
+                          <div className="admin-item-info" style={{ width: '100%', maxWidth: '100%', minWidth: 0, boxSizing: 'border-box' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                              <strong style={lote.status === 'cancelada' ? { textDecoration: 'line-through' } : undefined}>
+                                🧾 Venta #{lote.numero}{lote.cliente ? ` — ${lote.cliente}` : ''}
+                              </strong>
+                              <button type="button" onClick={() => setEditingVentaLoteId(editingV ? null : lote.id)}>
+                                {editingV ? '✅ Listo' : '✏️ Editar'}
+                              </button>
+                            </div>
+                            {lote.status === 'cancelada' && (
+                              <p style={{ color: '#b03434', fontSize: '0.8rem', fontWeight: 600, margin: '2px 0' }}>
+                                ❌ Cancelada — {lote.motivo_cancelacion || 'Sin motivo especificado'}
+                              </p>
+                            )}
+                            <span>Fecha: {new Date(lote.created_at).toLocaleDateString()}</span>
+
+                            <p style={{ fontSize: '0.7rem', color: '#8a8a7a', margin: '8px 0 2px', textAlign: 'center' }}>◀ Deslizá la tabla para ver más columnas ▶</p>
+                            <div style={{ width: '100%', maxWidth: '100%', minWidth: 0, overflowX: 'auto', WebkitOverflowScrolling: 'touch', touchAction: 'pan-x pan-y', marginTop: 2, borderRadius: 8, border: '1px solid #ddd', boxShadow: '0 1px 2px rgba(0,0,0,0.06)', boxSizing: 'border-box' }}>
+                              <table style={{ borderCollapse: 'collapse', width: '100%', minWidth: 460, fontSize: 11 }}>
+                                <thead>
+                                  <tr style={{ background: '#f3ecdd' }}>
+                                    <th style={{ padding: '3px 2px', border: '1px solid #ddd', whiteSpace: 'nowrap' }}>Foto</th>
+                                    <th style={{ padding: '3px 2px', border: '1px solid #ddd', whiteSpace: 'normal', maxWidth: 120, wordBreak: 'break-word' }}>Nombre</th>
+                                    <th style={{ padding: '3px 2px', border: '1px solid #ddd', whiteSpace: 'nowrap' }} title="Motivo">🏷️</th>
+                                    <th style={{ padding: '3px 2px', border: '1px solid #ddd', whiteSpace: 'nowrap' }}>Cant</th>
+                                    <th style={{ padding: '3px 2px', border: '1px solid #ddd', whiteSpace: 'nowrap' }}>P.Unit</th>
+                                    <th style={{ padding: '3px 2px', border: '1px solid #ddd', whiteSpace: 'nowrap' }}>P.Tot</th>
+                                    <th style={{ padding: '3px 2px', border: '1px solid #ddd', whiteSpace: 'nowrap' }}>Estado</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {lineasConProrrateo.map(d => {
+                                    const plant = plants.find(p => p.id === d.plant_id)
+                                    return (
+                                    <tr key={d.id}>
+                                      <td style={{ padding: 2, border: '1px solid #ddd', textAlign: 'center', whiteSpace: 'nowrap' }}>
+                                        {plant && plant.image_url ? <img src={plant.image_url} alt={d.plant_name} style={{ width: 22, height: 22, objectFit: 'cover', borderRadius: 3 }} /> : '—'}
+                                      </td>
+                                      <td style={{ padding: 2, border: '1px solid #ddd', whiteSpace: 'normal', maxWidth: 120, wordBreak: 'break-word' }}>
+                                        {editingV ? <input defaultValue={d.plant_name} onBlur={e => updateDecrementoField(d, 'plant_name', e.target.value)} style={{ width: 90, fontSize: 11 }} /> : d.plant_name}
+                                      </td>
+                                      <td style={{ padding: 2, border: '1px solid #ddd', textAlign: 'center', whiteSpace: 'nowrap' }} title={d.motivo}>
+                                        {editingV ? (
+                                          <select defaultValue={d.motivo} onChange={e => updateDecrementoField(d, 'motivo', e.target.value)} style={{ fontSize: 11 }}>
+                                            <option value="Venta manual (con precio)">Venta manual (con precio)</option>
+                                            <option value="Planta muerta / Pérdida">Planta muerta / Pérdida</option>
+                                            <option value="Regalo / Obsequio">Regalo / Obsequio</option>
+                                          </select>
+                                        ) : (
+                                          d.motivo === 'Planta muerta / Pérdida' ? '💀' : d.motivo === 'Regalo / Obsequio' ? '🎁' : '🛒'
+                                        )}
+                                      </td>
+                                      <td style={{ padding: 2, border: '1px solid #ddd', textAlign: 'center', whiteSpace: 'nowrap' }}>
+                                        {editingV ? <input type="number" defaultValue={d.quantity} onBlur={e => updateDecrementoField(d, 'quantity', e.target.value)} style={{ width: 34, fontSize: 11 }} /> : d.quantity}
+                                      </td>
+                                      <td style={{ padding: 2, border: '1px solid #ddd', textAlign: 'right', whiteSpace: 'nowrap' }}>
+                                        {editingV ? <input type="number" step="0.01" defaultValue={d.unit_price || 0} onBlur={e => updateDecrementoField(d, 'unit_price', e.target.value)} style={{ width: 48, fontSize: 11 }} /> : `$${Number(d.unit_price || 0).toFixed(2)}`}
+                                      </td>
+                                      <td style={{ padding: 2, border: '1px solid #ddd', textAlign: 'right', whiteSpace: 'nowrap' }}>${d._value.toFixed(2)}</td>
+                                      <td style={{ padding: 2, border: '1px solid #ddd', textAlign: 'center', whiteSpace: 'nowrap' }}>
+                                        <StatusChecklist
+                                          steps={[{ key: 'pedido', label: 'Pedido' }, { key: 'pagado', label: 'Pagado' }, { key: 'entregado', label: 'Entregado' }]}
+                                          currentStatus={d.status || 'pedido'}
+                                          disabled={approvingIds.includes(d.id)}
+                                          onAdvance={key => key === 'pagado' ? markDecrementoPagado(d) : markDecrementoEntregado(d)}
+                                        />
+                                      </td>
+                                    </tr>
+                                    )
+                                  })}
+                                </tbody>
+                                <tfoot>
+                                  <tr><td colSpan={5} style={{ padding: '3px 2px', border: '1px solid #ddd', whiteSpace: 'nowrap' }}>Subtotal</td><td colSpan={2} style={{ padding: '3px 2px', border: '1px solid #ddd', textAlign: 'right', whiteSpace: 'nowrap' }}>${subtotal.toFixed(2)}</td></tr>
+                                  <tr><td colSpan={5} style={{ padding: '3px 2px', border: '1px solid #ddd', whiteSpace: 'nowrap' }}>Envío 1</td><td colSpan={2} style={{ padding: '3px 2px', border: '1px solid #ddd', textAlign: 'right', whiteSpace: 'nowrap' }}>{editingV ? <input type="number" step="0.01" defaultValue={lote.envio1 || 0} onBlur={e => updateVentaLoteExtra(lote, 'envio1', e.target.value)} style={{ width: 70, fontSize: 11 }} /> : `$${Number(lote.envio1 || 0).toFixed(2)}`}</td></tr>
+                                  <tr><td colSpan={5} style={{ padding: '3px 2px', border: '1px solid #ddd', whiteSpace: 'nowrap' }}>Envío 2</td><td colSpan={2} style={{ padding: '3px 2px', border: '1px solid #ddd', textAlign: 'right', whiteSpace: 'nowrap' }}>{editingV ? <input type="number" step="0.01" defaultValue={lote.envio2 || 0} onBlur={e => updateVentaLoteExtra(lote, 'envio2', e.target.value)} style={{ width: 70, fontSize: 11 }} /> : `$${Number(lote.envio2 || 0).toFixed(2)}`}</td></tr>
+                                  <tr><td colSpan={5} style={{ padding: '3px 2px', border: '1px solid #ddd', whiteSpace: 'nowrap' }}>Varios</td><td colSpan={2} style={{ padding: '3px 2px', border: '1px solid #ddd', textAlign: 'right', whiteSpace: 'nowrap' }}>{editingV ? <input type="number" step="0.01" defaultValue={lote.varios || 0} onBlur={e => updateVentaLoteExtra(lote, 'varios', e.target.value)} style={{ width: 70, fontSize: 11 }} /> : `$${Number(lote.varios || 0).toFixed(2)}`}</td></tr>
+                                  <tr style={{ background: '#f3ecdd' }}><td colSpan={5} style={{ padding: '3px 2px', border: '1px solid #ddd', whiteSpace: 'nowrap' }}><strong>Total</strong></td><td colSpan={2} style={{ padding: '3px 2px', border: '1px solid #ddd', textAlign: 'right', whiteSpace: 'nowrap' }}><strong>${totalLote.toFixed(2)}</strong></td></tr>
+                                </tfoot>
+                              </table>
+                            </div>
+
+                            {addToVentaLoteId === lote.id ? (
+                              <div className="admin-form" style={{ marginTop: 8, width: '100%', maxWidth: '100%', boxSizing: 'border-box' }}>
+                                <select className="gallery-select" value={decPlantCategory} onChange={e => setDecPlantCategory(e.target.value)} style={{ width: '100%', boxSizing: 'border-box' }}>
+                                  <option value="all">Todas las categorías</option>
+                                  {categories.map(c => <option key={c.id} value={c.id}>{c.emoji} {c.name}</option>)}
+                                </select>
+                                <input
+                                  className="order-search"
+                                  placeholder="Buscar planta por nombre..."
+                                  value={decPlantSearch}
+                                  onChange={e => setDecPlantSearch(e.target.value)}
+                                  style={{ width: '100%', boxSizing: 'border-box' }}
+                                />
+                                {(decPlantSearch.trim() || decPlantCategory !== 'all') ? (
+                                  <PlantPicker
+                                    list={[
+                                      ...plants
+                                        .filter(p => decPlantCategory === 'all' || p.category_id === decPlantCategory)
+                                        .filter(p => p.name.toLowerCase().includes(decPlantSearch.trim().toLowerCase()))
+                                        .map(p => ({ id: p.id, name: p.name })),
+                                      ...seedBatches
+                                        .filter(sb => (sb.stock || 0) > 0)
+                                        .filter(sb => decPlantCategory === 'all' || sb.category_id === decPlantCategory)
+                                        .filter(sb => seedBatchDisplayName(sb).toLowerCase().includes(decPlantSearch.trim().toLowerCase()))
+                                        .map(sb => ({ id: `seed:${sb.id}`, name: `${seedBatchDisplayName(sb)} — ${sb.stock || 0} disponibles` })),
+                                    ]}
+                                    selectedId={ventaLineForm.plant_id}
+                                    onSelect={id => setVentaLineForm({ ...ventaLineForm, plant_id: id })}
+                                  />
+                                ) : (
+                                  <p className="status-msg" style={{ margin: '4px 0' }}>
+                                    {ventaLineForm.plant_id ? `✓ ${resolveVentaTarget(ventaLineForm.plant_id).isSeed ? seedBatchDisplayName(resolveVentaTarget(ventaLineForm.plant_id).seedBatch) : (resolveVentaTarget(ventaLineForm.plant_id).plant?.name || '')}` : 'Elige una categoría o escribe para buscar'}
+                                  </p>
+                                )}
+                                <input placeholder="Cantidad" type="number" value={ventaLineForm.quantity} onChange={e => setVentaLineForm({ ...ventaLineForm, quantity: e.target.value })} style={{ width: '100%', boxSizing: 'border-box' }} />
+                                <select
+                                  value={ventaLineForm.motivo}
+                                  onChange={e => {
+                                    const motivo = e.target.value
+                                    const autoZero = motivo === 'Planta muerta / Pérdida' || motivo === 'Regalo / Obsequio'
+                                    setVentaLineForm({ ...ventaLineForm, motivo, unit_price: autoZero ? '0' : ventaLineForm.unit_price })
+                                  }}
+                                  style={{ width: '100%', boxSizing: 'border-box' }}
+                                >
+                                  <option value="Venta manual (con precio)">Venta manual (con precio)</option>
+                                  <option value="Planta muerta / Pérdida">Planta muerta / Pérdida</option>
+                                  <option value="Regalo / Obsequio">Regalo / Obsequio</option>
+                                </select>
+                                <input
+                                  placeholder="Precio unitario"
+                                  type="number"
+                                  step="0.01"
+                                  value={ventaLineForm.unit_price}
+                                  onChange={e => setVentaLineForm({ ...ventaLineForm, unit_price: e.target.value })}
+                                  disabled={ventaLineForm.motivo === 'Planta muerta / Pérdida' || ventaLineForm.motivo === 'Regalo / Obsequio'}
+                                  style={{ width: '100%', boxSizing: 'border-box' }}
+                                />
+                                <div className="admin-item-actions" style={{ flexWrap: 'wrap' }}>
+                                  <button type="button" onClick={() => addPlantToVentaLote(lote.id)}>Guardar</button>
+                                  <button type="button" onClick={() => { setAddToVentaLoteId(null); setVentaLineForm({ plant_id: '', quantity: '', unit_price: '', motivo: 'Venta manual (con precio)' }) }}>Cancelar</button>
+                                </div>
+                              </div>
+                            ) : (
+                              <div style={{ display: 'flex', gap: 8, marginTop: 8, position: 'relative' }}>
+                                <button
+                                  type="button"
+                                  onClick={() => setAddToVentaLoteId(lote.id)}
+                                  style={{ flex: '1 1 auto', boxSizing: 'border-box' }}
+                                >
+                                  ➕ Agregar planta
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => deleteVentaLote(lote.id)}
+                                  className="danger"
+                                  aria-label="Eliminar venta"
+                                  style={{ flex: '0 0 auto' }}
+                                >
+                                  🗑️ Eliminar
+                                </button>
+                                {lote.status !== 'cancelada' && (
+                                  <button
+                                    type="button"
+                                    onClick={() => cancelVentaLote(lote.id)}
+                                    aria-label="Cancelar venta"
+                                    style={{ flex: '0 0 auto', background: '#fff', color: '#b03434', border: '1px solid #b03434' }}
+                                  >
+                                    ❌ Cancelar
+                                  </button>
+                                )}
+                                <div style={{ position: 'relative' }}>
+                                  <button
+                                    type="button"
+                                    onClick={() => setShareVentaMenuId(shareVentaMenuId === lote.id ? null : lote.id)}
+                                    aria-label="Compartir factura"
+                                    style={{ background: '#fff', color: '#4a5d3a', border: '1px solid #4a5d3a', padding: '10px 14px', borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                                  >
+                                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                      <circle cx="18" cy="5" r="3" />
+                                      <circle cx="6" cy="12" r="3" />
+                                      <circle cx="18" cy="19" r="3" />
+                                      <line x1="8.59" y1="13.51" x2="15.42" y2="17.49" />
+                                      <line x1="15.41" y1="6.51" x2="8.59" y2="10.49" />
+                                    </svg>
+                                  </button>
+                                  {shareVentaMenuId === lote.id && (
+                                    <div style={{ position: 'absolute', right: 0, bottom: '110%', background: '#fff', border: '1px solid #ddd', borderRadius: 8, boxShadow: '0 2px 8px rgba(0,0,0,0.18)', overflow: 'hidden', zIndex: 5, minWidth: 170 }}>
+                                      <button
+                                        type="button"
+                                        onClick={() => { sendVentaInvoiceWhatsApp(lote, lineasConProrrateo, subtotal, totalLote); setShareVentaMenuId(null) }}
+                                        style={{ display: 'block', width: '100%', textAlign: 'left', padding: '10px 14px', background: '#fff', border: 'none', borderBottom: '1px solid #eee', fontSize: '0.85rem', color: '#25D366', fontWeight: 600, boxSizing: 'border-box' }}
+                                      >
+                                        💬 WhatsApp
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => { downloadVentaInvoicePDF(lote, lineasConProrrateo, subtotal, totalLote); setShareVentaMenuId(null) }}
+                                        style={{ display: 'block', width: '100%', textAlign: 'left', padding: '10px 14px', background: '#fff', border: 'none', fontSize: '0.85rem', color: '#4a5d3a', fontWeight: 600, boxSizing: 'border-box' }}
+                                      >
+                                        ⬇️ Descargar PDF
+                                      </button>
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      )
+                    })}
+
+                    {movimientosFiltrados.filter(m => !(m._type === 'decremento' && m.lote_id)).length === 0 && ventaLotesFiltrados.length === 0 && <p className="status-msg">No se encontraron movimientos.</p>}
+                    {movimientosFiltrados.filter(m => !(m._type === 'decremento' && m.lote_id)).map(m => (
+                      m._type === 'venta' ? (
+                        <div key={`o-${m.id}`} className="admin-item" style={{ width: '100%', maxWidth: '100%', minWidth: 0, overflow: 'hidden', boxSizing: 'border-box' }}>
+                          <div className="admin-item-info" style={{ width: '100%', maxWidth: '100%', minWidth: 0, boxSizing: 'border-box' }}>
+                            <strong>🛒 Pedido #{m.id}{m.customer_name ? ` — ${m.customer_name}` : ''}</strong>
+                            <span>{m.customer_phone}</span>
+                            <span className={`order-badge order-${m.status}`}>{m.status}</span>
+                            <span>Pedido: {new Date(m.created_at).toLocaleDateString()}</span>
+                            {m.fecha_pago && <span>Pagado: {new Date(m.fecha_pago).toLocaleDateString()}</span>}
+                            {m.fecha_entrega && <span>Entregado: {new Date(m.fecha_entrega).toLocaleDateString()}</span>}
+
+                            {(() => {
+                              const { subtotal, items, total } = orderProration(m)
+                              return (
+                                <>
+                                  <p style={{ fontSize: '0.7rem', color: '#8a8a7a', margin: '8px 0 2px', textAlign: 'center' }}>◀ Deslizá la tabla para ver más columnas ▶</p>
+                                  <div style={{ width: '100%', maxWidth: '100%', minWidth: 0, overflowX: 'auto', WebkitOverflowScrolling: 'touch', touchAction: 'pan-x pan-y', marginTop: 2, borderRadius: 8, border: '1px solid #ddd', boxShadow: '0 1px 2px rgba(0,0,0,0.06)', boxSizing: 'border-box' }}>
+                                    <table style={{ borderCollapse: 'collapse', width: '100%', minWidth: 420, fontSize: 11 }}>
+                                      <thead>
+                                        <tr style={{ background: '#f3ecdd' }}>
+                                          <th style={{ padding: '3px 2px', border: '1px solid #ddd', whiteSpace: 'nowrap' }}>Foto</th>
+                                          <th style={{ padding: '3px 2px', border: '1px solid #ddd', whiteSpace: 'normal', maxWidth: 100, wordBreak: 'break-word' }}>Nombre</th>
+                                          <th style={{ padding: '3px 2px', border: '1px solid #ddd', whiteSpace: 'nowrap' }}>Cant</th>
+                                          <th style={{ padding: '3px 2px', border: '1px solid #ddd', whiteSpace: 'nowrap' }}>P.Unit</th>
+                                          <th style={{ padding: '3px 2px', border: '1px solid #ddd', whiteSpace: 'nowrap' }}>P.Tot</th>
+                                          <th style={{ padding: '3px 2px', border: '1px solid #ddd', whiteSpace: 'nowrap' }}>Pror.</th>
+                                          <th style={{ padding: '3px 2px', border: '1px solid #ddd', whiteSpace: 'nowrap' }}>Total</th>
+                                        </tr>
+                                      </thead>
+                                      <tbody>
+                                        {items.map(it => (
+                                          <tr key={it.id}>
+                                            <td style={{ padding: 2, border: '1px solid #ddd', textAlign: 'center', whiteSpace: 'nowrap' }}>{it._plant?.image_url ? <img src={it._plant.image_url} alt={it._plant.name} style={{ width: 22, height: 22, objectFit: 'cover', borderRadius: 3 }} /> : '—'}</td>
+                                            <td style={{ padding: 2, border: '1px solid #ddd', whiteSpace: 'normal', maxWidth: 100, wordBreak: 'break-word' }}>{it._plant ? it._plant.name : 'Planta'}</td>
+                                            <td style={{ padding: 2, border: '1px solid #ddd', textAlign: 'center', whiteSpace: 'nowrap' }}>{it.quantity}</td>
+                                            <td style={{ padding: 2, border: '1px solid #ddd', textAlign: 'right', whiteSpace: 'nowrap' }}>${it._unitPrice.toFixed(2)}</td>
+                                            <td style={{ padding: 2, border: '1px solid #ddd', textAlign: 'right', whiteSpace: 'nowrap' }}>${it._value.toFixed(2)}</td>
+                                            <td style={{ padding: 2, border: '1px solid #ddd', textAlign: 'right', whiteSpace: 'nowrap' }}>${it._prorated.toFixed(2)}</td>
+                                            <td style={{ padding: 2, border: '1px solid #ddd', textAlign: 'right', whiteSpace: 'nowrap' }}>${it._lineTotal.toFixed(2)}</td>
+                                          </tr>
+                                        ))}
+                                      </tbody>
+                                      <tfoot>
+                                        <tr><td colSpan={4} style={{ padding: '3px 2px', border: '1px solid #ddd', whiteSpace: 'nowrap' }}>Subtotal</td><td colSpan={3} style={{ padding: '3px 2px', border: '1px solid #ddd', textAlign: 'right', whiteSpace: 'nowrap' }}>${subtotal.toFixed(2)}</td></tr>
+                                        <tr><td colSpan={4} style={{ padding: '3px 2px', border: '1px solid #ddd', whiteSpace: 'nowrap' }}>Envío 1</td><td colSpan={3} style={{ padding: '3px 2px', border: '1px solid #ddd', textAlign: 'right', whiteSpace: 'nowrap' }}><input type="number" step="0.01" defaultValue={m.envio1 || 0} onBlur={e => updateOrderExtra(m, 'envio1', e.target.value)} style={{ width: 70, fontSize: 11 }} /></td></tr>
+                                        <tr><td colSpan={4} style={{ padding: '3px 2px', border: '1px solid #ddd', whiteSpace: 'nowrap' }}>Envío 2</td><td colSpan={3} style={{ padding: '3px 2px', border: '1px solid #ddd', textAlign: 'right', whiteSpace: 'nowrap' }}><input type="number" step="0.01" defaultValue={m.envio2 || 0} onBlur={e => updateOrderExtra(m, 'envio2', e.target.value)} style={{ width: 70, fontSize: 11 }} /></td></tr>
+                                        <tr><td colSpan={4} style={{ padding: '3px 2px', border: '1px solid #ddd', whiteSpace: 'nowrap' }}>Varios</td><td colSpan={3} style={{ padding: '3px 2px', border: '1px solid #ddd', textAlign: 'right', whiteSpace: 'nowrap' }}><input type="number" step="0.01" defaultValue={m.varios || 0} onBlur={e => updateOrderExtra(m, 'varios', e.target.value)} style={{ width: 70, fontSize: 11 }} /></td></tr>
+                                        <tr style={{ background: '#f3ecdd' }}><td colSpan={4} style={{ padding: '3px 2px', border: '1px solid #ddd', whiteSpace: 'nowrap' }}><strong>Total</strong></td><td colSpan={3} style={{ padding: '3px 2px', border: '1px solid #ddd', textAlign: 'right', whiteSpace: 'nowrap' }}><strong>${total.toFixed(2)}</strong></td></tr>
+                                      </tfoot>
+                                    </table>
+                                  </div>
+
+                                  <div style={{ display: 'flex', gap: 8, marginTop: 8, alignItems: 'center' }}>
+                                    <div className="admin-item-actions" style={{ flex: '1 1 auto', margin: 0 }}>
+                                      <StatusChecklist
+                                        steps={[{ key: 'pedido', label: 'Pedido' }, { key: 'pagado', label: 'Pagado' }, { key: 'entregado', label: 'Entregado' }]}
+                                        currentStatus={m.status}
+                                        disabled={approvingIds.includes(m.id)}
+                                        onAdvance={key => key === 'pagado' ? markAsPaid(m) : markAsDelivered(m)}
+                                      />
+                                    </div>
+                                    <div style={{ position: 'relative' }}>
+                                      <button
+                                        type="button"
+                                        onClick={() => setShareOrderMenuId(shareOrderMenuId === m.id ? null : m.id)}
+                                        aria-label="Compartir factura"
+                                        style={{ background: '#fff', color: '#4a5d3a', border: '1px solid #4a5d3a', padding: '10px 14px', borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                                      >
+                                        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                          <circle cx="18" cy="5" r="3" />
+                                          <circle cx="6" cy="12" r="3" />
+                                          <circle cx="18" cy="19" r="3" />
+                                          <line x1="8.59" y1="13.51" x2="15.42" y2="17.49" />
+                                          <line x1="15.41" y1="6.51" x2="8.59" y2="10.49" />
+                                        </svg>
+                                      </button>
+                                      {shareOrderMenuId === m.id && (
+                                        <div style={{ position: 'absolute', right: 0, bottom: '110%', background: '#fff', border: '1px solid #ddd', borderRadius: 8, boxShadow: '0 2px 8px rgba(0,0,0,0.18)', overflow: 'hidden', zIndex: 5, minWidth: 170 }}>
+                                          <button
+                                            type="button"
+                                            onClick={() => { sendOrderInvoiceWhatsApp(m, items, subtotal, total); setShareOrderMenuId(null) }}
+                                            style={{ display: 'block', width: '100%', textAlign: 'left', padding: '10px 14px', background: '#fff', border: 'none', borderBottom: '1px solid #eee', fontSize: '0.85rem', color: '#25D366', fontWeight: 600, boxSizing: 'border-box' }}
+                                          >
+                                            💬 WhatsApp
+                                          </button>
+                                          <button
+                                            type="button"
+                                            onClick={() => { downloadOrderInvoicePDF(m, items, subtotal, total); setShareOrderMenuId(null) }}
+                                            style={{ display: 'block', width: '100%', textAlign: 'left', padding: '10px 14px', background: '#fff', border: 'none', fontSize: '0.85rem', color: '#4a5d3a', fontWeight: 600, boxSizing: 'border-box' }}
+                                          >
+                                            ⬇️ Descargar PDF
+                                          </button>
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
+                                </>
+                              )
+                            })()}
+                          </div>
+                        </div>
+                      ) : (
+                        <div key={`d-${m.id}`} className="admin-item">
+                          <div className="admin-item-info">
+                            <strong>{m.motivo === 'Venta manual (con precio)' ? '🛒' : m.motivo === 'Regalo / Obsequio' ? '🎁' : '🥀'} {m.plant_name}</strong>
+                            <span>{m.motivo}</span>
+                            <span>Registrado: {new Date(m.created_at).toLocaleDateString()}</span>
+                            <span>Cantidad: -{m.quantity}</span>
+                            {m.motivo === 'Venta manual (con precio)' && (
+                              <>
+                                <span>Precio unit.: ${Number(m.unit_price || 0).toFixed(2)}</span>
+                                <span><strong>Total: ${(Number(m.unit_price || 0) * Number(m.quantity)).toFixed(2)}</strong></span>
+                              </>
+                            )}
+                          </div>
+                        </div>
+                      )
+                    ))}
+                  </div>
+                </>
+              )}
+
+              {!loading && view === 'notas' && (() => {
+                const term = globalNoteSearch.trim().toLowerCase()
+                const globalResults = []
+                if (term) {
+                  plantNotes.forEach(note => {
+                    ;(note.content_blocks || []).forEach(b => {
+                      if (b.type === 'text' && b.content.toLowerCase().includes(term)) {
+                        const plant = plants.find(p => p.id === note.plant_id)
+                        globalResults.push({
+                          key: `pn-${note.id}`, icon: '🪴',
+                          title: plant ? plant.name : 'Planta',
+                          snippet: b.content,
+                          onOpen: () => { setView('galeria'); setPhotoModalPlantId(note.plant_id); setPhotoModalSection('notas') },
+                        })
+                      }
+                    })
+                  })
+                  lotes.forEach(lote => {
+                    ;(lote.content_blocks || []).forEach(b => {
+                      if (b.type === 'text' && b.content.toLowerCase().includes(term)) {
+                        globalResults.push({
+                          key: `lt-${lote.id}`, icon: '📦',
+                          title: `Compra #${lote.numero}${lote.proveedor ? ` — ${lote.proveedor}` : ''}`,
+                          snippet: b.content,
+                          onOpen: () => { setView('ingresos'); setIngresosSubTab('compras'); openLoteNote(lote) },
+                        })
+                      }
+                    })
+                  })
+                  seedBatches.forEach(batch => {
+                    ;(batch.content_blocks || []).forEach(b => {
+                      if (b.type === 'text' && b.content.toLowerCase().includes(term)) {
+                        globalResults.push({
+                          key: `sb-${batch.id}`, icon: '🌰',
+                          title: batch.es_noid ? 'NOID' : (batch.nombre || 'Lote de semillas'),
+                          snippet: b.content,
+                          onOpen: () => { setView('ingresos'); setIngresosSubTab('semillas'); openSbNote(batch) },
+                        })
+                      }
+                    })
+                  })
+                  categoryNotes.forEach(note => {
+                    ;(note.content_blocks || []).forEach(b => {
+                      if (b.type === 'text' && b.content.toLowerCase().includes(term)) {
+                        const cat = categories.find(c => c.id === note.category_id)
+                        globalResults.push({
+                          key: `cn-${note.id}`, icon: '📝',
+                          title: cat ? `${cat.emoji} ${cat.name}` : 'General (sin categoría)',
+                          snippet: b.content,
+                          onOpen: () => openEditCategoryNote(note),
+                        })
+                      }
+                    })
+                  })
+                }
+
+                const filteredNotes = categoryNotes.filter(n => noteFilterCategory === 'all' || (noteFilterCategory === '__none__' ? !n.category_id : n.category_id === noteFilterCategory))
+                return (
+                  <>
+                    <input
+                      className="order-search"
+                      placeholder="🔍 Buscar en todas las notas (plantas, compras, semillas, categorías)..."
+                      value={globalNoteSearch}
+                      onChange={e => setGlobalNoteSearch(e.target.value)}
+                      style={{ marginBottom: 10 }}
+                    />
+
+                    {term ? (
+                      <>
+                        <p style={{ margin: '0 0 8px', color: '#7a7060', fontSize: 13 }}>{globalResults.length} resultado(s)</p>
+                        {globalResults.length === 0 && <p className="status-msg">No se encontró nada con "{globalNoteSearch}".</p>}
+                        <div className="admin-list">
+                          {globalResults.map(r => (
+                            <div key={r.key} className="admin-item" style={{ flexDirection: 'column', alignItems: 'stretch' }}>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                <strong>{r.icon} {r.title}</strong>
+                                <button type="button" onClick={r.onOpen}>Abrir</button>
+                              </div>
+                              <p className="task-note" style={{ margin: '4px 0 0' }}>{r.snippet}</p>
+                            </div>
+                          ))}
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
+                          <select value={noteFilterCategory} onChange={e => setNoteFilterCategory(e.target.value)} style={{ flex: '1 1 200px' }}>
+                            <option value="all">Todas las categorías</option>
+                            <option value="__none__">Sin categoría (generales)</option>
+                            {categories.map(c => <option key={c.id} value={c.id}>{c.emoji} {c.name}</option>)}
+                          </select>
+                          <button type="button" onClick={openNewCategoryNote} style={{ background: '#4a5d3a', color: '#fff', border: 'none', padding: '10px 16px', borderRadius: 8, fontWeight: 600 }}>
+                            + Nueva nota
+                          </button>
+                        </div>
+
+                        {filteredNotes.length === 0 && <p className="status-msg">No hay notas todavía.</p>}
+
+                        <div className="admin-list">
+                          {filteredNotes.map(note => {
+                            const cat = categories.find(c => c.id === note.category_id)
+                            return (
+                              <div key={note.id} className="admin-item" style={{ flexDirection: 'column', alignItems: 'stretch' }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                  <strong>{cat ? `${cat.emoji} ${cat.name}` : '📝 General (sin categoría)'}</strong>
+                                  <div style={{ display: 'flex', gap: 6 }}>
+                                    <button type="button" onClick={() => openEditCategoryNote(note)}>✏️ Editar</button>
+                                    <button type="button" className="danger" onClick={() => deleteCategoryNote(note.id)}>🗑️</button>
+                                  </div>
+                                </div>
+                                <p style={{ fontSize: 12, color: '#7a7060', margin: '4px 0' }}>
+                                  {new Date(note.updated_at || note.created_at).toLocaleString()}
+                                </p>
+                                <div className="note-blocks-view">
+                                  {(note.content_blocks || []).map((b, i) => (
+                                    <div key={i}>
+                                      {b.type === 'text' && <p className="task-note">{b.content}</p>}
+                                      {b.type === 'photo' && <img src={b.url} alt="" className="note-block-photo" />}
+                                      {b.type === 'video' && <video src={b.url} controls className="note-video" />}
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )
+                          })}
+                        </div>
+                      </>
+                    )}
+                  </>
+                )
+              })()}
+
+              {!loading && view === 'tabla' && (() => {
+                const tableRows = plants.map(p => {
+                  const compraDePlanta = compras.find(c => c.plant_id === p.id)
+                  const loteDePlanta = compraDePlanta ? lotes.find(l => l.id === compraDePlanta.lote_id) : null
+                  let precioSugerido = null
+                  if (compraDePlanta && loteDePlanta) {
+                    const lineasDelLote = compras.filter(c => c.lote_id === loteDePlanta.id)
+                    const { lineas: lineasProrrateadas } = loteProration(loteDePlanta, lineasDelLote)
+                    const miLinea = lineasProrrateadas.find(l => l.id === compraDePlanta.id)
+                    if (miLinea && Number(miLinea.quantity) > 0) {
+                      precioSugerido = miLinea._lineTotal / Number(miLinea.quantity)
+                    }
+                  }
+                  const decrementoDePlanta = decrementos.find(d => d.plant_id === p.id)
+                  const ventaLoteDePlanta = decrementoDePlanta ? ventaLotes.find(l => l.id === decrementoDePlanta.lote_id) : null
+                  const orderDePlanta = orders.find(o => (o.order_items || []).some(it => it.plant_id === p.id))
+                  const categoria = categories.find(cat => cat.id === p.category_id)
+                  const vendido = !!(orderDePlanta || decrementoDePlanta)
+                  const florecio = floraciones.some(f => f.plant_id === p.id)
+                  const discountPercent = Number(p.discount_percent) || 0
+                  const price = Number(p.price) || 0
+                  return {
+                    id: p.id,
+                    image_url: p.image_url,
+                    hasPhoto: !!p.image_url,
+                    name: p.name || '',
+                    categoria: categoria ? categoria.name : '',
+                    categoriaEmoji: categoria ? categoria.emoji : '',
+                    categoriaId: p.category_id || '',
+                    categoriaParentId: categoria?.parent_id || '',
+                    proveedor: compraDePlanta?.proveedor || '',
+                    price,
+                    precioSugerido,
+                    discountPercent,
+                    priceWithDiscount: discountPercent > 0 ? price * (1 - discountPercent / 100) : price,
+                    stock: Number(p.stock) || 0,
+                    height: p.height || '',
+                    active: !!p.active,
+                    is_new: !!p.is_new,
+                    on_sale: !!p.on_sale,
+                    coming_soon: !!p.coming_soon,
+                    flagged: !!p.flagged,
+                    florecio,
+                    vendido,
+                    loteNumero: loteDePlanta ? loteDePlanta.numero : null,
+                    fechaCompra: loteDePlanta ? loteDePlanta.created_at : (compraDePlanta ? compraDePlanta.created_at : null),
+                    ventaNumero: ventaLoteDePlanta ? ventaLoteDePlanta.numero : null,
+                    fechaVenta: ventaLoteDePlanta ? ventaLoteDePlanta.created_at : (orderDePlanta ? orderDePlanta.created_at : (decrementoDePlanta ? decrementoDePlanta.created_at : null)),
+                  }
+                })
+
+                const f = tableFilters
+                const filteredRows = tableRows.filter(r => {
+                  if (gallerySearch && !r.name.toLowerCase().includes(gallerySearch.trim().toLowerCase())) return false
+                  if (f.categoria !== 'all' && r.categoriaId !== f.categoria && r.categoriaParentId !== f.categoria) return false
+                  if (f.proveedor && !r.proveedor.toLowerCase().includes(f.proveedor.trim().toLowerCase())) return false
+                  if (f.precioMin !== '' && r.price < Number(f.precioMin)) return false
+                  if (f.precioMax !== '' && r.price > Number(f.precioMax)) return false
+                  if (f.stockMin !== '' && r.stock < Number(f.stockMin)) return false
+                  if (f.stockMax !== '' && r.stock > Number(f.stockMax)) return false
+                  if (f.altura && !r.height.toLowerCase().includes(f.altura.trim().toLowerCase())) return false
+                  if (f.estado !== 'all' && (f.estado === 'visible') !== r.active) return false
+                  if (f.nueva !== 'all' && (f.nueva === 'si') !== r.is_new) return false
+                  if (f.descuento !== 'all' && (f.descuento === 'si') !== r.on_sale) return false
+                  if (f.proximamente !== 'all' && (f.proximamente === 'si') !== r.coming_soon) return false
+                  if (f.revisar !== 'all' && (f.revisar === 'si') !== r.flagged) return false
+                  if (f.florecio !== 'all' && (f.florecio === 'si') !== r.florecio) return false
+                  if (f.vendido !== 'all' && (f.vendido === 'si') !== r.vendido) return false
+                  if (f.foto !== 'all' && (f.foto === 'si') !== r.hasPhoto) return false
+                  return true
+                })
+
+                const sortedRows = [...filteredRows].sort((a, b) => {
+                  let av = a[tableSort.field]
+                  let bv = b[tableSort.field]
+                  if (tableSort.field === 'fechaCompra') {
+                    av = av ? new Date(av).getTime() : -Infinity
+                    bv = bv ? new Date(bv).getTime() : -Infinity
+                  }
+                  if (typeof av === 'boolean') av = av ? 1 : 0
+                  if (typeof bv === 'boolean') bv = bv ? 1 : 0
+                  if (typeof av === 'string') av = av.toLowerCase()
+                  if (typeof bv === 'string') bv = bv.toLowerCase()
+                  if (av == null || av === '') av = tableSort.dir === 'asc' ? Infinity : -Infinity
+                  if (bv == null || bv === '') bv = tableSort.dir === 'asc' ? Infinity : -Infinity
+                  if (av < bv) return tableSort.dir === 'asc' ? -1 : 1
+                  if (av > bv) return tableSort.dir === 'asc' ? 1 : -1
+                  return 0
+                })
+
+                const arrow = field => tableSort.field === field ? (tableSort.dir === 'asc' ? ' ▲' : ' ▼') : ''
+                const thStyle = { padding: '6px 8px', border: '1px solid #ddd', background: '#F3ECDD', cursor: 'pointer', textAlign: 'left', verticalAlign: 'top', position: 'sticky', top: 0 }
+                const thTitleStyle = { display: 'block', whiteSpace: 'nowrap', fontWeight: 700, marginBottom: 4 }
+                const tdStyle = { padding: '5px 8px', border: '1px solid #ddd', whiteSpace: 'nowrap', fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis' }
+                const filterInputStyle = { display: 'block', width: 90, maxWidth: '100%', boxSizing: 'border-box', fontSize: 12, padding: '3px 4px' }
+
+                return (
+                  <>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8, marginBottom: 8 }}>
+                      <p style={{ margin: 0, color: '#7a7060', fontSize: 13 }}>
+                        {sortedRows.length} de {plants.length} planta(s) — click en un encabezado para ordenar
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => exportTableToExcel(sortedRows)}
+                        style={{
+                          background: QUICK_FILTER_TONES.sage.bg, border: `1px solid ${QUICK_FILTER_TONES.sage.border}`,
+                          borderRadius: 18, padding: '9px 14px', fontWeight: 700, color: '#5B4636', fontSize: 13.5, cursor: 'pointer',
+                        }}
+                      >
+                        ⬇️ Exportar a Excel ({sortedRows.length})
+                      </button>
+                    </div>
+                    <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch', border: '1px solid #E8DFC8', borderRadius: 8 }}>
+                      <table style={{ borderCollapse: 'collapse', width: '100%', minWidth: 1930, tableLayout: 'fixed' }}>
+                        <thead>
+                          <tr>
+                            <th style={{ ...thStyle, width: 90 }} onClick={() => toggleTableSort('hasPhoto')}>
+                              <span style={thTitleStyle}>Foto{arrow('hasPhoto')}</span>
+                              <select onClick={e => e.stopPropagation()} value={f.foto} onChange={e => setTableFilter('foto', e.target.value)} style={filterInputStyle}>
+                                <option value="all">Todas</option><option value="si">Con foto</option><option value="no">Sin foto</option>
+                              </select>
+                            </th>
+                            <th style={{ ...thStyle, width: 140 }} onClick={() => toggleTableSort('name')}>
+                              <span style={thTitleStyle}>Nombre{arrow('name')}</span>
+                              <input onClick={e => e.stopPropagation()} value={gallerySearch} onChange={e => setGallerySearch(e.target.value)} placeholder="Buscar..." style={filterInputStyle} />
+                            </th>
+                            <th style={{ ...thStyle, width: 120 }} onClick={() => toggleTableSort('categoria')}>
+                              <span style={thTitleStyle}>Categoría{arrow('categoria')}</span>
+                              <select onClick={e => e.stopPropagation()} value={f.categoria} onChange={e => setTableFilter('categoria', e.target.value)} style={filterInputStyle}>
+                                <option value="all">Todas</option>
+                                {categories.filter(c => !c.parent_id).map(parent => {
+                                  const children = categories.filter(c => c.parent_id === parent.id)
+                                  if (children.length === 0) {
+                                    return <option key={parent.id} value={parent.id}>{parent.emoji} {parent.name}</option>
+                                  }
+                                  return (
+                                    <optgroup key={parent.id} label={`${parent.emoji} ${parent.name}`}>
+                                      <option value={parent.id}>{parent.emoji} {parent.name} (todas)</option>
+                                      {children.map(ch => <option key={ch.id} value={ch.id}>　↳ {ch.emoji} {ch.name}</option>)}
+                                    </optgroup>
+                                  )
+                                })}
+                              </select>
+                            </th>
+                            <th style={{ ...thStyle, width: 110 }} onClick={() => toggleTableSort('proveedor')}>
+                              <span style={thTitleStyle}>Proveedor{arrow('proveedor')}</span>
+                              <input onClick={e => e.stopPropagation()} value={f.proveedor} onChange={e => setTableFilter('proveedor', e.target.value)} placeholder="Buscar..." style={filterInputStyle} />
+                            </th>
+                            <th style={{ ...thStyle, width: 100 }} onClick={() => toggleTableSort('precioSugerido')}>
+                              <span style={thTitleStyle}>P. sugerido{arrow('precioSugerido')}</span>
+                            </th>
+                            <th style={{ ...thStyle, width: 100 }} onClick={() => toggleTableSort('price')}>
+                              <span style={thTitleStyle}>Precio{arrow('price')}</span>
+                              <div style={{ display: 'flex', gap: 3 }}>
+                                <input onClick={e => e.stopPropagation()} type="number" value={f.precioMin} onChange={e => setTableFilter('precioMin', e.target.value)} placeholder="Min" style={{ ...filterInputStyle, width: 44 }} />
+                                <input onClick={e => e.stopPropagation()} type="number" value={f.precioMax} onChange={e => setTableFilter('precioMax', e.target.value)} placeholder="Max" style={{ ...filterInputStyle, width: 44 }} />
+                              </div>
+                            </th>
+                            <th style={{ ...thStyle, width: 90 }} onClick={() => toggleTableSort('priceWithDiscount')}>
+                              <span style={thTitleStyle}>Con desc.{arrow('priceWithDiscount')}</span>
+                            </th>
+                            <th style={{ ...thStyle, width: 90 }} onClick={() => toggleTableSort('stock')}>
+                              <span style={thTitleStyle}>Stock{arrow('stock')}</span>
+                              <div style={{ display: 'flex', gap: 3 }}>
+                                <input onClick={e => e.stopPropagation()} type="number" value={f.stockMin} onChange={e => setTableFilter('stockMin', e.target.value)} placeholder="Min" style={{ ...filterInputStyle, width: 40 }} />
+                                <input onClick={e => e.stopPropagation()} type="number" value={f.stockMax} onChange={e => setTableFilter('stockMax', e.target.value)} placeholder="Max" style={{ ...filterInputStyle, width: 40 }} />
+                              </div>
+                            </th>
+                            <th style={{ ...thStyle, width: 90 }} onClick={() => toggleTableSort('height')}>
+                              <span style={thTitleStyle}>Altura{arrow('height')}</span>
+                              <input onClick={e => e.stopPropagation()} value={f.altura} onChange={e => setTableFilter('altura', e.target.value)} placeholder="Buscar..." style={filterInputStyle} />
+                            </th>
+                            <th style={{ ...thStyle, width: 90 }} onClick={() => toggleTableSort('active')}>
+                              <span style={thTitleStyle}>Estado{arrow('active')}</span>
+                              <select onClick={e => e.stopPropagation()} value={f.estado} onChange={e => setTableFilter('estado', e.target.value)} style={filterInputStyle}>
+                                <option value="all">Todas</option>
+                                <option value="visible">Visible</option>
+                                <option value="oculta">Oculta</option>
+                              </select>
+                            </th>
+                            <th style={{ ...thStyle, width: 80 }} onClick={() => toggleTableSort('is_new')}>
+                              <span style={thTitleStyle}>Nueva{arrow('is_new')}</span>
+                              <select onClick={e => e.stopPropagation()} value={f.nueva} onChange={e => setTableFilter('nueva', e.target.value)} style={filterInputStyle}>
+                                <option value="all">Todas</option><option value="si">Sí</option><option value="no">No</option>
+                              </select>
+                            </th>
+                            <th style={{ ...thStyle, width: 90 }} onClick={() => toggleTableSort('on_sale')}>
+                              <span style={thTitleStyle}>Descuento{arrow('on_sale')}</span>
+                              <select onClick={e => e.stopPropagation()} value={f.descuento} onChange={e => setTableFilter('descuento', e.target.value)} style={filterInputStyle}>
+                                <option value="all">Todas</option><option value="si">Sí</option><option value="no">No</option>
+                              </select>
+                            </th>
+                            <th style={{ ...thStyle, width: 80 }} onClick={() => toggleTableSort('coming_soon')}>
+                              <span style={thTitleStyle}>Próx.{arrow('coming_soon')}</span>
+                              <select onClick={e => e.stopPropagation()} value={f.proximamente} onChange={e => setTableFilter('proximamente', e.target.value)} style={filterInputStyle}>
+                                <option value="all">Todas</option><option value="si">Sí</option><option value="no">No</option>
+                              </select>
+                            </th>
+                            <th style={{ ...thStyle, width: 80 }} onClick={() => toggleTableSort('flagged')}>
+                              <span style={thTitleStyle}>Revisar{arrow('flagged')}</span>
+                              <select onClick={e => e.stopPropagation()} value={f.revisar} onChange={e => setTableFilter('revisar', e.target.value)} style={filterInputStyle}>
+                                <option value="all">Todas</option><option value="si">Sí</option><option value="no">No</option>
+                              </select>
+                            </th>
+                            <th style={{ ...thStyle, width: 90 }} onClick={() => toggleTableSort('florecio')}>
+                              <span style={thTitleStyle}>Floreció{arrow('florecio')}</span>
+                              <select onClick={e => e.stopPropagation()} value={f.florecio} onChange={e => setTableFilter('florecio', e.target.value)} style={filterInputStyle}>
+                                <option value="all">Todas</option><option value="si">Sí</option><option value="no">No</option>
+                              </select>
+                            </th>
+                            <th style={{ ...thStyle, width: 80 }} onClick={() => toggleTableSort('vendido')}>
+                              <span style={thTitleStyle}>Vendió{arrow('vendido')}</span>
+                              <select onClick={e => e.stopPropagation()} value={f.vendido} onChange={e => setTableFilter('vendido', e.target.value)} style={filterInputStyle}>
+                                <option value="all">Todas</option><option value="si">Sí</option><option value="no">No</option>
+                              </select>
+                            </th>
+                            <th style={{ ...thStyle, width: 90 }} onClick={() => toggleTableSort('loteNumero')}>N° compra{arrow('loteNumero')}</th>
+                            <th style={{ ...thStyle, width: 100 }} onClick={() => toggleTableSort('fechaCompra')}>Fecha compra{arrow('fechaCompra')}</th>
+                            <th style={{ ...thStyle, width: 90 }} onClick={() => toggleTableSort('ventaNumero')}>N° venta{arrow('ventaNumero')}</th>
+                            <th style={{ ...thStyle, width: 100 }} onClick={() => toggleTableSort('fechaVenta')}>Fecha venta{arrow('fechaVenta')}</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {sortedRows.map(r => (
+                            <tr
+                              key={r.id}
+                              onClick={() => { setPhotoModalPlantId(r.id); setPhotoModalIndex(0); setPhotoModalSection('fotos') }}
+                              style={{ cursor: 'pointer' }}
+                            >
+                              <td style={tdStyle}>{r.image_url ? <img src={r.image_url} alt={r.name} style={{ width: 32, height: 32, objectFit: 'cover', borderRadius: 4 }} /> : '—'}</td>
+                              <td style={tdStyle}>{r.name}</td>
+                              <td style={tdStyle}>{r.categoriaEmoji} {r.categoria || '—'}</td>
+                              <td style={tdStyle}>{r.proveedor || '—'}</td>
+                              <td style={tdStyle}>{r.precioSugerido != null ? `$${r.precioSugerido.toFixed(2)}` : '—'}</td>
+                              <td style={tdStyle}>${r.price.toFixed(2)}</td>
+                              <td style={tdStyle}>{r.discountPercent > 0 ? `$${r.priceWithDiscount.toFixed(2)} (-${r.discountPercent}%)` : '—'}</td>
+                              <td style={tdStyle}>{r.stock}</td>
+                              <td style={tdStyle}>{r.height || '—'}</td>
+                              <td style={tdStyle}>{r.active ? 'Visible' : 'Oculta'}</td>
+                              <td style={tdStyle}>
+                                {r.is_new ? (
+                                  <button type="button" onClick={e => { e.stopPropagation(); toggleIsNew(r.id, true) }} style={{ background: 'none', border: '1px solid #ddd', borderRadius: 4, cursor: 'pointer', fontSize: 11, padding: '1px 5px' }}>✓ ✕</button>
+                                ) : ''}
+                              </td>
+                              <td style={tdStyle}>{r.on_sale ? '✓' : ''}</td>
+                              <td style={tdStyle}>
+                                {r.coming_soon ? (
+                                  <button type="button" onClick={e => { e.stopPropagation(); toggleComingSoon(r.id, true) }} style={{ background: 'none', border: '1px solid #ddd', borderRadius: 4, cursor: 'pointer', fontSize: 11, padding: '1px 5px' }}>✓ ✕</button>
+                                ) : ''}
+                              </td>
+                              <td style={tdStyle}>{r.flagged ? '🚩' : ''}</td>
+                              <td style={tdStyle}>{r.florecio ? '🌸' : ''}</td>
+                              <td style={tdStyle}>{r.vendido ? '🛒' : ''}</td>
+                              <td style={tdStyle}>{r.loteNumero ?? '—'}</td>
+                              <td style={tdStyle}>{r.fechaCompra ? new Date(r.fechaCompra).toLocaleDateString() : '—'}</td>
+                              <td style={tdStyle}>{r.ventaNumero ?? '—'}</td>
+                              <td style={tdStyle}>{r.fechaVenta ? new Date(r.fechaVenta).toLocaleDateString() : '—'}</td>
+                            </tr>
+                          ))}
+                          {sortedRows.length === 0 && (
+                            <tr><td colSpan={20} style={{ ...tdStyle, textAlign: 'center' }}>No hay plantas con esos filtros.</td></tr>
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </>
+                )
+              })()}
+
+              {!loading && view === 'ingresos' && (() => {
+                function compraCategoryId(c) {
+                  if (c.new_plant_category) return c.new_plant_category
+                  const plant = plants.find(p => p.id === c.plant_id)
+                  return plant ? plant.category_id : null
+                }
+
+                const filteredCompras = compras
+                  .filter(c => {
+                    const term = ingresosSearch.trim().toLowerCase()
+                    if (!term) return true
+                    return (c.proveedor || '').toLowerCase().includes(term) || compraNombre(c).toLowerCase().includes(term)
+                  })
+                  .filter(c => !ingresosDate || (c.created_at || '').slice(0, 10) === ingresosDate)
+                  .filter(c => ingresosCategoria === 'all' || compraCategoryId(c) === ingresosCategoria)
+                  .filter(c => ingresosStatus === 'all' || c.status === ingresosStatus)
+
+                const comprasByLote = {}
+                const comprasSinLote = []
+                filteredCompras.forEach(c => {
+                  if (c.lote_id) {
+                    if (!comprasByLote[c.lote_id]) comprasByLote[c.lote_id] = []
+                    comprasByLote[c.lote_id].push(c)
+                  } else {
+                    comprasSinLote.push(c)
+                  }
+                })
+                return (
+                  <>
+                    <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
+                      <button
+                        type="button"
+                        onClick={() => setIngresosSubTab('compras')}
+                        className={ingresosSubTab === 'compras' ? 'ingresos-tab active' : 'ingresos-tab'}
+                      >
+                        🌱 Plantas
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setIngresosSubTab('semillas')}
+                        className={ingresosSubTab === 'semillas' ? 'ingresos-tab active' : 'ingresos-tab'}
+                      >
+                        🌰 Semillas
+                      </button>
+                    </div>
+
+                    {ingresosSubTab === 'compras' && (
+                    <>
+                    {!loteBuilderOpen && (
+                      <>
+                        <div style={{ display: 'flex', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
+                          <button
+                            type="button"
+                            className="full-form-btn"
+                            onClick={() => { setLoteBuilderOpen(true); setLoteStep('header'); setLoteAddMode('choose') }}
+                            style={{ background: '#4a5d3a', color: '#fff', border: 'none', padding: '14px 22px', borderRadius: 8, fontSize: '1.05rem', fontWeight: 700, boxShadow: '0 3px 6px rgba(0,0,0,0.2)', flex: '1 1 auto' }}
+                          >
+                            🧺 Nueva compra
+                          </button>
+                          <label
+                            style={{ background: '#fff', color: '#4a5d3a', border: '1px solid #4a5d3a', padding: '14px 18px', borderRadius: 8, fontSize: '0.95rem', fontWeight: 600, cursor: scanningFactura ? 'wait' : 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flex: '1 1 auto', textAlign: 'center', boxSizing: 'border-box', opacity: scanningFactura ? 0.7 : 1 }}
+                          >
+                            {scanningFactura ? '⏳ Leyendo factura...' : '📷 Escanear Factura'}
+                            <input
+                              type="file"
+                              accept="image/*"
+                              onChange={handleScanFacturaFile}
+                              disabled={scanningFactura}
+                              style={{ display: 'none' }}
+                            />
+                          </label>
+                          <button
+                            type="button"
+                            onClick={() => setIngresosMenuOpen(!ingresosMenuOpen)}
+                            style={{ background: '#fff', color: '#4a5d3a', border: '1px solid #4a5d3a', padding: '14px 18px', borderRadius: 8, fontSize: '0.95rem', fontWeight: 600 }}
+                          >
+                            🔍 Buscar compra
+                          </button>
+                        </div>
+
+                        {ingresosMenuOpen && (
+                          <div className="admin-form" style={{ marginBottom: 10, padding: 14, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                            <input
+                              className="order-search"
+                              placeholder="Buscar por proveedor o planta..."
+                              value={ingresosSearch}
+                              onChange={e => setIngresosSearch(e.target.value)}
+                              style={{ width: '100%', boxSizing: 'border-box', padding: '10px', fontSize: '1rem', borderRadius: 6, border: '1px solid #ccc' }}
+                            />
+                            <div className="mov-filters" style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                              <input
+                                type="date"
+                                className="gallery-select"
+                                value={ingresosDate}
+                                onChange={e => setIngresosDate(e.target.value)}
+                                style={{ padding: '10px', borderRadius: 6, border: '1px solid #ccc' }}
+                              />
+                              <select className="gallery-select" value={ingresosCategoria} onChange={e => setIngresosCategoria(e.target.value)} style={{ padding: '10px', borderRadius: 6, border: '1px solid #ccc' }}>
+                                <option value="all">Todas las categorías</option>
+                                {categories.map(c => <option key={c.id} value={c.id}>{c.emoji} {c.name}</option>)}
+                              </select>
+                              <select className="gallery-select" value={ingresosStatus} onChange={e => setIngresosStatus(e.target.value)} style={{ padding: '10px', borderRadius: 6, border: '1px solid #ccc' }}>
+                                <option value="all">Todos los estados</option>
+                                <option value="pedido">Pedido</option>
+                                <option value="pagado">Pagado</option>
+                                <option value="recibido">Recibido</option>
+                              </select>
+                              {(ingresosSearch || ingresosDate || ingresosCategoria !== 'all' || ingresosStatus !== 'all') && (
+                                <button
+                                  type="button"
+                                  onClick={() => { setIngresosSearch(''); setIngresosDate(''); setIngresosCategoria('all'); setIngresosStatus('all') }}
+                                >
+                                  Limpiar filtros
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                      </>
+                    )}
+
+                    {/* ---------- PASO 1: Cabecera de la compra (Proveedor) ---------- */}
+                    {loteBuilderOpen && loteStep === 'header' && (
+                      <div className="admin-form" style={{ display: 'flex', flexDirection: 'column', gap: 10, padding: 14 }}>
+                        <div style={{ fontSize: '0.8rem', color: '#6b6b5f', marginBottom: -4, fontWeight: 600 }}>PASO 1 DE 2 · Datos de la compra</div>
+                        <h3 style={{ margin: '4px 0' }}>Nueva compra</h3>
+                        <input
+                          placeholder="Proveedor (opcional)"
+                          list="proveedores-list"
+                          value={loteProveedor}
+                          onChange={e => setLoteProveedor(e.target.value)}
+                          style={{ width: '100%', boxSizing: 'border-box', padding: '12px 10px', fontSize: '1rem', borderRadius: 6, border: '1px solid #ccc' }}
+                        />
+                        <datalist id="proveedores-list">
+                          {[...new Set(lotes.map(l => l.proveedor).filter(Boolean))].map(prov => (
+                            <option key={prov} value={prov} />
+                          ))}
+                        </datalist>
+
+                        <div className="admin-item-actions" style={{ flexDirection: 'column', gap: 8, marginTop: 6 }}>
+                          <button
+                            type="button"
+                            onClick={() => setLoteStep('products')}
+                            style={{ background: '#4a5d3a', color: '#fff', padding: '14px 16px', borderRadius: 8, border: 'none', fontSize: '1rem', fontWeight: 600, width: '100%' }}
+                          >
+                            Comenzar a agregar productos →
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => { setLoteBuilderOpen(false); setLoteLines([]); setLoteNota(''); setLoteProveedor(''); setLoteStep('header') }}
+                            style={{ background: '#fff', color: '#b03434', padding: '10px 16px', borderRadius: 6, border: '1px solid #b03434', width: '100%', boxSizing: 'border-box' }}
+                          >
+                            Cancelar
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* ---------- PASO 2: Agregar productos + resumen ---------- */}
+                    {loteBuilderOpen && loteStep === 'products' && (
+                      <div className="admin-form" style={{ padding: 14 }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 4, gap: 8 }}>
+                          <div style={{ fontSize: '0.8rem', color: '#6b6b5f', fontWeight: 600 }}>PASO 2 DE 2 · Agregar productos</div>
+                          <button
+                            type="button"
+                            onClick={() => setLoteStep('header')}
+                            style={{ fontSize: '0.75rem', background: 'none', border: 'none', color: '#4a5d3a', textDecoration: 'underline', cursor: 'pointer', whiteSpace: 'nowrap' }}
+                          >
+                            ✏️ Editar proveedor/nota
+                          </button>
+                        </div>
+                        <h3 style={{ margin: '4px 0 12px' }}>
+                          {loteProveedor ? `Compra a ${loteProveedor}` : 'Nueva compra'}
+                          {loteNota ? ` — ${loteNota}` : ''}
+                        </h3>
+
+                        {/* Agregar planta: primero la acción, sin ningún texto ni contador por encima */}
+                        {loteAddMode === 'choose' && (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 14 }}>
+                            <button
+                              type="button"
+                              onClick={() => setLoteAddMode('search')}
+                              style={{ background: '#4a5d3a', color: '#fff', padding: '16px 14px', borderRadius: 8, border: 'none', fontSize: '1rem', fontWeight: 600, textAlign: 'left', display: 'flex', alignItems: 'center', gap: 10 }}
+                            >
+                              🔍 Buscar planta existente en catálogo
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setLoteAddMode('new')}
+                              style={{ background: '#fff', color: '#4a5d3a', padding: '16px 14px', borderRadius: 8, border: '2px solid #4a5d3a', fontSize: '1rem', fontWeight: 600, textAlign: 'left', display: 'flex', alignItems: 'center', gap: 10 }}
+                            >
+                              🌱 Registrar planta nueva
+                            </button>
+                            <input
+                              ref={bulkLoteBuilderPhotoInputRef}
+                              type="file"
+                              accept="image/*"
+                              multiple
+                              style={{ display: 'none' }}
+                              onChange={e => { addBulkPhotosToLoteBuilder(e.target.files); e.target.value = '' }}
+                            />
+                            <button
+                              type="button"
+                              onClick={() => setBulkCategoryPickerFor('loteBuilder')}
+                              style={{ background: QUICK_FILTER_TONES.sage.bg, color: '#5B4636', padding: '16px 14px', borderRadius: 8, border: `2px dashed ${QUICK_FILTER_TONES.sage.border}`, fontSize: '1rem', fontWeight: 600, textAlign: 'left', display: 'flex', alignItems: 'center', gap: 10 }}
+                            >
+                              📸 Carga masiva de fotos
+                            </button>
+                          </div>
+                        )}
+
+                        {/* Al entrar a buscar o registrar, solo se ve el formulario correspondiente — sin encabezados de más */}
+
+                        {/* Paso B1: Buscar planta existente */}
+                        {loteAddMode === 'search' && !lineForm.plant_id && (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                            <button
+                              type="button"
+                              onClick={() => setLoteAddMode('choose')}
+                              style={{ background: '#fff', color: '#b03434', border: '1px solid #b03434', padding: '10px 14px', borderRadius: 6, fontSize: '0.9rem', fontWeight: 600, alignSelf: 'flex-start' }}
+                            >
+                              ← Cancelar / Volver a opciones
+                            </button>
+                            <select
+                              className="gallery-select"
+                              value={loteLinePlantCategory}
+                              onChange={e => setLoteLinePlantCategory(e.target.value)}
+                              style={{ fontSize: '1rem', width: '100%', boxSizing: 'border-box', padding: '10px', borderRadius: 6, border: '1px solid #ccc' }}
+                            >
+                              <option value="all">Todas las categorías</option>
+                              {categories.map(c => <option key={c.id} value={c.id}>{c.emoji} {c.name}</option>)}
+                            </select>
+                            <input
+                              className="order-search"
+                              placeholder="🔍 Buscar planta por nombre..."
+                              value={loteLinePlantSearch}
+                              onChange={e => setLoteLinePlantSearch(e.target.value)}
+                              style={{ fontSize: '1rem', padding: 10, width: '100%', boxSizing: 'border-box', borderRadius: 6, border: '1px solid #ccc' }}
+                            />
+                            {(loteLinePlantSearch.trim() || loteLinePlantCategory !== 'all') ? (
+                              <PlantPicker
+                                list={plants
+                                  .filter(p => loteLinePlantCategory === 'all' || p.category_id === loteLinePlantCategory)
+                                  .filter(p => p.name.toLowerCase().includes(loteLinePlantSearch.trim().toLowerCase()))}
+                                selectedId={lineForm.plant_id}
+                                onSelect={id => setLineForm({ ...lineForm, plant_id: id, new_plant_name: '', new_plant_category: '' })}
+                              />
+                            ) : (
+                              <p className="status-msg" style={{ margin: '4px 0' }}>Elige una categoría o escribe para buscar</p>
+                            )}
+                          </div>
+                        )}
+
+                        {/* Paso B2: formulario limpio para planta nueva */}
+                        {loteAddMode === 'new' && (
+                          <div style={{ background: '#f3ecdd', padding: 12, borderRadius: 8, marginTop: 4, border: '1px solid #d8cdb0', display: 'flex', flexDirection: 'column', gap: 8 }}>
+                            <strong>🌱 Registrando planta nueva</strong>
+                            <button
+                              type="button"
+                              onClick={() => { setLineForm({ plant_id: '', new_plant_name: '', new_plant_category: '', quantity: '', unit_cost: '', sale_price: '', file: null }); setLoteAddMode('choose') }}
+                              style={{ background: '#fff', color: '#b03434', border: '1px solid #b03434', padding: '10px 14px', borderRadius: 6, fontSize: '0.9rem', fontWeight: 600, alignSelf: 'flex-start' }}
+                            >
+                              ← Cancelar / Volver a opciones
+                            </button>
+                            <input placeholder="Nombre de la planta" value={lineForm.new_plant_name} onChange={e => setLineForm({ ...lineForm, plant_id: '', new_plant_name: e.target.value })} style={{ width: '100%', boxSizing: 'border-box', padding: 10, borderRadius: 6, border: '1px solid #ccc' }} />
+                            <select value={lineForm.new_plant_category} onChange={e => setLineForm({ ...lineForm, new_plant_category: e.target.value })} style={{ width: '100%', boxSizing: 'border-box', padding: 10, borderRadius: 6, border: '1px solid #ccc' }}>
+                              <option value="">Selecciona categoría (crea la categoría primero en Categorías si no existe)</option>
+                              {assignableCategories().map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                            </select>
+                           <div style={{ marginBottom: '10px' }}>
+  <label style={{ display: 'block', fontWeight: 'bold', fontSize: '13px', marginBottom: '4px' }}>
+    📷 Foto de la compra / etiqueta (Autocompletar)
+  </label>
+  <input 
+    type="file" 
+    accept="image/*"
+    disabled={isAnalyzingImage}
+    onChange={async (e) => {
+      const file = e.target.files[0];
+      if (file) {
+        setLineForm(prev => ({ ...prev, file }));
+        await handleAutoFillFromImage(file);
+      }
+    }} 
+  />
+
+  {isAnalyzingImage && (
+    <p style={{ color: '#2563eb', marginTop: '4px', fontSize: '13px', fontWeight: 'bold' }}>
+      🔍 Leyendo datos de la foto con IA...
+    </p>
+  )}
+</div>
+                            <input placeholder="Cantidad" type="number" value={lineForm.quantity} onChange={e => setLineForm({ ...lineForm, quantity: e.target.value })} style={{ width: '100%', boxSizing: 'border-box', padding: 10, borderRadius: 6, border: '1px solid #ccc' }} />
+                            <input placeholder="Precio de compra (por unidad)" type="number" step="0.01" value={lineForm.unit_cost} onChange={e => setLineForm({ ...lineForm, unit_cost: e.target.value })} style={{ width: '100%', boxSizing: 'border-box', padding: 10, borderRadius: 6, border: '1px solid #ccc' }} />
+                            <input placeholder="Precio de venta (opcional)" type="number" step="0.01" value={lineForm.sale_price} onChange={e => setLineForm({ ...lineForm, sale_price: e.target.value })} style={{ width: '100%', boxSizing: 'border-box', padding: 10, borderRadius: 6, border: '1px solid #ccc' }} />
+                            <button
+                              type="button"
+                              onClick={e => { if (addLineToLote(e)) { setLoteAddMode('choose'); setLoteLinePlantSearch(''); setLoteLinePlantCategory('all') } }}
+                              style={{ background: '#4a5d3a', color: '#fff', padding: '10px 16px', borderRadius: 6, border: 'none', marginTop: 4, width: '100%' }}
+                            >
+                              ➕ Agregar a la lista
+                            </button>
+                          </div>
+                        )}
+
+                        {/* Paso C: planta existente ya seleccionada — solo faltan cantidad/precios */}
+                        {loteAddMode === 'search' && lineForm.plant_id && (
+                          <div style={{ background: '#f3ecdd', padding: 12, borderRadius: 8, marginTop: 8, border: '1px solid #d8cdb0', display: 'flex', flexDirection: 'column', gap: 8 }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                              <strong>✓ {plants.find(p => p.id === lineForm.plant_id)?.name || ''}</strong>
+                              <button
+                                type="button"
+                                onClick={() => setLineForm({ ...lineForm, plant_id: '' })}
+                                style={{ fontSize: '0.75rem', background: 'none', border: 'none', color: '#4a5d3a', textDecoration: 'underline', cursor: 'pointer' }}
+                              >
+                                Cambiar selección
+                              </button>
+                            </div>
+                            <input placeholder="Cantidad" type="number" value={lineForm.quantity} onChange={e => setLineForm({ ...lineForm, quantity: e.target.value })} style={{ width: '100%', boxSizing: 'border-box', padding: 10, borderRadius: 6, border: '1px solid #ccc' }} />
+                            <input placeholder="Precio de compra (por unidad)" type="number" step="0.01" value={lineForm.unit_cost} onChange={e => setLineForm({ ...lineForm, unit_cost: e.target.value })} style={{ width: '100%', boxSizing: 'border-box', padding: 10, borderRadius: 6, border: '1px solid #ccc' }} />
+                            <input placeholder="Precio de venta (opcional)" type="number" step="0.01" value={lineForm.sale_price} onChange={e => setLineForm({ ...lineForm, sale_price: e.target.value })} style={{ width: '100%', boxSizing: 'border-box', padding: 10, borderRadius: 6, border: '1px solid #ccc' }} />
+                            <input type="file" accept="image/*" onChange={e => setLineForm({ ...lineForm, file: e.target.files[0] })} />
+                            <button
+                              type="button"
+                              onClick={e => { if (addLineToLote(e)) { setLoteAddMode('choose'); setLoteLinePlantSearch(''); setLoteLinePlantCategory('all') } }}
+                              style={{ background: '#4a5d3a', color: '#fff', padding: '10px 16px', borderRadius: 6, border: 'none', marginTop: 4, width: '100%' }}
+                            >
+                              ➕ Agregar a la lista
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => { setLineForm({ ...lineForm, plant_id: '' }); setLoteAddMode('choose') }}
+                              style={{ background: '#fff', color: '#b03434', border: '1px solid #b03434', padding: '10px 14px', borderRadius: 6, fontSize: '0.9rem', fontWeight: 600 }}
+                            >
+                              ← Cancelar / Volver a opciones
+                            </button>
+                          </div>
+                        )}
+
+                        {/* Resumen: aparece solo cuando ya hay productos, y siempre debajo de las acciones */}
+                        {loteLines.length > 0 && (
+                          <div style={{ marginTop: 18 }}>
+                            <h4 style={{ margin: '0 0 8px' }}>Productos agregados ({loteLines.length})</h4>
+                            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.9rem' }}>
+                              <thead>
+                                <tr style={{ borderBottom: '2px solid #4a5d3a' }}>
+                                  <th style={{ textAlign: 'left', padding: '6px 4px' }}>Nombre</th>
+                                  <th style={{ textAlign: 'center', padding: '6px 4px' }}>Cant.</th>
+                                  <th style={{ textAlign: 'right', padding: '6px 4px' }}>Total</th>
+                                  <th style={{ padding: '6px 4px' }}></th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {loteLines.map((line, i) => (
+                                  <tr key={i} style={{ borderBottom: '1px solid #ddd' }}>
+                                    <td style={{ padding: '6px 4px' }}>{line.plant_name}</td>
+                                    <td style={{ textAlign: 'center', padding: '6px 4px' }}>{line.quantity}</td>
+                                    <td style={{ textAlign: 'right', padding: '6px 4px' }}>${(Number(line.quantity || 0) * Number(line.unit_cost || 0)).toFixed(2)}</td>
+                                    <td style={{ textAlign: 'right', padding: '6px 4px' }}>
+                                      <button onClick={() => removeLoteLine(i)} className="danger" style={{ fontSize: '0.75rem' }}>Quitar</button>
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        )}
+
+                        {/* Guardar/Cancelar: solo visibles y activos si ya hay al menos un producto */}
+                        {loteLines.length > 0 && (
+                          <div className="admin-item-actions" style={{ marginTop: 12 }}>
+                            <button
+                              type="button"
+                              onClick={saveLote}
+                              disabled={savingLote}
+                              style={{ background: '#4a5d3a', color: '#fff', padding: '10px 16px', borderRadius: 6, border: 'none' }}
+                            >
+                              {savingLote ? 'Guardando...' : 'Guardar compra'}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => { setLoteBuilderOpen(false); setLoteLines([]); setLoteNota(''); setLoteProveedor(''); setLoteStep('header'); setLoteAddMode('choose') }}
+                              style={{ background: '#fff', color: '#b03434', padding: '10px 16px', borderRadius: 6, border: '1px solid #b03434' }}
+                            >
+                              Cancelar
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    <div className="admin-list">
+                      {lotes.length === 0 && comprasSinLote.length === 0 && <p className="status-msg">No hay ingresos registrados.</p>}
+                      {lotes.map(lote => {
+                        const lineas = comprasByLote[lote.id] || []
+                        if (lineas.length === 0) return null
+                        const { subtotal, extras, total: totalLote, lineas: lineasConProrrateo } = loteProration(lote, lineas)
+                        const editing = editingLoteId === lote.id
+                        const loteDraft = loteDrafts[lote.id] || {}
+                        return (
+                          <div key={lote.id} className="admin-item lote-group" style={{ width: '100%', maxWidth: '100%', minWidth: 0, overflow: 'hidden', boxSizing: 'border-box', background: statusPastelBg(lineas, 'recibido') }}>
+                            <div className="admin-item-info" style={{ width: '100%', maxWidth: '100%', minWidth: 0, boxSizing: 'border-box' }}>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                <strong>🧺 Compra #{lote.numero}{lote.nota ? ` — ${lote.nota}` : ''}</strong>
+                                <button type="button" onClick={() => editing ? finishEditingLote(lote, lineasConProrrateo) : setEditingLoteId(lote.id)}>
+                                  {editing ? '✅ Listo' : '✏️ Editar'}
+                                </button>
+                              </div>
+                              {editing ? (
+                                <label>Proveedor: <input value={loteDraft.proveedor ?? (lote.proveedor || '')} onChange={e => setLoteDraftField(lote.id, 'proveedor', e.target.value)} /></label>
+                              ) : (
+                                <span>Proveedor: {lote.proveedor || '—'}</span>
+                              )}
+                              {editing ? (
+                                <label>Fecha: <input type="date" value={loteDraft.fecha ?? dateToInputValue(lote.created_at)} onChange={e => setLoteDraftField(lote.id, 'fecha', e.target.value)} /></label>
+                              ) : (
+                                <span>Fecha: {new Date(lote.created_at).toLocaleDateString()}</span>
+                              )}
+
+                              <p style={{ fontSize: '0.7rem', color: '#8a8a7a', margin: '8px 0 2px', textAlign: 'center' }}>◀ Deslizá la tabla para ver más columnas ▶</p>
+                              <div style={{ width: '100%', maxWidth: '100%', minWidth: 0, overflowX: 'auto', WebkitOverflowScrolling: 'touch', touchAction: 'pan-x pan-y', marginTop: 2, borderRadius: 8, border: '1px solid #ddd', boxShadow: '0 1px 2px rgba(0,0,0,0.06)', boxSizing: 'border-box' }}>
+                                <table className="invoice-table" style={{ borderCollapse: 'collapse', width: '100%', minWidth: 380, fontSize: 11 }}>
+                                  <thead>
+                                    <tr style={{ background: '#f3ecdd' }}>
+                                      <th style={{ padding: '3px 2px', border: '1px solid #ddd', whiteSpace: 'nowrap' }}>Foto</th>
+                                      <th style={{ padding: '3px 2px', border: '1px solid #ddd', whiteSpace: 'normal', maxWidth: 60, wordBreak: 'break-word' }}>Nombre</th>
+                                      <th style={{ padding: '3px 2px', border: '1px solid #ddd', whiteSpace: 'nowrap' }}>Cant</th>
+                                      <th style={{ padding: '3px 2px', border: '1px solid #ddd', whiteSpace: 'nowrap' }}>P.Unit</th>
+                                      <th style={{ padding: '3px 2px', border: '1px solid #ddd', whiteSpace: 'nowrap' }}>P.Tot</th>
+                                      <th style={{ padding: '3px 2px', border: '1px solid #ddd', whiteSpace: 'nowrap' }}>Pror.</th>
+                                      <th style={{ padding: '3px 2px', border: '1px solid #ddd', whiteSpace: 'nowrap' }}>Total</th>
+                                      <th style={{ padding: '3px 2px', border: '1px solid #ddd', whiteSpace: 'nowrap' }}>Estado</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {lineasConProrrateo.map(c => {
+                                      const lineDraft = compraDrafts[c.id] || {}
+                                      return (
+                                      <tr key={c.id}>
+                                        <td style={{ padding: 2, border: '1px solid #ddd', textAlign: 'center', whiteSpace: 'nowrap' }}>
+                                          {c.image_url ? <img src={c.image_url} alt={compraNombre(c)} style={{ width: 22, height: 22, objectFit: 'cover', borderRadius: 3 }} /> : '—'}
+                                          {editing && (
+                                            <label className="file-label" style={{ display: 'block', marginTop: 1, fontSize: 8, background: 'transparent', color: 'inherit', border: '1px solid #ccc' }}>
+                                              📷
+                                              <input
+                                                type="file"
+                                                accept="image/*"
+                                                style={{ display: 'none' }}
+                                                onChange={async e => {
+                                                  const file = e.target.files[0]
+                                                  e.target.value = ''
+                                                  if (!file) return
+                                                  const url = await uploadImage(file)
+                                                  if (url) updateCompraField(c, 'image_url', url)
+                                                }}
+                                              />
+                                            </label>
+                                          )}
+                                        </td>
+                                        <td style={{ padding: 2, border: '1px solid #ddd', whiteSpace: 'normal', maxWidth: 60, wordBreak: 'break-word' }}>
+                                          {editing ? <input value={lineDraft.plant_name ?? compraNombre(c)} onChange={e => setLineDraft(c.id, 'plant_name', e.target.value)} style={{ width: 60, fontSize: 11 }} /> : compraNombre(c)}
+                                        </td>
+                                        <td style={{ padding: 2, border: '1px solid #ddd', textAlign: 'center', whiteSpace: 'nowrap' }}>
+                                          {editing ? <input type="number" value={lineDraft.quantity ?? c.quantity} onChange={e => setLineDraft(c.id, 'quantity', e.target.value)} style={{ width: 34, fontSize: 11 }} /> : c.quantity}
+                                        </td>
+                                        <td style={{ padding: 2, border: '1px solid #ddd', textAlign: 'right', whiteSpace: 'nowrap' }}>
+                                          {editing ? <input type="number" step="0.01" value={lineDraft.unit_cost ?? c.unit_cost} onChange={e => setLineDraft(c.id, 'unit_cost', e.target.value)} style={{ width: 48, fontSize: 11 }} /> : `$${Number(c.unit_cost).toFixed(2)}`}
+                                        </td>
+                                        <td style={{ padding: 2, border: '1px solid #ddd', textAlign: 'right', whiteSpace: 'nowrap' }}>${c._value.toFixed(2)}</td>
+                                        <td style={{ padding: 2, border: '1px solid #ddd', textAlign: 'right', whiteSpace: 'nowrap' }}>${c._prorated.toFixed(2)}</td>
+                                        <td style={{ padding: 2, border: '1px solid #ddd', textAlign: 'right', whiteSpace: 'nowrap' }}>${c._lineTotal.toFixed(2)}</td>
+                                        <td style={{ padding: 2, border: '1px solid #ddd', textAlign: 'center', whiteSpace: 'nowrap' }}>
+                                          <StatusChecklist
+                                            steps={[{ key: 'pedido', label: 'Pedido' }, { key: 'pagado', label: 'Pagado' }, { key: 'recibido', label: 'Recibido' }]}
+                                            currentStatus={c.status}
+                                            disabled={approvingIds.includes(c.id)}
+                                            onAdvance={key => key === 'pagado' ? markCompraPagada(c) : markCompraRecibida(c)}
+                                          />
+                                        </td>
+                                      </tr>
+                                      )
+                                    })}
+                                  </tbody>
+                                  <tfoot>
+                                    <tr><td colSpan={4} style={{ padding: '3px 2px', border: '1px solid #ddd', whiteSpace: 'nowrap' }}>Subtotal</td><td colSpan={4} style={{ padding: '3px 2px', border: '1px solid #ddd', textAlign: 'right', whiteSpace: 'nowrap' }}>${subtotal.toFixed(2)}</td></tr>
+                                    <tr><td colSpan={4} style={{ padding: '3px 2px', border: '1px solid #ddd', whiteSpace: 'nowrap' }}>Envío 1</td><td colSpan={4} style={{ padding: '3px 2px', border: '1px solid #ddd', textAlign: 'right', whiteSpace: 'nowrap' }}>{editing ? <input type="number" step="0.01" value={loteDraft.envio1 ?? (lote.envio1 || 0)} onChange={e => setLoteDraftField(lote.id, 'envio1', e.target.value)} style={{ width: 70, fontSize: 11 }} /> : `$${Number(lote.envio1 || 0).toFixed(2)}`}</td></tr>
+                                    <tr><td colSpan={4} style={{ padding: '3px 2px', border: '1px solid #ddd', whiteSpace: 'nowrap' }}>Envío 2</td><td colSpan={4} style={{ padding: '3px 2px', border: '1px solid #ddd', textAlign: 'right', whiteSpace: 'nowrap' }}>{editing ? <input type="number" step="0.01" value={loteDraft.envio2 ?? (lote.envio2 || 0)} onChange={e => setLoteDraftField(lote.id, 'envio2', e.target.value)} style={{ width: 70, fontSize: 11 }} /> : `$${Number(lote.envio2 || 0).toFixed(2)}`}</td></tr>
+                                    <tr><td colSpan={4} style={{ padding: '3px 2px', border: '1px solid #ddd', whiteSpace: 'nowrap' }}>Varios</td><td colSpan={4} style={{ padding: '3px 2px', border: '1px solid #ddd', textAlign: 'right', whiteSpace: 'nowrap' }}>{editing ? <input type="number" step="0.01" value={loteDraft.varios ?? (lote.varios || 0)} onChange={e => setLoteDraftField(lote.id, 'varios', e.target.value)} style={{ width: 70, fontSize: 11 }} /> : `$${Number(lote.varios || 0).toFixed(2)}`}</td></tr>
+                                    <tr style={{ background: '#f3ecdd' }}><td colSpan={4} style={{ padding: '3px 2px', border: '1px solid #ddd' }}><strong>Total</strong></td><td colSpan={4} style={{ padding: '3px 2px', border: '1px solid #ddd', textAlign: 'right' }}><strong>${totalLote.toFixed(2)}</strong></td></tr>
+                                  </tfoot>
+                                </table>
+                              </div>
+
+                              <div className="admin-item-actions" style={{ marginTop: 8 }}>
+                                {lineas.some(c => c.status === 'pedido') && (
+                                  <button onClick={() => markLotePagado(lote.id)} disabled={lineas.some(c => approvingIds.includes(c.id))}>
+                                    Marcar toda la compra como pagada
+                                  </button>
+                                )}
+                                {lineas.some(c => c.status === 'pagado') && (
+                                  <button onClick={() => markLoteRecibido(lote.id)} disabled={lineas.some(c => approvingIds.includes(c.id))}>
+                                    Marcar toda la compra como recibida
+                                  </button>
+                                )}
+                                <button onClick={() => openLoteNote(lote)}>
+                                  📝 {(lote.content_blocks && lote.content_blocks.length > 0) ? 'Editar nota de la compra' : 'Agregar nota de la compra'}
+                                </button>
+                                <button onClick={() => setAddToLoteId(addToLoteId === lote.id ? null : lote.id)}>
+                                  ➕ Agregar planta
+                                </button>
+                                <button onClick={() => deleteLote(lote.id)} className="danger">
+                                  🗑️ Eliminar compra
+                                </button>
+                              </div>
+                              {addToLoteId === lote.id && (
+                                <div className="admin-form" style={{ marginTop: 8 }}>
+                                  <h4>Agregar planta olvidada a esta compra</h4>
+                                  <select className="gallery-select" value={loteLinePlantCategory} onChange={e => setLoteLinePlantCategory(e.target.value)}>
+                                    <option value="all">Todas las categorías</option>
+                                    {categories.map(c => <option key={c.id} value={c.id}>{c.emoji} {c.name}</option>)}
+                                  </select>
+                                  <input
+                                    className="order-search"
+                                    placeholder="Buscar planta por nombre..."
+                                    value={loteLinePlantSearch}
+                                    onChange={e => setLoteLinePlantSearch(e.target.value)}
+                                  />
+                                  {(loteLinePlantSearch.trim() || loteLinePlantCategory !== 'all') ? (
+                                    <PlantPicker
+                                      list={plants
+                                        .filter(p => loteLinePlantCategory === 'all' || p.category_id === loteLinePlantCategory)
+                                        .filter(p => p.name.toLowerCase().includes(loteLinePlantSearch.trim().toLowerCase()))}
+                                      selectedId={addToLoteForm.plant_id}
+                                      onSelect={id => setAddToLoteForm({ ...addToLoteForm, plant_id: id, new_plant_name: '', new_plant_category: '' })}
+                                    />
+                                  ) : (
+                                    <p className="status-msg" style={{ margin: '4px 0' }}>
+                                      {addToLoteForm.plant_id ? `✓ ${plants.find(p => p.id === addToLoteForm.plant_id)?.name || ''}` : 'Elige una categoría o escribe para buscar'}
+                                    </p>
+                                  )}
+                                  <p style={{ margin: '4px 0', fontSize: '0.8rem', color: '#6b6b5f' }}>— o registra una planta nueva —</p>
+                                  <input placeholder="Nombre de planta nueva" value={addToLoteForm.new_plant_name} onChange={e => setAddToLoteForm({ ...addToLoteForm, plant_id: '', new_plant_name: e.target.value })} />
+                                  <select value={addToLoteForm.new_plant_category} onChange={e => setAddToLoteForm({ ...addToLoteForm, new_plant_category: e.target.value })}>
+                                    <option value="">Selecciona categoría</option>
+                                    {assignableCategories().map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                                  </select>
+                                  <input placeholder="Cantidad" type="number" value={addToLoteForm.quantity} onChange={e => setAddToLoteForm({ ...addToLoteForm, quantity: e.target.value })} />
+                                  <input placeholder="Precio de compra (opcional)" type="number" step="0.01" value={addToLoteForm.unit_cost} onChange={e => setAddToLoteForm({ ...addToLoteForm, unit_cost: e.target.value })} />
+                                  <input placeholder="Precio de venta (opcional)" type="number" step="0.01" value={addToLoteForm.sale_price} onChange={e => setAddToLoteForm({ ...addToLoteForm, sale_price: e.target.value })} />
+                                  <input type="file" accept="image/*" onChange={e => setAddToLoteForm({ ...addToLoteForm, file: e.target.files[0] })} />
+                                  <div className="admin-item-actions">
+                                    <button type="button" onClick={() => saveAddToLote(lote)} disabled={savingAddToLote}>
+                                      {savingAddToLote ? 'Guardando...' : 'Guardar planta'}
+                                    </button>
+                                    <button type="button" onClick={() => setAddToLoteId(null)}>Cancelar</button>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        )
+                      })}
+                      {comprasSinLote.map(c => (
+                        <div key={c.id} className="admin-item">
+                          {c.image_url ? <img src={c.image_url} alt={compraNombre(c)} /> : <div className="no-img-sm">Sin foto</div>}
+                          <div className="admin-item-info">
+                            <input
+                              key={`${c.id}-${compraNombre(c)}`}
+                              defaultValue={compraNombre(c)}
+                              onBlur={e => updateCompraField(c, 'plant_name', e.target.value)}
+                              style={{ fontWeight: 'bold', fontSize: '1rem', width: '100%', boxSizing: 'border-box' }}
+                            />
+                            <label>Procedencia: <input defaultValue={c.proveedor || ''} onBlur={e => updateCompraField(c, 'proveedor', e.target.value)} /></label>
+                            <span className={`order-badge order-${c.status}`}>{c.status}</span>
+                            <span>Pedido: {new Date(c.created_at).toLocaleDateString()}</span>
+                            {c.fecha_pago && <span>Pagado: {new Date(c.fecha_pago).toLocaleDateString()}</span>}
+                            {c.fecha_recibido && <span>Recibido: {new Date(c.fecha_recibido).toLocaleDateString()}</span>}
+                            <div className="admin-item-controls">
+                              <label>Cant.: <input type="number" defaultValue={c.quantity} onBlur={e => updateCompraField(c, 'quantity', e.target.value)} /></label>
+                              <label>Costo: $<input type="number" step="0.01" defaultValue={c.unit_cost} onBlur={e => updateCompraField(c, 'unit_cost', e.target.value)} /></label>
+                              <label>Venta: $<input type="number" step="0.01" defaultValue={c.sale_price ?? ''} onBlur={e => updateCompraField(c, 'sale_price', e.target.value)} /></label>
+                            </div>
+                            <span>Total compra: ${Number(c.total).toFixed(2)}</span>
+                            <div className="admin-item-actions">
+                              {c.status === 'pedido' && (
+                                <button onClick={() => markCompraPagada(c)} disabled={approvingIds.includes(c.id)}>
+                                  {approvingIds.includes(c.id) ? 'Procesando...' : 'Marcar como pagado'}
+                                </button>
+                              )}
+                              {c.status === 'pagado' && (
+                                <button onClick={() => markCompraRecibida(c)} disabled={approvingIds.includes(c.id)}>
+                                  {approvingIds.includes(c.id) ? 'Procesando...' : 'Marcar como recibido'}
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
+                    {loteNoteModalOpen && createPortal(
+                      <div className="admin-sheet-overlay" style={{ position: 'fixed', inset: 0, zIndex: 3000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <div className="free-note-modal" onClick={e => e.stopPropagation()}>
+                          <div className="free-note-modal-header">
+                            <h4>Nota de la compra #{lotes.find(l => l.id === currentNoteLoteId)?.numero || ''}</h4>
+                            <button
+                              type="button"
+                              className="modal-close-btn"
+                              onClick={() => {
+                                const hasUnsaved = loteNoteCurrentText.trim().length > 0
+                                if (hasUnsaved && !confirm('¿Cerrar sin guardar? Perderás lo que escribiste.')) return
+                                setLoteNoteModalOpen(false)
+                              }}
+                            >✕</button>
+                          </div>
+                          <div className="free-note-sheet">
+                            {loteNoteBlocks.map((b, i) => (
+                              <div key={i} className="note-sheet-block">
+                                {b.type === 'text' && <p>{b.content}</p>}
+                                {b.type === 'photo' && <img src={b.url || URL.createObjectURL(b.file)} alt="" className="note-sheet-photo" />}
+                                {b.type === 'video' && (
+                                  <video src={b.url || URL.createObjectURL(b.file)} controls className="note-video" />
+                                )}
+                              </div>
+                            ))}
+                            <textarea
+                              className="note-sheet-textarea"
+                              placeholder={loteNoteBlocks.length > 0 ? 'Sigue escribiendo...' : 'Escribe cómo fue esta compra...'}
+                              rows={loteNoteBlocks.length > 0 ? 2 : 4}
+                              value={loteNoteCurrentText}
+                              onChange={e => setLoteNoteCurrentText(e.target.value)}
+                              autoFocus
+                            />
+                            <div className="note-sheet-toolbar">
+                              <label className="icon-btn" title="Elegir foto de galería">
+                                🖼️
+                                <input
+                                  type="file"
+                                  accept="image/*"
+                                  style={{ display: 'none' }}
+                                  onChange={e => { insertPhotoBlockToLoteNote(e.target.files[0]); e.target.value = '' }}
+                                />
+                              </label>
+                              <label className="icon-btn" title="Tomar foto">
+                                📷
+                                <input
+                                  type="file"
+                                  accept="image/*"
+                                  capture="environment"
+                                  style={{ display: 'none' }}
+                                  onChange={e => { insertPhotoBlockToLoteNote(e.target.files[0]); e.target.value = '' }}
+                                />
+                              </label>
+                              <label className="icon-btn" title="Insertar video aquí">
+                                🎥
+                                <input
+                                  type="file"
+                                  accept="video/*"
+                                  style={{ display: 'none' }}
+                                  onChange={e => { insertVideoBlockToLoteNote(e.target.files[0]); e.target.value = '' }}
+                                />
+                              </label>
+                              {loteNoteBlocks.length > 0 && (
+                                <button type="button" className="icon-btn-text" onClick={removeLastLoteNoteBlock}>Deshacer</button>
+                              )}
+                              <button
+                                type="button"
+                                className="icon-btn"
+                                title="Compartir por WhatsApp"
+                                disabled={sharingNotes}
+                                onClick={() => shareLoteNote(lotes.find(l => l.id === currentNoteLoteId))}
+                              >
+                                📲
+                              </button>
+                              <button type="button" className="save-note-btn-inline" onClick={saveLoteNote} disabled={savingLoteNote}>
+                                {savingLoteNote ? 'Guardando...' : 'Guardar'}
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      </div>,
+                      document.body
+                    )}
+
+                    {facturaScanOpen && createPortal(
+                      <div className="admin-sheet-overlay" onClick={() => setFacturaScanOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 3000 }}>
+                        <div className="admin-sheet" onClick={e => e.stopPropagation()} style={{ maxWidth: 600 }}>
+                          <div className="admin-sheet-header">
+                            <button className="admin-sheet-back" onClick={() => setFacturaScanOpen(false)}>← Cancelar</button>
+                            <h2>📷 Revisar factura escaneada</h2>
+                          </div>
+                          <div className="admin-sheet-body" style={{ overflow: 'visible', maxHeight: 'none', height: 'auto' }}>
+                            <p style={{ fontSize: '0.8rem', color: '#8a8a7a', marginTop: 0 }}>
+                              Revisa y corrige los datos antes de guardar. Si un producto ya existe en tu catálogo con el mismo nombre, se vinculará automáticamente.
+                            </p>
+
+                            <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, marginBottom: 2 }}>Proveedor</label>
+                            <input
+                              value={facturaData.proveedor}
+                              onChange={e => updateFacturaField('proveedor', e.target.value)}
+                              style={{ width: '100%', boxSizing: 'border-box', padding: 10, borderRadius: 6, border: '1px solid #ccc', marginBottom: 10 }}
+                            />
+
+                            <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, marginBottom: 2 }}>Fecha de la compra</label>
+                            <input
+                              type="date"
+                              value={facturaData.fecha || ''}
+                              onChange={e => updateFacturaField('fecha', e.target.value)}
+                              style={{ width: '100%', boxSizing: 'border-box', padding: 10, borderRadius: 6, border: '1px solid #ccc', marginBottom: 14 }}
+                            />
+
+                            <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, marginBottom: 6 }}>Productos detectados</label>
+                            {facturaData.items.map((item, idx) => (
+                              <div key={idx} style={{ display: 'flex', gap: 6, marginBottom: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+                                <input
+                                  placeholder="Nombre del producto"
+                                  value={item.nombre}
+                                  onChange={e => updateFacturaItem(idx, 'nombre', e.target.value)}
+                                  style={{ flex: '2 1 140px', padding: 8, borderRadius: 6, border: '1px solid #ccc', boxSizing: 'border-box' }}
+                                />
+                                <input
+                                  type="number"
+                                  placeholder="Cant."
+                                  value={item.cantidad}
+                                  onChange={e => updateFacturaItem(idx, 'cantidad', e.target.value)}
+                                  style={{ flex: '1 1 60px', padding: 8, borderRadius: 6, border: '1px solid #ccc', boxSizing: 'border-box' }}
+                                />
+                                <input
+                                  type="number"
+                                  placeholder="P. Unit"
+                                  value={item.precio_unitario}
+                                  onChange={e => updateFacturaItem(idx, 'precio_unitario', e.target.value)}
+                                  style={{ flex: '1 1 70px', padding: 8, borderRadius: 6, border: '1px solid #ccc', boxSizing: 'border-box' }}
+                                />
+                                <button type="button" className="danger" onClick={() => removeFacturaItem(idx)}>🗑️</button>
+                              </div>
+                            ))}
+                            <button type="button" onClick={addFacturaItem} style={{ marginBottom: 14 }}>➕ Agregar producto</button>
+
+                            <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, marginBottom: 2 }}>Envío / delivery (opcional)</label>
+                            <input
+                              type="number"
+                              placeholder="0.00"
+                              value={facturaData.envio}
+                              onChange={e => updateFacturaField('envio', e.target.value)}
+                              style={{ width: '100%', boxSizing: 'border-box', padding: 10, borderRadius: 6, border: '1px solid #ccc', marginBottom: 10 }}
+                            />
+
+                            {(facturaData.subtotal || facturaData.total) && (
+                              <p style={{ fontSize: '0.8rem', color: '#8a8a7a' }}>
+                                Detectado en la factura — Subtotal: {facturaData.subtotal || '—'} · Total: {facturaData.total || '—'}
+                                {' '}(referencia; el total real de la compra en el panel se calcula por producto).
+                              </p>
+                            )}
+
+                            <div className="admin-item-actions" style={{ marginTop: 10 }}>
+                              <button type="button" onClick={saveFacturaCompra} disabled={savingFactura}>
+                                {savingFactura ? 'Guardando...' : 'Guardar compra'}
+                              </button>
+                              <button type="button" onClick={() => setFacturaScanOpen(false)}>Cancelar</button>
+                            </div>
+                          </div>
+                        </div>
+                      </div>,
+                      document.body
+                    )}
+                    </>
+                    )}
+
+                    {ingresosSubTab === 'semillas' && (
+                      <div className="seed-batches-tab">
+                        {!sbFormOpen ? (
+                          <button
+                            type="button"
+                            className="full-form-btn"
+                            onClick={() => { resetSbForm(); setSbFormOpen(true) }}
+                            style={{ background: '#4a5d3a', color: '#fff', border: 'none', padding: '14px 22px', borderRadius: 8, fontSize: '1.05rem', fontWeight: 700, boxShadow: '0 3px 6px rgba(0,0,0,0.2)', marginBottom: 14 }}
+                          >
+                            🌰 Nuevo ingreso de semillas
+                          </button>
+                        ) : (
+                          <div className="seed-form" style={{ marginBottom: 16 }}>
+                            <h4 style={{ margin: '0 0 4px', color: 'var(--sage-dark)' }}>🌰 Nuevo ingreso de semillas</h4>
+                            <select value={sbForm.origen} onChange={e => setSbForm({ ...sbForm, origen: e.target.value, plant_id: '' })}>
+                              <option value="cosecha">🌱 Cosecha de mi planta</option>
+                              <option value="compra">🛒 Compra a proveedor</option>
+                            </select>
+
+                            {sbForm.origen === 'cosecha' && (
+                              <select value={sbForm.plant_id} onChange={e => onSbFormPlantChange(e.target.value)}>
+                                <option value="">Elige la planta...</option>
+                                {plants.map(pl => (
+                                  <option key={pl.id} value={pl.id}>{pl.name}</option>
+                                ))}
+                              </select>
+                            )}
+
+                            {sbForm.origen === 'compra' && (
+                              <input
+                                placeholder="Proveedor"
+                                value={sbForm.proveedor}
+                                onChange={e => setSbForm({ ...sbForm, proveedor: e.target.value })}
+                              />
+                            )}
+
+                            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.85rem', color: 'var(--dark)' }}>
+                              <input
+                                type="checkbox"
+                                checked={sbForm.es_noid}
+                                onChange={e => setSbForm({ ...sbForm, es_noid: e.target.checked, category_id: e.target.checked ? '' : sbForm.category_id })}
+                              />
+                              No sé qué es todavía (NOID)
+                            </label>
+
+                            {!sbForm.es_noid && (
+                              <>
+                                <input
+                                  placeholder="Nombre (opcional por ahora)"
+                                  value={sbForm.nombre}
+                                  onChange={e => setSbForm({ ...sbForm, nombre: e.target.value })}
+                                />
+                                <select value={sbForm.category_id} onChange={e => setSbForm({ ...sbForm, category_id: e.target.value })} disabled={sbForm.origen === 'cosecha' && !!sbForm.plant_id}>
+                                  <option value="">Elige categoría...</option>
+                                  {categories.map(cat => (
+                                    <option key={cat.id} value={cat.id}>{cat.emoji} {cat.name}</option>
+                                  ))}
+                                </select>
+                              </>
+                            )}
+
+                            <input
+                              type="number"
+                              placeholder="Cantidad de semillas"
+                              value={sbForm.cantidad_semillas}
+                              onChange={e => setSbForm({ ...sbForm, cantidad_semillas: e.target.value })}
+                            />
+                            <label className="seed-form-field-label">
+                              Fecha
+                              <input
+                                type="date"
+                                value={sbForm.fecha || localDateISO()}
+                                onChange={e => setSbForm({ ...sbForm, fecha: e.target.value })}
+                              />
+                            </label>
+                            <input
+                              type="number"
+                              step="0.01"
+                              placeholder="Precio de venta (opcional, para vender las semillas)"
+                              value={sbForm.price}
+                              onChange={e => setSbForm({ ...sbForm, price: e.target.value })}
+                            />
+                            <div className="admin-item-actions">
+                              <button type="button" onClick={saveSeedBatch}>Guardar</button>
+                              <button type="button" onClick={() => setSbFormOpen(false)}>Cancelar</button>
+                            </div>
+                          </div>
+                        )}
+
+                        {seedBatches.length === 0 ? (
+                          <p className="status-msg">Todavía no has registrado ningún lote de semillas.</p>
+                        ) : (
+                          <div className="admin-list">
+                            {seedBatches.map(batch => {
+                              const categoria = categories.find(c => c.id === batch.category_id)
+                              const plantaOrigen = plants.find(p => p.id === batch.plant_id)
+                              const converting = sbConvertId === batch.id
+                              const editingBatch = editingSeedBatchId === batch.id
+                              return (
+                                <div key={batch.id} className="admin-item lote-group" style={{ width: '100%', maxWidth: '100%', minWidth: 0, overflow: 'hidden', boxSizing: 'border-box' }}>
+                                  <div className="admin-item-info" style={{ width: '100%', maxWidth: '100%', minWidth: 0, boxSizing: 'border-box' }}>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                      <strong>🌰 {batch.es_noid ? 'NOID' : (batch.nombre || 'Sin nombre')}{categoria ? ` · ${categoria.emoji} ${categoria.name}` : ''}</strong>
+                                      <button type="button" onClick={() => setEditingSeedBatchId(editingBatch ? null : batch.id)}>
+                                        {editingBatch ? '✅ Listo' : '✏️ Editar'}
+                                      </button>
+                                    </div>
+                                    {editingBatch ? (
+                                      <>
+                                        <label>Nombre: <input defaultValue={batch.nombre || ''} onBlur={e => updateSeedBatchField(batch.id, 'nombre', e.target.value)} /></label>
+                                        <label>
+                                          Categoría:{' '}
+                                          <select defaultValue={batch.category_id || ''} onChange={e => updateSeedBatchField(batch.id, 'category_id', e.target.value || null)}>
+                                            <option value="">Sin categoría</option>
+                                            {assignableCategories().map(cat => (
+                                              <option key={cat.id} value={cat.id}>{cat.emoji} {cat.name}</option>
+                                            ))}
+                                          </select>
+                                        </label>
+                                        <label>
+                                          NOID:{' '}
+                                          <input type="checkbox" defaultChecked={batch.es_noid} onChange={e => updateSeedBatchField(batch.id, 'es_noid', e.target.checked)} />
+                                        </label>
+                                        {batch.origen === 'compra' && (
+                                          <label>Proveedor: <input defaultValue={batch.proveedor || ''} onBlur={e => updateSeedBatchField(batch.id, 'proveedor', e.target.value)} /></label>
+                                        )}
+                                        <label>Fecha: <input type="date" defaultValue={batch.fecha} onChange={e => updateSeedBatchField(batch.id, 'fecha', e.target.value)} /></label>
+                                      </>
+                                    ) : (
+                                      <>
+                                        <span>{batch.origen === 'cosecha' ? `Cosecha de ${plantaOrigen?.name || 'planta'}` : `Compra${batch.proveedor ? ` a ${batch.proveedor}` : ''}`}</span>
+                                        <span>Fecha: {new Date(batch.fecha + 'T00:00:00').toLocaleDateString()}</span>
+                                      </>
+                                    )}
+
+                                    <p style={{ fontSize: '0.7rem', color: '#8a8a7a', margin: '8px 0 2px', textAlign: 'center' }}>◀ Deslizá la tabla para ver más columnas ▶</p>
+                                    <div style={{ width: '100%', maxWidth: '100%', minWidth: 0, overflowX: 'auto', WebkitOverflowScrolling: 'touch', touchAction: 'pan-x pan-y', marginTop: 2, borderRadius: 8, border: '1px solid #ddd', boxShadow: '0 1px 2px rgba(0,0,0,0.06)', boxSizing: 'border-box' }}>
+                                      <table className="invoice-table" style={{ borderCollapse: 'collapse', width: '100%', minWidth: 380, fontSize: 11 }}>
+                                        <thead>
+                                          <tr style={{ background: '#f3ecdd' }}>
+                                            <th style={{ padding: '3px 2px', border: '1px solid #ddd', whiteSpace: 'nowrap' }}>Semillas</th>
+                                            <th style={{ padding: '3px 2px', border: '1px solid #ddd', whiteSpace: 'nowrap' }}>Costo</th>
+                                            <th style={{ padding: '3px 2px', border: '1px solid #ddd', whiteSpace: 'nowrap' }}>Estado</th>
+                                          </tr>
+                                        </thead>
+                                        <tbody>
+                                          <tr>
+                                            <td style={{ padding: 2, border: '1px solid #ddd', textAlign: 'center', whiteSpace: 'nowrap' }}>{batch.cantidad_semillas}</td>
+                                            <td style={{ padding: 2, border: '1px solid #ddd', textAlign: 'center', whiteSpace: 'nowrap' }}>
+                                              <input type="number" step="0.01" defaultValue={batch.costo || 0} onBlur={e => updateSeedBatchField(batch.id, 'costo', Number(e.target.value) || 0)} style={{ width: 55, fontSize: 11 }} />
+                                            </td>
+                                            <td style={{ padding: 2, border: '1px solid #ddd', textAlign: 'center', whiteSpace: 'nowrap' }}>
+                                              <select defaultValue={batch.estado} onChange={e => updateSeedBatchField(batch.id, 'estado', e.target.value)} style={{ fontSize: 11 }}>
+                                                <option value="semillas">semillas</option>
+                                                <option value="sembrado">sembrado</option>
+                                                <option value="en_crecimiento">en crecimiento</option>
+                                                <option value="catalogado">catalogado</option>
+                                              </select>
+                                            </td>
+                                          </tr>
+                                        </tbody>
+                                        <tfoot>
+                                          <tr><td colSpan={1} style={{ padding: '3px 2px', border: '1px solid #ddd', whiteSpace: 'nowrap' }}>Subtotal</td><td colSpan={2} style={{ padding: '3px 2px', border: '1px solid #ddd', textAlign: 'right', whiteSpace: 'nowrap' }}>${Number(batch.costo || 0).toFixed(2)}</td></tr>
+                                          <tr><td colSpan={1} style={{ padding: '3px 2px', border: '1px solid #ddd', whiteSpace: 'nowrap' }}>Envío 1</td><td colSpan={2} style={{ padding: '3px 2px', border: '1px solid #ddd', textAlign: 'right', whiteSpace: 'nowrap' }}><input type="number" step="0.01" defaultValue={batch.envio1 || 0} onBlur={e => updateSeedBatchField(batch.id, 'envio1', Number(e.target.value) || 0)} style={{ width: 60, fontSize: 11 }} /></td></tr>
+                                          <tr><td colSpan={1} style={{ padding: '3px 2px', border: '1px solid #ddd', whiteSpace: 'nowrap' }}>Envío 2</td><td colSpan={2} style={{ padding: '3px 2px', border: '1px solid #ddd', textAlign: 'right', whiteSpace: 'nowrap' }}><input type="number" step="0.01" defaultValue={batch.envio2 || 0} onBlur={e => updateSeedBatchField(batch.id, 'envio2', Number(e.target.value) || 0)} style={{ width: 60, fontSize: 11 }} /></td></tr>
+                                          <tr><td colSpan={1} style={{ padding: '3px 2px', border: '1px solid #ddd', whiteSpace: 'nowrap' }}>Varios</td><td colSpan={2} style={{ padding: '3px 2px', border: '1px solid #ddd', textAlign: 'right', whiteSpace: 'nowrap' }}><input type="number" step="0.01" defaultValue={batch.varios || 0} onBlur={e => updateSeedBatchField(batch.id, 'varios', Number(e.target.value) || 0)} style={{ width: 60, fontSize: 11 }} /></td></tr>
+                                          <tr style={{ background: '#f3ecdd' }}><td colSpan={1} style={{ padding: '3px 2px', border: '1px solid #ddd' }}><strong>Total</strong></td><td colSpan={2} style={{ padding: '3px 2px', border: '1px solid #ddd', textAlign: 'right' }}><strong>${(Number(batch.costo || 0) + Number(batch.envio1 || 0) + Number(batch.envio2 || 0) + Number(batch.varios || 0)).toFixed(2)}</strong></td></tr>
+                                        </tfoot>
+                                      </table>
+                                    </div>
+
+                                    <div className="plant-quick-edit-prices" style={{ marginTop: 8 }}>
+                                      <label>Venta $<input type="number" step="0.01" defaultValue={batch.price || ''} onBlur={e => updateSeedBatchField(batch.id, 'price', Number(e.target.value) || null)} /></label>
+                                      <label>Stock semillas: <input type="number" defaultValue={batch.stock || 0} onBlur={e => updateSeedBatchField(batch.id, 'stock', Number(e.target.value) || 0)} /></label>
+                                    </div>
+
+                                    <div className="admin-item-actions" style={{ marginTop: 8 }}>
+                                      <button type="button" onClick={() => openSbNote(batch)}>
+                                        📝 {(batch.content_blocks && batch.content_blocks.length > 0) ? 'Editar notas' : 'Agregar notas'}
+                                      </button>
+                                      {batch.estado !== 'catalogado' && (
+                                        <button type="button" onClick={() => { if (converting) { setSbConvertId(null) } else { openConvertSeedBatch(batch) } }}>
+                                          🪴 Convertir en planta
+                                        </button>
+                                      )}
+                                      <button type="button" onClick={() => deleteSeedBatch(batch.id)} className="danger">
+                                        🗑️ Eliminar
+                                      </button>
+                                    </div>
+
+                                    {converting && (
+                                      <div className="seed-form" style={{ marginTop: 8 }}>
+                                        <h4 style={{ margin: '0 0 4px', color: 'var(--sage-dark)' }}>🪴 Convertir "{batch.es_noid ? 'NOID' : (batch.nombre || 'este lote')}" en planta</h4>
+                                        <input
+                                          placeholder="Nombre de la planta"
+                                          value={sbConvertForm.nombre}
+                                          onChange={e => setSbConvertForm({ ...sbConvertForm, nombre: e.target.value })}
+                                        />
+                                        <select value={sbConvertForm.category_id} onChange={e => setSbConvertForm({ ...sbConvertForm, category_id: e.target.value })}>
+                                          <option value="">Elige categoría...</option>
+                                          {assignableCategories().map(cat => (
+                                            <option key={cat.id} value={cat.id}>{cat.emoji} {cat.name}</option>
+                                          ))}
+                                        </select>
+                                        <input type="number" step="0.01" placeholder="Precio de venta" value={sbConvertForm.price} onChange={e => setSbConvertForm({ ...sbConvertForm, price: e.target.value })} />
+                                        <input type="number" placeholder="Cuántas plantas pasan a stock" value={sbConvertForm.stock} onChange={e => setSbConvertForm({ ...sbConvertForm, stock: e.target.value })} />
+                                        <div className="admin-item-actions">
+                                          <button type="button" onClick={() => confirmConvertSeedBatch(batch)}>Crear planta</button>
+                                          <button type="button" onClick={() => setSbConvertId(null)}>Cancelar</button>
+                                        </div>
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                              )
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {sbNoteModalOpen && createPortal(
+                      <div className="admin-sheet-overlay" style={{ position: 'fixed', inset: 0, zIndex: 3000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <div className="free-note-modal" onClick={e => e.stopPropagation()}>
+                          <div className="free-note-modal-header">
+                            <h4>Notas — {(() => { const b = seedBatches.find(x => x.id === currentNoteSeedBatchId); return b ? (b.es_noid ? 'NOID' : (b.nombre || 'lote de semillas')) : '' })()}</h4>
+                            <button
+                              type="button"
+                              className="modal-close-btn"
+                              onClick={() => {
+                                const hasUnsaved = sbNoteCurrentText.trim().length > 0
+                                if (hasUnsaved && !confirm('¿Cerrar sin guardar? Perderás lo que escribiste.')) return
+                                setSbNoteModalOpen(false)
+                              }}
+                            >✕</button>
+                          </div>
+                          <div className="free-note-sheet">
+                            {sbNoteBlocks.map((b, i) => (
+                              <div key={i} className="note-sheet-block">
+                                {b.type === 'text' && <p>{b.content}</p>}
+                                {b.type === 'photo' && <img src={b.url || URL.createObjectURL(b.file)} alt="" className="note-sheet-photo" />}
+                                {b.type === 'video' && (
+                                  <video src={b.url || URL.createObjectURL(b.file)} controls className="note-video" />
+                                )}
+                              </div>
+                            ))}
+                            <textarea
+                              className="note-sheet-textarea"
+                              placeholder={sbNoteBlocks.length > 0 ? 'Sigue escribiendo...' : 'Escribe el avance de hoy...'}
+                              rows={sbNoteBlocks.length > 0 ? 2 : 4}
+                              value={sbNoteCurrentText}
+                              onChange={e => setSbNoteCurrentText(e.target.value)}
+                              autoFocus
+                            />
+                            <div className="note-sheet-toolbar">
+                              <label className="icon-btn" title="Insertar foto aquí">
+                                📷
+                                <input
+                                  type="file"
+                                  accept="image/*"
+                                  style={{ display: 'none' }}
+                                  onChange={e => { insertPhotoBlockToSbNote(e.target.files[0]); e.target.value = '' }}
+                                />
+                              </label>
+                              <label className="icon-btn" title="Insertar video aquí">
+                                🎥
+                                <input
+                                  type="file"
+                                  accept="video/*"
+                                  style={{ display: 'none' }}
+                                  onChange={e => { insertVideoBlockToSbNote(e.target.files[0]); e.target.value = '' }}
+                                />
+                              </label>
+                              {sbNoteBlocks.length > 0 && (
+                                <button type="button" className="icon-btn-text" onClick={removeLastSbNoteBlock}>Deshacer</button>
+                              )}
+                              <button
+                                type="button"
+                                className="icon-btn"
+                                title="Compartir por WhatsApp"
+                                disabled={sharingNotes}
+                                onClick={() => shareSbNote(seedBatches.find(b => b.id === currentNoteSeedBatchId))}
+                              >
+                                📲
+                              </button>
+                              <button type="button" className="save-note-btn-inline" onClick={saveSbNote} disabled={savingSbNote}>
+                                {savingSbNote ? 'Guardando...' : 'Guardar'}
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      </div>,
+                      document.body
+                    )}
+                  </>
+                )
+              })()}
+
+            </div>
+          </div>
+      </div>
+
+      {/* ---------- HOJA IMPRIMIBLE DE ETIQUETAS (solo visible al imprimir) ---------- */}
+      <div className="print-labels-sheet">
+        <div className="label-grid">
+          {plants.filter(p => selectedLabels.has(p.id)).flatMap(p => {
+            const qty = Math.max(1, Number(labelQuantities[p.id]) || 1)
+            return Array.from({ length: qty }, (_, i) => (
+              <div
+                key={`${p.id}-${i}`}
+                className="label-card"
+                style={{ width: '50mm', height: '60mm', display: 'flex', flexDirection: 'column', overflow: 'hidden', border: '0.5pt solid #ccc', boxSizing: 'border-box' }}
+              >
+                <span
+                  className="label-name"
+                  style={{ background: '#1a2e4a', color: '#fff', fontWeight: 900, textAlign: 'center', padding: '2.5mm 1mm', fontSize: '14pt', lineHeight: 1.1, textTransform: 'uppercase', letterSpacing: '0.5px', textShadow: '1px 1px 0 rgba(0,0,0,0.4)' }}
+                >
+                  {p.name}
+                </span>
+                {p.image_url
+                  ? <img src={p.image_url} alt={p.name} className="label-photo" style={{ flex: 1, width: '100%', objectFit: 'cover' }} />
+                  : <div className="label-photo label-no-img" style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>Sin foto</div>}
+              </div>
+            ))
+          })}
+        </div>
+      </div>
+
+      {/* ---------- Cantidad de copias por etiqueta, antes de generar ---------- */}
+      {labelQtyModalOpen && createPortal(
+        <div
+          className="admin-sheet-overlay"
+          onClick={() => setLabelQtyModalOpen(false)}
+          style={{ position: 'fixed', inset: 0, zIndex: 3000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+        >
+          <div className="free-note-modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 420, width: '100%', maxHeight: '80vh', display: 'flex', flexDirection: 'column' }}>
+            <div className="free-note-modal-header">
+              <h4>¿Cuántas copias de cada una?</h4>
+              <button type="button" className="modal-close-btn" onClick={() => setLabelQtyModalOpen(false)}>✕</button>
+            </div>
+            <div style={{ overflowY: 'auto', padding: '4px 2px' }}>
+              {plants.filter(p => selectedLabels.has(p.id)).map(p => (
+                <div key={p.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, padding: '8px 4px', borderBottom: '1px solid #eee' }}>
+                  <span style={{ fontSize: 14 }}>{p.name}</span>
+                  <input
+                    type="number"
+                    min="1"
+                    value={labelQuantities[p.id] ?? 1}
+                    onChange={e => setLabelQuantities(prev => ({ ...prev, [p.id]: Math.max(1, Number(e.target.value) || 1) }))}
+                    style={{ width: 60, textAlign: 'center' }}
+                  />
+                </div>
+              ))}
+            </div>
+            <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+              <button type="button" onClick={() => setLabelQtyModalOpen(false)}>Cancelar</button>
+              <button
+                type="button"
+                className="save-note-btn-inline"
+                onClick={() => {
+                  setLabelQtyModalOpen(false)
+                  if (pendingLabelAction === 'print') printLabels()
+                  if (pendingLabelAction === 'pdf') downloadLabelsPDF(plants)
+                  if (pendingLabelAction === 'pptx') downloadLabelsPPTX(plants)
+                }}
+              >
+                Continuar
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {/* ---------- Modal de Notas (separadas de las plantas) ---------- */}
+      {categoryNoteModalOpen && createPortal(
+        <div className="admin-sheet-overlay" style={{ position: 'fixed', inset: 0, zIndex: 3000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div className="free-note-modal" onClick={e => e.stopPropagation()}>
+            <div className="free-note-modal-header">
+              <h4>{editingCategoryNoteId ? 'Editar nota' : 'Nueva nota'}</h4>
+              <button
+                type="button"
+                className="modal-close-btn"
+                onClick={() => {
+                  const hasUnsaved = categoryNoteCurrentText.trim().length > 0
+                  if (hasUnsaved && !confirm('¿Salir sin guardar el texto que estabas escribiendo?')) return
+                  setCategoryNoteModalOpen(false)
+                }}
+              >✕</button>
+            </div>
+            <select value={categoryNoteCategoryId} onChange={e => setCategoryNoteCategoryId(e.target.value)} style={{ marginBottom: 8 }}>
+              <option value="">📝 General (sin categoría)</option>
+              {categories.map(c => <option key={c.id} value={c.id}>{c.emoji} {c.name}</option>)}
+            </select>
+            {categoryNoteBlocks.map((b, i) => (
+              <div key={i}>
+                {b.type === 'text' && <p className="task-note">{b.content}</p>}
+                {b.type === 'photo' && <img src={b.file ? URL.createObjectURL(b.file) : b.url} alt="" className="note-block-photo" />}
+                {b.type === 'video' && <video src={b.file ? URL.createObjectURL(b.file) : b.url} controls className="note-video" />}
+              </div>
+            ))}
+            <textarea
+              placeholder={categoryNoteBlocks.length > 0 ? 'Sigue escribiendo...' : 'Escribe la nota...'}
+              rows={categoryNoteBlocks.length > 0 ? 2 : 4}
+              value={categoryNoteCurrentText}
+              onChange={e => setCategoryNoteCurrentText(e.target.value)}
+            />
+            <div className="note-sheet-toolbar">
+              <label className="icon-btn" title="Elegir foto de galería">
+                🖼️
+                <input type="file" accept="image/*" style={{ display: 'none' }} onChange={e => { insertPhotoBlockToCategoryNote(e.target.files[0]); e.target.value = '' }} />
+              </label>
+              <label className="icon-btn" title="Tomar foto">
+                📷
+                <input type="file" accept="image/*" capture="environment" style={{ display: 'none' }} onChange={e => { insertPhotoBlockToCategoryNote(e.target.files[0]); e.target.value = '' }} />
+              </label>
+              <label className="icon-btn" title="Insertar video aquí">
+                🎥
+                <input type="file" accept="video/*" style={{ display: 'none' }} onChange={e => { insertVideoBlockToCategoryNote(e.target.files[0]); e.target.value = '' }} />
+              </label>
+              {categoryNoteBlocks.length > 0 && (
+                <button type="button" onClick={removeLastCategoryNoteBlock}>↩️ Deshacer</button>
+              )}
+            </div>
+            <button type="button" className="save-note-btn-inline" onClick={saveCategoryNote} disabled={savingCategoryNote}>
+              {savingCategoryNote ? 'Guardando...' : 'Guardar'}
+            </button>
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {/* ---------- Selector de categoría previo a una carga masiva de fotos ---------- */}
+      {bulkCategoryPickerFor && createPortal(
+        <div
+          className="sub-sheet-overlay"
+          onClick={() => { setBulkCategoryPickerFor(null); setBulkCategorySearch('') }}
+          style={{ position: 'fixed', inset: 0, zIndex: 3000, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}
+        >
+          <div className="sub-sheet" onClick={e => e.stopPropagation()} style={{ width: '100%', maxWidth: 480 }}>
+            <div className="sub-sheet-handle" />
+            <h4 className="sub-sheet-title">¿Son de una categoría en particular?</h4>
+            <div className="sub-sheet-search">
+              <span>🔍</span>
+              <input
+                placeholder="Buscar categoría..."
+                value={bulkCategorySearch}
+                onChange={e => setBulkCategorySearch(e.target.value)}
+                autoFocus
+              />
+            </div>
+            <div className="sub-sheet-list">
+              <div className="sub-sheet-option" style={{ cursor: 'pointer' }} onClick={() => chooseBulkCategory(null)}>
+                🚩 Sin categoría (decidir después)
+              </div>
+              {assignableCategories()
+                .filter(c => c.name.toLowerCase().includes(bulkCategorySearch.trim().toLowerCase()))
+                .map(c => (
+                  <div key={c.id} className="sub-sheet-option" style={{ cursor: 'pointer' }} onClick={() => chooseBulkCategory(c.id)}>
+                    {c.emoji} {c.name}
+                  </div>
+                ))}
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+    </div>
+    </>
+  )
+}
+
+// Error Boundary: si algo falla durante el render (por ejemplo, algo que solo
+// ocurre en ciertos navegadores móviles), esto evita que toda la app quede en
+// blanco y en su lugar muestra el error real en pantalla para poder diagnosticarlo.
+class AdminErrorBoundary extends Component {
+  constructor(props) {
+    super(props)
+    this.state = { error: null, info: null }
+  }
+
+  static getDerivedStateFromError(error) {
+    return { error }
+  }
+
+  componentDidCatch(error, info) {
+    console.error('Error al renderizar Admin:', error, info)
+    this.setState({ info })
+  }
+
+  render() {
+    if (this.state.error) {
+      return (
+        <div style={{ padding: 20, fontFamily: 'sans-serif', maxWidth: 600, margin: '0 auto' }}>
+          <h2 style={{ color: '#b03434' }}>⚠️ Ocurrió un error al cargar el panel</h2>
+          <p style={{ fontSize: 14 }}>
+            Copiá este mensaje y compartilo para poder solucionarlo:
+          </p>
+          <pre style={{
+            background: '#f3ecdd',
+            padding: 12,
+            borderRadius: 8,
+            fontSize: 12,
+            whiteSpace: 'pre-wrap',
+            wordBreak: 'break-word',
+            border: '1px solid #d8cdb0',
+          }}>
+            {String(this.state.error && (this.state.error.stack || this.state.error.message || this.state.error))}
+          </pre>
+          <button
+            type="button"
+            onClick={() => this.setState({ error: null, info: null })}
+            style={{ marginTop: 12, background: '#4a5d3a', color: '#fff', border: 'none', padding: '10px 16px', borderRadius: 6, fontWeight: 600 }}
+          >
+            Reintentar
+          </button>
+        </div>
+      )
+    }
+    return this.props.children
+  }
+}
+
+export default function AdminWithErrorBoundary(props) {
+  return (
+    <AdminErrorBoundary>
+      <Admin {...props} />
+    </AdminErrorBoundary>
+  )
+}
