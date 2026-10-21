@@ -4418,34 +4418,29 @@ function Admin() {
 
       <div style={{ flex: 1, minWidth: 0, maxWidth: '100%', overflowX: 'clip' }}>
       <div className="admin-header" style={isWideScreen ? { flexWrap: 'nowrap', overflow: 'hidden', justifyContent: 'flex-start', textAlign: 'left' } : undefined}>
-        {isWideScreen ? (
-          <h1 style={{ textAlign: 'left', lineHeight: 1.2 }}>
-            <span style={{ display: 'block', fontSize: '1.8rem' }}>Diamantev</span>
-            <span style={{ display: 'block', fontSize: '0.95rem', fontWeight: 500, color: '#7a7060' }}>Panel de administrador</span>
-          </h1>
-        ) : (
-          <div style={{ flex: '0 0 100%', width: '100%' }}>
-            {/* Banner bajito con el botón de menú (☰) dentro, a la izquierda */}
-            <div
-              role="img"
-              aria-label="Diamantev — Diamantes verdes"
-              style={{ position: 'relative', width: '100%', aspectRatio: '1985 / 592', maxHeight: 170, backgroundColor: '#FBF3E6', backgroundImage: 'url(/banner-diamantev.jpg)', backgroundSize: 'cover', backgroundRepeat: 'no-repeat', backgroundPosition: 'center', borderRadius: 14, border: '1px solid #E8DFC8', overflow: 'hidden', boxSizing: 'border-box' }}
-            >
+        <div style={{ flex: isWideScreen ? '0 1 720px' : '0 0 100%', width: '100%', maxWidth: isWideScreen ? 720 : undefined }}>
+          {/* Banner con el botón de menú (☰) dentro, a la izquierda (solo en celular; en PC el menú ya está a un lado) */}
+          <div
+            role="img"
+            aria-label="Diamantev — Diamantes verdes"
+            style={{ position: 'relative', width: '100%', aspectRatio: '1985 / 493', backgroundColor: '#FBF3E6', backgroundImage: 'url(/banner-diamantev.jpg)', backgroundSize: 'cover', backgroundRepeat: 'no-repeat', backgroundPosition: 'center', borderRadius: 14, border: '1px solid #E8DFC8', overflow: 'hidden', boxSizing: 'border-box' }}
+          >
+            {!isWideScreen && (
               <button
                 type="button"
                 aria-label="Abrir menú"
                 onClick={() => setHomeMenuOpen(!homeMenuOpen)}
-                style={{ position: 'absolute', top: '50%', left: '2%', transform: 'translateY(-50%)', width: 36, height: 40, minHeight: 0, padding: 0, borderRadius: '50%', background: 'transparent', backgroundImage: 'none', border: 'none', boxShadow: 'none', color: '#6b5233', fontSize: 26, fontWeight: 700, lineHeight: 1, textShadow: '0 0 3px #fff, 0 0 6px #fff, 0 0 10px #fff', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
+                style={{ position: 'absolute', top: '41.6%', left: '2%', transform: 'translateY(-50%)', width: 36, height: 40, minHeight: 0, padding: 0, borderRadius: '50%', background: 'transparent', backgroundImage: 'none', border: 'none', boxShadow: 'none', color: '#6b5233', fontSize: 26, fontWeight: 700, lineHeight: 1, textShadow: '0 0 3px #fff, 0 0 6px #fff, 0 0 10px #fff', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
               >
                 ☰
               </button>
-            </div>
-            {/* Franja blanca entre dos líneas */}
-            <div style={{ marginTop: 8, background: '#fff', borderTop: '1px solid #C8B58A', borderBottom: '1px solid #C8B58A', padding: '6px 0', textAlign: 'center', fontSize: '0.95rem', fontWeight: 600, letterSpacing: '0.04em', color: '#5a5040' }}>
-              Panel de administrador
-            </div>
+            )}
           </div>
-        )}
+          {/* Franja blanca entre dos líneas */}
+          <div style={{ marginTop: 8, background: '#fff', borderTop: '1px solid #C8B58A', borderBottom: '1px solid #C8B58A', padding: '6px 0', textAlign: 'center', fontSize: '0.95rem', fontWeight: 600, letterSpacing: '0.04em', color: '#5a5040' }}>
+            Panel de administrador
+          </div>
+        </div>
         {!isWideScreen && (
           <>
             <button
