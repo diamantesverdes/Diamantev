@@ -4430,9 +4430,12 @@ function Admin() {
                 type="button"
                 aria-label="Abrir menú"
                 onClick={() => setHomeMenuOpen(!homeMenuOpen)}
-                style={{ position: 'absolute', top: '50.9%', left: '2%', transform: 'translateY(-50%)', width: 36, height: 40, minHeight: 0, padding: 0, borderRadius: '50%', background: 'transparent', backgroundImage: 'none', border: 'none', boxShadow: 'none', color: '#6b5233', fontSize: 26, fontWeight: 700, lineHeight: 1, textShadow: '0 0 3px #fff, 0 0 6px #fff, 0 0 10px #fff', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
+                style={{ position: 'absolute', top: '57%', left: '10.5%', transform: 'translateY(-50%)', width: 36, height: 36, minHeight: 0, padding: 0, borderRadius: 8, background: 'transparent', backgroundImage: 'none', border: 'none', boxShadow: 'none', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 5, cursor: 'pointer' }}
               >
-                ☰
+                {/* Tres rayas dibujadas con CSS: quedan exactamente centradas */}
+                {[0, 1, 2].map(i => (
+                  <span key={i} style={{ display: 'block', width: 24, height: 3, borderRadius: 2, background: '#6b5233', boxShadow: '0 0 3px rgba(255,255,255,0.9)' }} />
+                ))}
               </button>
             )}
           </div>
