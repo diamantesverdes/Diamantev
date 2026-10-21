@@ -4429,13 +4429,13 @@ function Admin() {
             <div
               role="img"
               aria-label="Diamantev — Diamantes verdes"
-              style={{ position: 'relative', width: '100%', height: 'clamp(100px, 34vw, 150px)', backgroundColor: '#f9f8f1', backgroundImage: 'url(/banner-diamantev.jpg)', backgroundSize: 'contain', backgroundRepeat: 'no-repeat', backgroundPosition: 'calc(50% + 30px) center', borderRadius: 14, border: '1px solid #E8DFC8', boxShadow: '0 2px 8px rgba(0,0,0,0.08)', overflow: 'hidden', boxSizing: 'border-box' }}
+              style={{ position: 'relative', width: '100%', height: 'clamp(88px, 27vw, 130px)', backgroundColor: '#f9f8f1', backgroundImage: 'url(/banner-diamantev.jpg)', backgroundSize: 'contain', backgroundRepeat: 'no-repeat', backgroundPosition: 'center', borderRadius: 14, border: '1px solid #E8DFC8', overflow: 'hidden', boxSizing: 'border-box' }}
             >
               <button
                 type="button"
                 aria-label="Abrir menú"
                 onClick={() => setHomeMenuOpen(!homeMenuOpen)}
-                style={{ position: 'absolute', top: 8, left: 8, width: 40, height: 40, minHeight: 0, padding: 0, borderRadius: '50%', background: 'rgba(255,255,255,0.88)', backgroundImage: 'none', border: '1px solid #C8B58A', boxShadow: 'none', color: '#4a3a2a', fontSize: 20, lineHeight: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
+                style={{ position: 'absolute', top: '50%', left: 6, transform: 'translateY(-50%)', width: 44, height: 44, minHeight: 0, padding: 0, borderRadius: '50%', background: 'transparent', backgroundImage: 'none', border: 'none', boxShadow: 'none', color: '#8a6d4b', fontSize: 28, lineHeight: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
               >
                 ☰
               </button>
