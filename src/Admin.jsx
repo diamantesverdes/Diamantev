@@ -4435,7 +4435,7 @@ function Admin() {
                 type="button"
                 aria-label="Abrir menú"
                 onClick={() => setHomeMenuOpen(!homeMenuOpen)}
-                style={{ position: 'absolute', top: '50%', left: 6, transform: 'translateY(-50%)', width: 44, height: 44, minHeight: 0, padding: 0, borderRadius: '50%', background: 'transparent', backgroundImage: 'none', border: 'none', boxShadow: 'none', color: '#6b5233', fontSize: 28, fontWeight: 700, lineHeight: 1, textShadow: '0 0 3px #fff, 0 0 6px #fff, 0 0 10px #fff', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
+                style={{ position: 'absolute', top: '50%', left: '12.8%', transform: 'translateY(-50%)', width: 36, height: 40, minHeight: 0, padding: 0, borderRadius: '50%', background: 'transparent', backgroundImage: 'none', border: 'none', boxShadow: 'none', color: '#6b5233', fontSize: 26, fontWeight: 700, lineHeight: 1, textShadow: '0 0 3px #fff, 0 0 6px #fff, 0 0 10px #fff', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
               >
                 ☰
               </button>
