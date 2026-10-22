@@ -4822,7 +4822,7 @@ function Admin() {
                     const activeChips = []
                     if (galleryFilter !== 'all') {
                       const cat = categories.find(c => c.id === galleryFilter)
-                      activeChips.push({ key: 'cat', label: cat ? `${cat.emoji} ${cat.name}` : 'Categoría', onRemove: () => setGalleryFilter('all') })
+                      activeChips.push({ key: 'cat', label: cat ? `Categoría: ${cat.emoji} ${cat.name}` : 'Categoría', onRemove: () => setGalleryFilter('all') })
                     }
                     if (galleryProveedor !== 'all') {
                       activeChips.push({ key: 'prov', label: galleryProveedor === '__none__' ? 'Sin proveedor' : `🚚 ${galleryProveedor}`, onRemove: () => setGalleryProveedor('all') })
@@ -4978,18 +4978,6 @@ function Admin() {
                               </button>
                             )}
                           </div>
-                          <button type="button" onClick={() => setVerMenuOpen(o => !o)}
-                            style={{
-                              display: 'flex', alignItems: 'center', gap: 6,
-                              background: verActivo ? QUICK_FILTER_TONES.cream.active : QUICK_FILTER_TONES.cream.bg,
-                              border: `2px solid ${QUICK_FILTER_TONES.cream.border}`, borderRadius: 18,
-                              padding: '9px 14px', fontWeight: verActivo ? 700 : 600,
-                              color: '#5B4636', fontSize: 13.5, cursor: 'pointer', whiteSpace: 'nowrap',
-                            }}>
-                            <span style={{ fontSize: 16 }}>👁️</span>
-                            Ver
-                            <span style={{ fontSize: 11, opacity: 0.6 }}>⌄</span>
-                          </button>
                           <button
                             type="button"
                             className={activeChips.length > 0 ? 'filter-trigger-btn has-filters' : 'filter-trigger-btn'}
@@ -4998,6 +4986,38 @@ function Admin() {
                             🎛️ Filtros{activeChips.length > 0 ? ` (${activeChips.length})` : ''}
                           </button>
                         </div>
+
+
+                        {(() => {
+                          const selCat = categories.find(x => x.id === galleryFilter)
+                          const selParentId = selCat ? (selCat.parent_id || selCat.id) : null
+                          const pillStyle = active => ({
+                            flex: '0 0 auto', display: 'flex', alignItems: 'center', gap: 5, whiteSpace: 'nowrap', cursor: 'pointer',
+                            background: active ? QUICK_FILTER_TONES.cream.active : QUICK_FILTER_TONES.cream.bg,
+                            border: `2px solid ${QUICK_FILTER_TONES.cream.border}`, borderRadius: 18,
+                            padding: '6px 12px', fontSize: 13, fontWeight: active ? 700 : 600, color: '#5B4636',
+                            boxShadow: 'none', minHeight: 0, lineHeight: 1.2,
+                          })
+                          return (
+                            <div style={{ display: 'flex', gap: 6, overflowX: 'auto', WebkitOverflowScrolling: 'touch', scrollbarWidth: 'none', paddingTop: 6, paddingBottom: 2 }}>
+                              <button type="button" onClick={() => openSelector('categoria')} aria-label="Elegir categoría" style={pillStyle(!!(selCat && selCat.parent_id))}>
+                                🏷️ {selCat && selCat.parent_id ? `${selCat.emoji} ${selCat.name}` : 'Categorías'}
+                                <span style={{ fontSize: 11, opacity: 0.6 }}>⌄</span>
+                              </button>
+                              <button type="button" onClick={() => setGalleryFilter('all')} style={pillStyle(galleryFilter === 'all')}>Todas</button>
+                              {categories.filter(c => !c.parent_id).map(c => (
+                                <button
+                                  key={c.id}
+                                  type="button"
+                                  onClick={() => setGalleryFilter(galleryFilter === c.id ? 'all' : c.id)}
+                                  style={pillStyle(selParentId === c.id)}
+                                >
+                                  {c.emoji} {c.name}
+                                </button>
+                              ))}
+                            </div>
+                          )
+                        })()}
 
                         {/* ---------- Barra fija: conmutador de modo + acciones ---------- */}
                         <style>{`
@@ -5038,45 +5058,6 @@ function Admin() {
                             </div>
                           )}
                         </div>
-
-                        {verMenuOpen && (
-                          <div className="pill-row" style={{ display: 'flex', flexWrap: 'wrap', gap: 8, margin: '8px 0' }}>
-                            <button type="button" onClick={() => openSelector('categoria')}
-                              style={{
-                                display: 'flex', alignItems: 'center', gap: 6,
-                                background: galleryFilter !== 'all' ? QUICK_FILTER_TONES.cream.active : QUICK_FILTER_TONES.cream.bg,
-                                border: `2px solid ${QUICK_FILTER_TONES.cream.border}`, borderRadius: 18,
-                                padding: '9px 14px', fontWeight: galleryFilter !== 'all' ? 700 : 600,
-                                color: '#5B4636', fontSize: 13.5, cursor: 'pointer', whiteSpace: 'nowrap',
-                              }}>
-                              <span style={{ fontSize: 16 }}>🏷️</span>
-                              {galleryFilter === 'all' ? 'Categoría: Todas' : (() => { const c = categories.find(x => x.id === galleryFilter); return c ? `${c.emoji} ${c.name}` : 'Categoría' })()}
-                              <span style={{ fontSize: 11, opacity: 0.6 }}>⌄</span>
-                            </button>
-                            <QuickFilterButton
-                              icon="📦" label="Compra" tone="sage"
-                              value={galleryCompraStatus}
-                              onChange={v => setGalleryCompraStatus(v)}
-                              options={[
-                                { value: 'all', label: 'Todos' },
-                                { value: 'pedido', label: 'Pedido', shortLabel: 'Pedido' },
-                                { value: 'pagado', label: 'Pagado', shortLabel: 'Pagado' },
-                                { value: 'recibido', label: 'Recibido', shortLabel: 'Recibido' },
-                              ]}
-                            />
-                            <QuickFilterButton
-                              icon="🛒" label="Venta" tone="rose"
-                              value={galleryVentaStatus}
-                              onChange={v => setGalleryVentaStatus(v)}
-                              options={[
-                                { value: 'all', label: 'Todos' },
-                                { value: 'pedido', label: 'Pedido', shortLabel: 'Pedido' },
-                                { value: 'pagado', label: 'Pagado', shortLabel: 'Pagado' },
-                                { value: 'entregado', label: 'Entregado', shortLabel: 'Entregado' },
-                              ]}
-                            />
-                          </div>
-                        )}
 
                         {activeChips.length > 0 && (
                           <div className="filter-chips-row">
@@ -5158,8 +5139,8 @@ function Admin() {
                               </div>
 
                               <div className="filter-sheet-body">
-                                <div className="attr-panel">
-                                  <h4 className="attr-title">Atributos rápidos</h4>
+                                <details className="attr-panel" open>
+                                  <summary className="attr-title" style={{ cursor: 'pointer' }}>Atributos rápidos</summary>
                                   <div className="attr-row">
                                     {triPill('📦', 'Stock', 'hasStock', 'noStock', 'Con stock', 'Sin stock')}
                                     {triPill('📷', 'Foto', 'hasPhoto', 'noPhoto', 'Con foto', 'Sin foto')}
@@ -5193,10 +5174,10 @@ function Admin() {
                                     {smallPill('🚩', 'Para revisar', 'flagged')}
                                     {smallPill('🟢', 'Marcadas para cliente', 'marcadoCliente')}
                                   </div>
-                                </div>
+                                </details>
 
-                                <div className="attr-panel">
-                                  <h4 className="attr-title">🎨 Color</h4>
+                                <details className="attr-panel">
+                                  <summary className="attr-title" style={{ cursor: 'pointer' }}>🎨 Color y orden</summary>
                                   <div className="attr-row">
                                     {PLANT_COLORS.filter(c => colorCounts[c.name] || galleryColorFilter === c.name).map(c => {
                                       const on = galleryColorFilter === c.name
@@ -5239,10 +5220,10 @@ function Admin() {
                                   <p style={{ fontSize: 12, color: '#8a7a5c', margin: '6px 2px 0' }}>
                                     Si alguna sale mal, toca el 🎨 de su tarjeta para corregirla. Las que corrijas a mano no se vuelven a cambiar.
                                   </p>
-                                </div>
+                                </details>
 
-                                <div className="attr-panel">
-                                  <h4 className="attr-title">Más filtros</h4>
+                                <details className="attr-panel" open={galleryLabelStatus !== 'all' || galleryProveedor !== 'all' || galleryLoteNumero !== 'all' || galleryVentaLoteNumero !== 'all' || galleryCompraStatus !== 'all' || galleryVentaStatus !== 'all'}>
+                                  <summary className="attr-title" style={{ cursor: 'pointer' }}>Más filtros</summary>
                                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
                                   <QuickFilterButton
                                     icon="🏷️" label="Etiquetas" tone="cream"
@@ -5255,6 +5236,28 @@ function Admin() {
                                       { value: 'colocada', label: '✅ Todo colocado', shortLabel: 'Colocado' },
                                     ]}
                                   />
+                              <QuickFilterButton
+                                icon="📦" label="Compra" tone="sage"
+                                value={galleryCompraStatus}
+                                onChange={v => setGalleryCompraStatus(v)}
+                                options={[
+                                  { value: 'all', label: 'Todos' },
+                                  { value: 'pedido', label: 'Pedido', shortLabel: 'Pedido' },
+                                  { value: 'pagado', label: 'Pagado', shortLabel: 'Pagado' },
+                                  { value: 'recibido', label: 'Recibido', shortLabel: 'Recibido' },
+                                ]}
+                              />
+                              <QuickFilterButton
+                                icon="🛒" label="Venta" tone="rose"
+                                value={galleryVentaStatus}
+                                onChange={v => setGalleryVentaStatus(v)}
+                                options={[
+                                  { value: 'all', label: 'Todos' },
+                                  { value: 'pedido', label: 'Pedido', shortLabel: 'Pedido' },
+                                  { value: 'pagado', label: 'Pagado', shortLabel: 'Pagado' },
+                                  { value: 'entregado', label: 'Entregado', shortLabel: 'Entregado' },
+                                ]}
+                              />
                                   <button type="button" onClick={() => openSelector('proveedor')}
                                     style={{
                                       display: 'flex', alignItems: 'center', gap: 6,
@@ -5292,7 +5295,7 @@ function Admin() {
                                     <span style={{ fontSize: 11, opacity: 0.6 }}>⌄</span>
                                   </button>
                                 </div>
-                                </div>
+                                </details>
                                 </div>
 
 
@@ -6890,11 +6893,11 @@ function Admin() {
                                 </div>
                               </div>
                             ) : (
-                              <div style={{ display: 'flex', gap: 8, marginTop: 8, position: 'relative' }}>
+                              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8, position: 'relative', alignItems: 'center' }}>
                                 <button
                                   type="button"
                                   onClick={() => setAddToVentaLoteId(lote.id)}
-                                  style={{ flex: '1 1 auto', boxSizing: 'border-box' }}
+                                  style={{ padding: '6px 10px', fontSize: '0.8rem', minHeight: 0, lineHeight: 1.2, borderRadius: 8, boxShadow: 'none', whiteSpace: 'nowrap', flex: '0 0 auto', boxSizing: 'border-box' }}
                                 >
                                   ➕ Agregar planta
                                 </button>
@@ -6903,7 +6906,7 @@ function Admin() {
                                   onClick={() => deleteVentaLote(lote.id)}
                                   className="danger"
                                   aria-label="Eliminar venta"
-                                  style={{ flex: '0 0 auto' }}
+                                  style={{ padding: '6px 10px', fontSize: '0.8rem', minHeight: 0, lineHeight: 1.2, borderRadius: 8, boxShadow: 'none', whiteSpace: 'nowrap', flex: '0 0 auto', boxSizing: 'border-box' }}
                                 >
                                   🗑️ Eliminar
                                 </button>
@@ -6912,7 +6915,7 @@ function Admin() {
                                     type="button"
                                     onClick={() => cancelVentaLote(lote.id)}
                                     aria-label="Cancelar venta"
-                                    style={{ flex: '0 0 auto', background: '#fff', color: '#b03434', border: '1px solid #b03434' }}
+                                    style={{ ...({ padding: '6px 10px', fontSize: '0.8rem', minHeight: 0, lineHeight: 1.2, borderRadius: 8, boxShadow: 'none', whiteSpace: 'nowrap', flex: '0 0 auto', boxSizing: 'border-box' }), background: '#fff', color: '#b03434', border: '1px solid #b03434' }}
                                   >
                                     ❌ Cancelar
                                   </button>
@@ -6922,15 +6925,16 @@ function Admin() {
                                     type="button"
                                     onClick={() => setShareVentaMenuId(shareVentaMenuId === lote.id ? null : lote.id)}
                                     aria-label="Compartir factura"
-                                    style={{ background: '#fff', color: '#4a5d3a', border: '1px solid #4a5d3a', padding: '10px 14px', borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                                    style={{ ...({ padding: '6px 10px', fontSize: '0.8rem', minHeight: 0, lineHeight: 1.2, borderRadius: 8, boxShadow: 'none', whiteSpace: 'nowrap', flex: '0 0 auto', boxSizing: 'border-box' }), background: '#fff', color: '#4a5d3a', border: '1px solid #4a5d3a', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4 }}
                                   >
-                                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                                       <circle cx="18" cy="5" r="3" />
                                       <circle cx="6" cy="12" r="3" />
                                       <circle cx="18" cy="19" r="3" />
                                       <line x1="8.59" y1="13.51" x2="15.42" y2="17.49" />
                                       <line x1="15.41" y1="6.51" x2="8.59" y2="10.49" />
                                     </svg>
+                                    Factura
                                   </button>
                                   {shareVentaMenuId === lote.id && (
                                     <div style={{ position: 'absolute', right: 0, bottom: '110%', background: '#fff', border: '1px solid #ddd', borderRadius: 8, boxShadow: '0 2px 8px rgba(0,0,0,0.18)', overflow: 'hidden', zIndex: 5, minWidth: 170 }}>
