@@ -499,6 +499,8 @@ function Admin() {
   const [photoModalIndex, setPhotoModalIndex] = useState(0)
   const [photoModalMenuOpen, setPhotoModalMenuOpen] = useState(false)
   const [photoModalSection, setPhotoModalSection] = useState('fotos')
+  const [mixRows, setMixRows] = useState([{ name: '', qty: '' }, { name: '', qty: '' }]) // variedades al separar un mix
+  const [splittingMix, setSplittingMix] = useState(false)
   // Panel "Compra e inventario" del modal de planta: datos frescos de la BD + borrador editable
   const [plantInv, setPlantInv] = useState(null) // { plantId, compras, lotes }
   const [plantInvDraft, setPlantInvDraft] = useState(null)
@@ -600,7 +602,8 @@ function Admin() {
   const [shareVentaMenuId, setShareVentaMenuId] = useState(null)
   const [shareOrderMenuId, setShareOrderMenuId] = useState(null)
   const [loteBuilderOpen, setLoteBuilderOpen] = useState(false)
-  const [loteStep, setLoteStep] = useState('header') // 'header' (paso 1) | 'products' (paso 2)
+  const [loteStep, setLoteStep] = useState('header') // 'method' (elegir cómo ingresar) | 'header' (paso 1) | 'products' (paso 2)
+  const [loteMethod, setLoteMethod] = useState('manual') // 'manual' | 'fotos' (el escaneo de factura tiene su propio flujo)
   const [loteAddMode, setLoteAddMode] = useState('choose') // 'choose' | 'search' | 'new'
   const [loteNota, setLoteNota] = useState('')
   const [loteProveedor, setLoteProveedor] = useState('')
@@ -732,6 +735,7 @@ function Admin() {
         total: result.total != null ? String(result.total) : '',
       })
       setFacturaScanOpen(true)
+      setLoteBuilderOpen(false); setLoteStep('header'); setLoteAddMode('choose')
     } catch (err) {
       console.error('Error al escanear factura:', err)
       alert('No se pudo leer la factura automáticamente. Detalle: ' + (err instanceof Error ? err.message : String(err)))
@@ -2412,6 +2416,13 @@ function Admin() {
     if (error) { undo(); alert('No se pudo guardar el abono: ' + error.message) }
   }
 
+  async function updateVentaLoteCliente(lote, value) {
+    const cliente = (value || '').trim() || null
+    const { error } = await supabase.from('venta_lotes').update({ cliente }).eq('id', lote.id)
+    if (error) { alert('No se pudo guardar el nombre del cliente: ' + error.message); return }
+    loadData()
+  }
+
   async function updateVentaLoteExtra(lote, field, value) {
     const num = Number(value) || 0
     const { error } = await supabase.from('venta_lotes').update({ [field]: num }).eq('id', lote.id)
@@ -2512,6 +2523,127 @@ function Admin() {
     }
   }
 
+  // Factura como FOTO (imagen JPG) para enviar por WhatsApp u otra app
+  async function shareInvoiceImage(params) {
+    try {
+      const W = 900, PAD = 48, ROW = 46, SCALE = 2
+      const lineas = params.lineas || []
+      let banner = null
+      try {
+        banner = await new Promise((resolve, reject) => {
+          const img = new Image()
+          img.onload = () => resolve(img)
+          img.onerror = reject
+          img.src = '/banner-diamantev.jpg'
+        })
+      } catch (e) { banner = null }
+      const bannerH = banner ? Math.round(W * banner.naturalHeight / banner.naturalWidth) : 0
+      const extraRows = [['Subtotal', Number(params.subtotal || 0)]]
+      if (params.envio1) extraRows.push(['Envío 1', Number(params.envio1)])
+      if (params.envio2) extraRows.push(['Envío 2', Number(params.envio2)])
+      if (params.varios) extraRows.push(['Varios', Number(params.varios)])
+      const headH = 40 + 40 + (params.cliente ? 34 : 0) + 30 + 16
+      const H = bannerH + headH + 44 + lineas.length * ROW + 24 + extraRows.length * 40 + 84 + 96
+      const canvas = document.createElement('canvas')
+      canvas.width = W * SCALE
+      canvas.height = H * SCALE
+      const ctx = canvas.getContext('2d')
+      ctx.scale(SCALE, SCALE)
+      const SERIF = 'Georgia, "Times New Roman", serif'
+      const money = n => `$${Number(n || 0).toFixed(2)}`
+      const fit = (text, maxW) => {
+        let t = String(text || '')
+        if (ctx.measureText(t).width <= maxW) return t
+        while (t.length > 1 && ctx.measureText(t + '…').width > maxW) t = t.slice(0, -1)
+        return t + '…'
+      }
+
+      ctx.fillStyle = '#FBF3E6'
+      ctx.fillRect(0, 0, W, H)
+      if (banner) ctx.drawImage(banner, 0, 0, W, bannerH)
+
+      let y = bannerH + 54
+      ctx.textAlign = 'left'
+      ctx.fillStyle = '#4a5d3a'
+      ctx.font = `bold 34px ${SERIF}`
+      ctx.fillText(params.numeroLabel, PAD, y)
+      y += 40
+      ctx.fillStyle = '#5a5040'
+      ctx.font = `24px ${SERIF}`
+      if (params.cliente) { ctx.fillText(`Cliente: ${params.cliente}`, PAD, y); y += 34 }
+      ctx.fillText(`Fecha: ${params.dateStr}`, PAD, y)
+      y += 46
+
+      const colName = PAD + 14
+      const colQty = W - PAD - 300
+      const colUnit = W - PAD - 150
+      const colTot = W - PAD - 14
+      ctx.fillStyle = '#f3ecdd'
+      ctx.fillRect(PAD, y, W - 2 * PAD, 44)
+      ctx.fillStyle = '#4a5d3a'
+      ctx.font = `bold 22px ${SERIF}`
+      ctx.textAlign = 'left'; ctx.fillText('Producto', colName, y + 30)
+      ctx.textAlign = 'center'; ctx.fillText('Cant.', colQty, y + 30)
+      ctx.textAlign = 'right'; ctx.fillText('P.Unit', colUnit, y + 30)
+      ctx.fillText('Total', colTot, y + 30)
+      y += 44
+
+      ctx.font = `22px ${SERIF}`
+      lineas.forEach((l, i) => {
+        if (i % 2 === 0) { ctx.fillStyle = 'rgba(255,255,255,0.65)'; ctx.fillRect(PAD, y, W - 2 * PAD, ROW) }
+        ctx.fillStyle = '#3b3b32'
+        ctx.textAlign = 'left'; ctx.fillText(fit(l.plant_name, colQty - 40 - colName), colName, y + 31)
+        ctx.textAlign = 'center'; ctx.fillText(String(l.quantity), colQty, y + 31)
+        ctx.textAlign = 'right'; ctx.fillText(money(l.unit_price), colUnit, y + 31)
+        ctx.fillText(money(l._lineTotal), colTot, y + 31)
+        y += ROW
+      })
+
+      y += 10
+      ctx.strokeStyle = '#C8B58A'
+      ctx.lineWidth = 2
+      ctx.beginPath(); ctx.moveTo(PAD, y); ctx.lineTo(W - PAD, y); ctx.stroke()
+      y += 34
+      ctx.font = `22px ${SERIF}`
+      ctx.fillStyle = '#5a5040'
+      extraRows.forEach(([label, value]) => {
+        ctx.textAlign = 'left'; ctx.fillText(label, W - PAD - 330, y)
+        ctx.textAlign = 'right'; ctx.fillText(money(value), colTot, y)
+        y += 40
+      })
+      y += 20
+      ctx.font = `bold 32px ${SERIF}`
+      ctx.fillStyle = '#4a5d3a'
+      ctx.textAlign = 'left'; ctx.fillText('Total', W - PAD - 330, y)
+      ctx.textAlign = 'right'; ctx.fillText(money(params.total), colTot, y)
+
+      ctx.textAlign = 'center'
+      ctx.fillStyle = '#7a7060'
+      ctx.font = `italic 24px ${SERIF}`
+      ctx.fillText('¡Gracias por tu compra! — Diamantev', W / 2, H - 44)
+
+      const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.92))
+      if (!blob) throw new Error('No se pudo crear la imagen')
+      const file = new File([blob], `${params.filenameSlug}.jpg`, { type: 'image/jpeg' })
+      if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
+        await navigator.share({ files: [file], title: params.numeroLabel })
+      } else {
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = url
+        a.download = `${params.filenameSlug}.jpg`
+        document.body.appendChild(a)
+        a.click()
+        a.remove()
+        setTimeout(() => URL.revokeObjectURL(url), 2000)
+        alert('Se descargó la foto de la factura. Ábrela desde tu galería para enviarla por WhatsApp.')
+      }
+    } catch (err) {
+      if (err && err.name === 'AbortError') return // cerró el panel de compartir
+      alert('No se pudo generar la foto de la factura. Intenta de nuevo.')
+    }
+  }
+
   // ---- Wrappers para ventas manuales (venta_lotes / decrementos) ----
   function sendVentaInvoiceWhatsApp(lote, lineasConProrrateo, subtotal, totalLote) {
     sendInvoiceWhatsApp({
@@ -2534,6 +2666,17 @@ function Admin() {
     })
   }
 
+  function shareVentaInvoiceImage(lote, lineasConProrrateo, subtotal, totalLote) {
+    return shareInvoiceImage({
+      numeroLabel: `Factura de venta #${lote.numero}`,
+      cliente: lote.cliente,
+      dateStr: new Date(lote.created_at).toLocaleDateString(),
+      lineas: lineasConProrrateo,
+      subtotal, envio1: lote.envio1, envio2: lote.envio2, varios: lote.varios, total: totalLote,
+      filenameSlug: `factura-venta-${lote.numero}`,
+    })
+  }
+
   // ---- Wrappers para pedidos web (orders) ----
   function sendOrderInvoiceWhatsApp(order, items, subtotal, total) {
     sendInvoiceWhatsApp({
@@ -2542,6 +2685,17 @@ function Admin() {
       dateStr: new Date(order.created_at).toLocaleDateString(),
       lineas: items.map(it => ({ plant_name: it._plant ? it._plant.name : 'Planta', quantity: it.quantity, unit_price: it._unitPrice, _lineTotal: it._lineTotal })),
       subtotal, envio1: order.envio1, envio2: order.envio2, varios: order.varios, total,
+    })
+  }
+
+  function shareOrderInvoiceImage(order, items, subtotal, total) {
+    return shareInvoiceImage({
+      numeroLabel: `Pedido #${order.id}`,
+      cliente: order.customer_name,
+      dateStr: new Date(order.created_at).toLocaleDateString(),
+      lineas: items.map(it => ({ plant_name: it._plant ? it._plant.name : 'Planta', quantity: it.quantity, unit_price: it._unitPrice, _lineTotal: it._lineTotal })),
+      subtotal, envio1: order.envio1, envio2: order.envio2, varios: order.varios, total,
+      filenameSlug: `factura-pedido-${order.id}`,
     })
   }
 
@@ -3243,6 +3397,105 @@ function Admin() {
     setCustomPupDate('')
     setNewPupCantidad('')
     loadData()
+  }
+
+  // ---------- Separar un "mix" en variedades ----------
+  // Crea (o suma a) una planta por cada variedad, descuenta del mix y reparte el costo de la compra
+  // por unidad: las unidades que salen del mix se llevan su costo (y su parte del envío, porque las filas
+  // nuevas quedan en la misma compra). Las plantas nuevas quedan ocultas hasta que les pongas foto.
+  async function splitMix(mix, rows) {
+    if (splittingMix) return
+    const items = rows
+      .map(r => ({ name: String(r.name || '').trim(), qty: Math.floor(Number(r.qty) || 0) }))
+      .filter(r => r.name || r.qty)
+    if (items.length === 0) { alert('Escribe al menos una variedad con su cantidad.'); return }
+    if (items.some(r => !r.name || r.qty <= 0)) { alert('Cada variedad necesita un nombre y una cantidad mayor a 0.'); return }
+    const keys = items.map(r => r.name.toLowerCase())
+    if (new Set(keys).size !== keys.length) { alert('Hay nombres repetidos en la lista. Junta esas cantidades en una sola fila.'); return }
+    if (keys.includes(String(mix.name).trim().toLowerCase())) { alert('Una variedad no puede llamarse igual que el mix. Cámbiale el nombre.'); return }
+    const total = items.reduce((sum, r) => sum + r.qty, 0)
+    const stockMix = Number(mix.stock) || 0
+    if (total > stockMix) { alert(`Sumas ${total}, pero el mix solo tiene ${stockMix} en stock.`); return }
+    const existentes = items.map(r => plants.find(p => p.id !== mix.id && String(p.name).trim().toLowerCase() === r.name.toLowerCase()))
+    const nuevas = existentes.filter(x => !x).length
+    const resumen = items.map((r, i) => `• ${r.name}: ${r.qty}${existentes[i] ? ' (se suma a la planta que ya existe)' : ' (planta nueva)'}`).join('\n')
+    if (!confirm(`Separar ${total} de "${mix.name}":\n${resumen}\n\nEn el mix quedan ${stockMix - total}.`)) return
+
+    setSplittingMix(true)
+    try {
+      // Compras ya recibidas del mix, de la más antigua a la más nueva: de ahí salen las unidades y su costo.
+      const fuentes = compras
+        .filter(c => c.plant_id === mix.id && recibidoDe(c) && Number(c.quantity) > 0)
+        .sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
+        .map(c => ({ c, restante: Number(c.quantity) }))
+      const salen = new Map() // id de compra -> unidades que salen del mix
+
+      for (let i = 0; i < items.length; i++) {
+        const it = items[i]
+        let planta = existentes[i]
+        if (planta) {
+          const { error } = await supabase.from('plants').update({ stock: (Number(planta.stock) || 0) + it.qty }).eq('id', planta.id)
+          if (error) throw new Error(`No se pudo sumar stock a "${planta.name}": ${error.message}`)
+        } else {
+          const { data, error } = await supabase.from('plants').insert({
+            name: it.name,
+            category_id: mix.category_id || null,
+            price: mix.price || 0,
+            stock: it.qty,
+            image_url: null,
+            active: false,
+            flagged: !mix.category_id,
+          }).select().single()
+          if (error || !data) throw new Error(`No se pudo crear "${it.name}": ${error ? error.message : 'sin respuesta'}`)
+          planta = data
+        }
+        let faltan = it.qty
+        for (const f of fuentes) {
+          if (faltan <= 0) break
+          if (f.restante <= 0) continue
+          const take = Math.min(faltan, f.restante)
+          const unit = Number(f.c.unit_cost) || 0
+          const cantOriginal = Number(f.c.quantity) || 1
+          const { id: _id, numero: _numero, plant_id: _pid, plant_name: _pn, quantity: _q, total: _t, image_url: _img, new_plant_category: _npc, ...resto } = f.c
+          const fila = { ...resto, plant_id: planta.id, plant_name: planta.name, quantity: take, total: take * unit, image_url: null }
+          if (resto.anticipo != null) fila.anticipo = Number(resto.anticipo) * take / cantOriginal // el abono se reparte igual
+          const { error } = await supabase.from('compras').insert(fila)
+          if (error) throw new Error(`No se pudo repartir el costo de "${it.name}": ${error.message}`)
+          f.restante -= take
+          faltan -= take
+          salen.set(f.c.id, (salen.get(f.c.id) || 0) + take)
+        }
+      }
+
+      // Las compras originales del mix bajan (o se borran si quedaron en 0)
+      for (const f of fuentes) {
+        const sale = salen.get(f.c.id) || 0
+        if (sale <= 0) continue
+        const cantOriginal = Number(f.c.quantity) || 0
+        const nueva = cantOriginal - sale
+        if (nueva > 0) {
+          const patch = { quantity: nueva, total: nueva * (Number(f.c.unit_cost) || 0) }
+          if (f.c.anticipo != null) patch.anticipo = Number(f.c.anticipo) * nueva / cantOriginal
+          await supabase.from('compras').update(patch).eq('id', f.c.id)
+        } else {
+          await supabase.from('compras').delete().eq('id', f.c.id)
+        }
+      }
+
+      const nuevoStock = stockMix - total
+      const patchMix = { stock: nuevoStock }
+      if (mix.stock_disponible != null) patchMix.stock_disponible = Math.min(Number(mix.stock_disponible) || 0, nuevoStock)
+      const { error: eMix } = await supabase.from('plants').update(patchMix).eq('id', mix.id)
+      if (eMix) throw new Error('No se pudo descontar el stock del mix: ' + eMix.message)
+
+      setMixRows([{ name: '', qty: '' }, { name: '', qty: '' }])
+      alert(`Listo: se separaron ${total} de "${mix.name}".` + (nuevas ? ` Las ${nuevas} planta(s) nueva(s) quedaron ocultas hasta que les pongas foto y las actives.` : ''))
+    } catch (err) {
+      alert('Algo falló al separar el mix: ' + (err instanceof Error ? err.message : String(err)) + '\n\nRevisa la Galería y las compras por si quedó algo a medias.')
+    } finally {
+      setSplittingMix(false)
+      loadData()
+    }
   }
 
   async function moverPupsAStock(plant, cantidad) {
@@ -5652,6 +5905,7 @@ function Admin() {
                             <button type="button" onClick={() => { setPhotoModalSection('ventas'); setSeedVentasFilter('all'); setPhotoModalMenuOpen(false); if (photoModalSheetRef.current) photoModalSheetRef.current.scrollTop = 0 }}>🛒 Ventas</button>
                             <button type="button" onClick={() => { setPhotoModalSection('floraciones'); setPhotoModalMenuOpen(false); if (photoModalSheetRef.current) photoModalSheetRef.current.scrollTop = 0 }}>🌸 Floraciones</button>
                             <button type="button" onClick={() => { setPhotoModalSection('hijos'); setPhotoModalMenuOpen(false); if (photoModalSheetRef.current) photoModalSheetRef.current.scrollTop = 0 }}>🌱 Hijos</button>
+                            <button type="button" onClick={() => { setPhotoModalSection('separar'); setMixRows([{ name: '', qty: '' }, { name: '', qty: '' }]); setPhotoModalMenuOpen(false); if (photoModalSheetRef.current) photoModalSheetRef.current.scrollTop = 0 }}>🔀 Separar mix</button>
                           </div>
                         </>
                       )}
@@ -6137,6 +6391,56 @@ function Admin() {
                             )}
                           </div>
                         )}
+
+                        {photoModalSection === 'separar' && (() => {
+                          const asignadas = mixRows.reduce((sum, r) => sum + (Math.floor(Number(r.qty) || 0)), 0)
+                          const stockMix = Number(p.stock) || 0
+                          const quedan = stockMix - asignadas
+                          return (
+                            <div className="historial-block">
+                              <h4>🔀 Separar mix</h4>
+                              <p className="historial-entry" style={{ border: 'none' }}>
+                                «{p.name}» tiene <strong>{stockMix}</strong> en stock. Escribe cómo salió cada variedad: se crean como plantas nuevas y se descuentan de este mix. El costo de la compra se reparte por igual por unidad.
+                              </p>
+                              {mixRows.map((r, i) => (
+                                <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 }}>
+                                  <input
+                                    placeholder="Nombre (ej. Lilium blanco)"
+                                    value={r.name}
+                                    onChange={e => setMixRows(rows => rows.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)))}
+                                    style={{ flex: 1, minWidth: 0 }}
+                                  />
+                                  <input
+                                    type="number"
+                                    inputMode="numeric"
+                                    min="1"
+                                    placeholder="Cant."
+                                    value={r.qty}
+                                    onChange={e => setMixRows(rows => rows.map((x, j) => (j === i ? { ...x, qty: e.target.value } : x)))}
+                                    style={{ width: 70 }}
+                                  />
+                                  {mixRows.length > 1 && (
+                                    <button type="button" onClick={() => setMixRows(rows => rows.filter((_, j) => j !== i))} aria-label="Quitar fila">✕</button>
+                                  )}
+                                </div>
+                              ))}
+                              <button type="button" className="historial-link-btn" onClick={() => setMixRows(rows => [...rows, { name: '', qty: '' }])}>
+                                ➕ Agregar otra variedad
+                              </button>
+                              <p className="historial-entry" style={{ border: 'none', color: quedan < 0 ? '#b03434' : '#5a5040', fontWeight: 600 }}>
+                                Separadas: {asignadas} · Quedan en el mix: {quedan}
+                              </p>
+                              <button
+                                type="button"
+                                disabled={splittingMix || quedan < 0 || asignadas <= 0}
+                                onClick={() => splitMix(p, mixRows)}
+                                style={{ background: '#4a5d3a', color: '#fff', border: 'none', padding: '12px 16px', borderRadius: 8, fontWeight: 700, width: '100%', opacity: (splittingMix || quedan < 0 || asignadas <= 0) ? 0.5 : 1 }}
+                              >
+                                {splittingMix ? 'Separando…' : '🔀 Separar'}
+                              </button>
+                            </div>
+                          )
+                        })()}
                       </div>
 
                     </div>
@@ -6443,6 +6747,19 @@ function Admin() {
                             )}
                             <span>Fecha: {new Date(lote.created_at).toLocaleDateString()}</span>
 
+                            {editingV && (
+                              <label style={{ display: 'flex', flexDirection: 'column', gap: 4, margin: '8px 0', fontSize: '0.85rem', color: '#5a5040' }}>
+                                Nombre del cliente / compradora
+                                <input
+                                  key={`cli-${lote.id}-${lote.cliente || ''}`}
+                                  defaultValue={lote.cliente || ''}
+                                  placeholder="Cliente"
+                                  onBlur={e => { if ((e.target.value || '').trim() !== (lote.cliente || '')) updateVentaLoteCliente(lote, e.target.value) }}
+                                  style={{ width: '100%', boxSizing: 'border-box', padding: '10px', fontSize: '1rem', borderRadius: 6, border: '1px solid #ccc' }}
+                                />
+                              </label>
+                            )}
+
                             <p style={{ fontSize: '0.7rem', color: '#8a8a7a', margin: '8px 0 2px', textAlign: 'center' }}>◀ Deslizá la tabla para ver más columnas ▶</p>
                             <div style={{ width: '100%', maxWidth: '100%', minWidth: 0, overflowX: 'auto', WebkitOverflowScrolling: 'touch', touchAction: 'pan-x pan-y', marginTop: 2, borderRadius: 8, border: '1px solid #ddd', boxShadow: '0 1px 2px rgba(0,0,0,0.06)', boxSizing: 'border-box' }}>
                               <table style={{ borderCollapse: 'collapse', width: '100%', minWidth: 460, fontSize: 11 }}>
@@ -6619,6 +6936,13 @@ function Admin() {
                                     <div style={{ position: 'absolute', right: 0, bottom: '110%', background: '#fff', border: '1px solid #ddd', borderRadius: 8, boxShadow: '0 2px 8px rgba(0,0,0,0.18)', overflow: 'hidden', zIndex: 5, minWidth: 170 }}>
                                       <button
                                         type="button"
+                                        onClick={() => { shareVentaInvoiceImage(lote, lineasConProrrateo, subtotal, totalLote); setShareVentaMenuId(null) }}
+                                        style={{ display: 'block', width: '100%', textAlign: 'left', padding: '10px 14px', background: '#fff', border: 'none', borderBottom: '1px solid #eee', fontSize: '0.85rem', color: '#4a5d3a', fontWeight: 600, boxSizing: 'border-box' }}
+                                      >
+                                        📷 Enviar como foto
+                                      </button>
+                                      <button
+                                        type="button"
                                         onClick={() => { sendVentaInvoiceWhatsApp(lote, lineasConProrrateo, subtotal, totalLote); setShareVentaMenuId(null) }}
                                         style={{ display: 'block', width: '100%', textAlign: 'left', padding: '10px 14px', background: '#fff', border: 'none', borderBottom: '1px solid #eee', fontSize: '0.85rem', color: '#25D366', fontWeight: 600, boxSizing: 'border-box' }}
                                       >
@@ -6722,6 +7046,13 @@ function Admin() {
                                       </button>
                                       {shareOrderMenuId === m.id && (
                                         <div style={{ position: 'absolute', right: 0, bottom: '110%', background: '#fff', border: '1px solid #ddd', borderRadius: 8, boxShadow: '0 2px 8px rgba(0,0,0,0.18)', overflow: 'hidden', zIndex: 5, minWidth: 170 }}>
+                                          <button
+                                            type="button"
+                                            onClick={() => { shareOrderInvoiceImage(m, items, subtotal, total); setShareOrderMenuId(null) }}
+                                            style={{ display: 'block', width: '100%', textAlign: 'left', padding: '10px 14px', background: '#fff', border: 'none', borderBottom: '1px solid #eee', fontSize: '0.85rem', color: '#4a5d3a', fontWeight: 600, boxSizing: 'border-box' }}
+                                          >
+                                            📷 Enviar como foto
+                                          </button>
                                           <button
                                             type="button"
                                             onClick={() => { sendOrderInvoiceWhatsApp(m, items, subtotal, total); setShareOrderMenuId(null) }}
@@ -7254,23 +7585,11 @@ function Admin() {
                           <button
                             type="button"
                             className="full-form-btn"
-                            onClick={() => { setLoteBuilderOpen(true); setLoteStep('header'); setLoteAddMode('choose') }}
+                            onClick={() => { setLoteBuilderOpen(true); setLoteStep('method'); setLoteAddMode('choose') }}
                             style={{ background: '#4a5d3a', color: '#fff', border: 'none', padding: '14px 22px', borderRadius: 8, fontSize: '1.05rem', fontWeight: 700, boxShadow: '0 3px 6px rgba(0,0,0,0.2)', flex: '1 1 auto' }}
                           >
                             🧺 Nueva compra
                           </button>
-                          <label
-                            style={{ background: '#fff', color: '#4a5d3a', border: '1px solid #4a5d3a', padding: '14px 18px', borderRadius: 8, fontSize: '0.95rem', fontWeight: 600, cursor: scanningFactura ? 'wait' : 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flex: '1 1 auto', textAlign: 'center', boxSizing: 'border-box', opacity: scanningFactura ? 0.7 : 1 }}
-                          >
-                            {scanningFactura ? '⏳ Leyendo factura...' : '📷 Escanear Factura'}
-                            <input
-                              type="file"
-                              accept="image/*"
-                              onChange={handleScanFacturaFile}
-                              disabled={scanningFactura}
-                              style={{ display: 'none' }}
-                            />
-                          </label>
                           <button
                             type="button"
                             onClick={() => setIngresosMenuOpen(!ingresosMenuOpen)}
@@ -7321,11 +7640,66 @@ function Admin() {
                       </>
                     )}
 
+                    {/* ---------- PASO 0: Elegir cómo se ingresa la compra ---------- */}
+                    {loteBuilderOpen && loteStep === 'method' && (
+                      <div className="admin-form" style={{ display: 'flex', flexDirection: 'column', gap: 12, padding: 14 }}>
+                        <h3 style={{ margin: '4px 0 0' }}>🧺 Nueva compra</h3>
+                        <div style={{ fontSize: '0.95rem', color: '#6b6b5f', marginTop: -4 }}>¿Cómo quieres ingresarla?</div>
+
+                        <label
+                          style={{ background: '#4a5d3a', color: '#fff', padding: '16px 14px', borderRadius: 8, fontSize: '1rem', fontWeight: 600, cursor: scanningFactura ? 'wait' : 'pointer', display: 'flex', flexDirection: 'column', gap: 2, opacity: scanningFactura ? 0.7 : 1 }}
+                        >
+                          <span>{scanningFactura ? '⏳ Leyendo factura...' : '📷 Escanear factura'}</span>
+                          <span style={{ fontSize: '0.82rem', fontWeight: 400, opacity: 0.9 }}>Toma una foto de la factura y los productos se leen solos</span>
+                          <input
+                            type="file"
+                            accept="image/*"
+                            onChange={handleScanFacturaFile}
+                            disabled={scanningFactura}
+                            style={{ display: 'none' }}
+                          />
+                        </label>
+
+                        <button
+                          type="button"
+                          onClick={() => { setLoteMethod('fotos'); setLoteAddMode('choose'); setLoteStep('header') }}
+                          style={{ background: '#fff', color: '#4a5d3a', padding: '16px 14px', borderRadius: 8, border: '2px solid #4a5d3a', fontSize: '1rem', fontWeight: 600, textAlign: 'left', display: 'flex', flexDirection: 'column', gap: 2 }}
+                        >
+                          <span>📸 Ingreso por fotografías</span>
+                          <span style={{ fontSize: '0.82rem', fontWeight: 400, color: '#6b6b5f' }}>Sube varias fotos y cada una se agrega a la compra</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => { setLoteMethod('manual'); setLoteAddMode('choose'); setLoteStep('header') }}
+                          style={{ background: '#fff', color: '#4a5d3a', padding: '16px 14px', borderRadius: 8, border: '2px solid #4a5d3a', fontSize: '1rem', fontWeight: 600, textAlign: 'left', display: 'flex', flexDirection: 'column', gap: 2 }}
+                        >
+                          <span>✍️ Manual</span>
+                          <span style={{ fontSize: '0.82rem', fontWeight: 400, color: '#6b6b5f' }}>Busca la planta en el catálogo o registra una nueva</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => { setLoteBuilderOpen(false); setLoteLines([]); setLoteNota(''); setLoteProveedor(''); setLoteStep('header'); setLoteAddMode('choose') }}
+                          style={{ background: '#fff', color: '#b03434', padding: '10px 16px', borderRadius: 6, border: '1px solid #b03434', width: '100%', boxSizing: 'border-box' }}
+                        >
+                          Cancelar
+                        </button>
+                      </div>
+                    )}
+
                     {/* ---------- PASO 1: Cabecera de la compra (Proveedor) ---------- */}
                     {loteBuilderOpen && loteStep === 'header' && (
                       <div className="admin-form" style={{ display: 'flex', flexDirection: 'column', gap: 10, padding: 14 }}>
                         <div style={{ fontSize: '0.8rem', color: '#6b6b5f', marginBottom: -4, fontWeight: 600 }}>PASO 1 DE 2 · Datos de la compra</div>
-                        <h3 style={{ margin: '4px 0' }}>Nueva compra</h3>
+                        <h3 style={{ margin: '4px 0' }}>Nueva compra · {loteMethod === 'fotos' ? '📸 Por fotografías' : '✍️ Manual'}</h3>
+                        <button
+                          type="button"
+                          onClick={() => setLoteStep('method')}
+                          style={{ alignSelf: 'flex-start', fontSize: '0.8rem', background: 'none', border: 'none', color: '#4a5d3a', textDecoration: 'underline', cursor: 'pointer', padding: 0, marginTop: -4 }}
+                        >
+                          ↩ Cambiar forma de ingreso
+                        </button>
                         <input
                           placeholder="Proveedor (opcional)"
                           list="proveedores-list"
@@ -7379,20 +7753,6 @@ function Admin() {
                         {/* Agregar planta: primero la acción, sin ningún texto ni contador por encima */}
                         {loteAddMode === 'choose' && (
                           <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 14 }}>
-                            <button
-                              type="button"
-                              onClick={() => setLoteAddMode('search')}
-                              style={{ background: '#4a5d3a', color: '#fff', padding: '16px 14px', borderRadius: 8, border: 'none', fontSize: '1rem', fontWeight: 600, textAlign: 'left', display: 'flex', alignItems: 'center', gap: 10 }}
-                            >
-                              🔍 Buscar planta existente en catálogo
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => setLoteAddMode('new')}
-                              style={{ background: '#fff', color: '#4a5d3a', padding: '16px 14px', borderRadius: 8, border: '2px solid #4a5d3a', fontSize: '1rem', fontWeight: 600, textAlign: 'left', display: 'flex', alignItems: 'center', gap: 10 }}
-                            >
-                              🌱 Registrar planta nueva
-                            </button>
                             <input
                               ref={bulkLoteBuilderPhotoInputRef}
                               type="file"
@@ -7401,13 +7761,48 @@ function Admin() {
                               style={{ display: 'none' }}
                               onChange={e => { addBulkPhotosToLoteBuilder(e.target.files); e.target.value = '' }}
                             />
-                            <button
-                              type="button"
-                              onClick={() => setBulkCategoryPickerFor('loteBuilder')}
-                              style={{ background: QUICK_FILTER_TONES.sage.bg, color: '#5B4636', padding: '16px 14px', borderRadius: 8, border: `2px dashed ${QUICK_FILTER_TONES.sage.border}`, fontSize: '1rem', fontWeight: 600, textAlign: 'left', display: 'flex', alignItems: 'center', gap: 10 }}
-                            >
-                              📸 Carga masiva de fotos
-                            </button>
+                            {loteMethod === 'fotos' ? (
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={() => setBulkCategoryPickerFor('loteBuilder')}
+                                  style={{ background: '#4a5d3a', color: '#fff', padding: '16px 14px', borderRadius: 8, border: 'none', fontSize: '1rem', fontWeight: 600, textAlign: 'left', display: 'flex', alignItems: 'center', gap: 10 }}
+                                >
+                                  📸 Elegir fotos
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setLoteMethod('manual')}
+                                  style={{ background: 'none', border: 'none', color: '#4a5d3a', textDecoration: 'underline', cursor: 'pointer', fontSize: '0.85rem', alignSelf: 'flex-start', padding: 0 }}
+                                >
+                                  ✍️ Agregar una planta a mano
+                                </button>
+                              </>
+                            ) : (
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={() => setLoteAddMode('search')}
+                                  style={{ background: '#4a5d3a', color: '#fff', padding: '16px 14px', borderRadius: 8, border: 'none', fontSize: '1rem', fontWeight: 600, textAlign: 'left', display: 'flex', alignItems: 'center', gap: 10 }}
+                                >
+                                  🔍 Buscar planta existente en catálogo
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setLoteAddMode('new')}
+                                  style={{ background: '#fff', color: '#4a5d3a', padding: '16px 14px', borderRadius: 8, border: '2px solid #4a5d3a', fontSize: '1rem', fontWeight: 600, textAlign: 'left', display: 'flex', alignItems: 'center', gap: 10 }}
+                                >
+                                  🌱 Registrar planta nueva
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setLoteMethod('fotos')}
+                                  style={{ background: 'none', border: 'none', color: '#4a5d3a', textDecoration: 'underline', cursor: 'pointer', fontSize: '0.85rem', alignSelf: 'flex-start', padding: 0 }}
+                                >
+                                  📸 Cargar varias fotos
+                                </button>
+                              </>
+                            )}
                           </div>
                         )}
 
