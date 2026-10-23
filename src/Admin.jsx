@@ -4785,6 +4785,8 @@ function Admin() {
                         if (galleryMissingFilters.has('noStock') && Number(p.stock) > 0) return false
                         if (galleryMissingFilters.has('hasStock') && !(Number(p.stock) > 0)) return false
                         if (galleryMissingFilters.has('flowered') && !floraciones.some(f => f.plant_id === p.id)) return false
+                        if (galleryMissingFilters.has('noFlowered') && floraciones.some(f => f.plant_id === p.id)) return false
+                        if (galleryMissingFilters.has('hasCategory') && !p.category_id) return false
                         if (galleryMissingFilters.has('sold')) {
                           const vendida = orders.some(o => (o.order_items || []).some(it => it.plant_id === p.id)) || decrementos.some(d => d.plant_id === p.id)
                           if (!vendida) return false
@@ -4857,9 +4859,9 @@ function Admin() {
                     }
                     const missingLabels = {
                       noPhoto: '🖼️ Sin foto', hasPhoto: '🖼️ Con foto',
-                      noCategory: 'Sin categoría', noPrice: 'Sin precio', hasPrice: '💲 Con precio', soloSemillas: '🌰 Solo semillas', sinSemillas: '🪴 Sin semillas', nombreCodigo: '🔤 Nombre con código',
+                      noCategory: '📂 Sin categoría', hasCategory: '📂 Con categoría', noPrice: 'Sin precio', hasPrice: '💲 Con precio', soloSemillas: '🌰 Solo semillas', sinSemillas: '🪴 Sin semillas', nombreCodigo: '🔤 Nombre con código',
                       noStock: '📦 Sin stock', hasStock: '📦 Con stock',
-                      flowered: '🌸 Floreció', sold: '🛒 Se vendió',
+                      flowered: '🌸 Floreció', noFlowered: '🌸 No ha florecido', sold: '🛒 Se vendió',
                       hasNotes: '📓 Con notas', noNotes: '📓 Sin notas',
                       hasVideo: '🎥 Con video', noVideo: '🎥 Sin video',
                       flagged: '🚩 Para revisar',
@@ -4999,13 +5001,17 @@ function Admin() {
                             boxShadow: 'none', minHeight: 0, lineHeight: 1.2,
                           })
                           return (
-                            <div style={{ display: 'flex', gap: 6, overflowX: 'auto', WebkitOverflowScrolling: 'touch', scrollbarWidth: 'none', paddingTop: 6, paddingBottom: 2 }}>
+                            <div
+                              // Celular: una fila que se desliza con el dedo. PC: las píldoras pasan a la siguiente línea (con mouse no se puede deslizar).
+                              onWheel={e => { if (!isWideScreen && e.deltaY !== 0) e.currentTarget.scrollLeft += e.deltaY }}
+                              style={{ display: 'flex', flexWrap: isWideScreen ? 'wrap' : 'nowrap', gap: 6, overflowX: isWideScreen ? 'visible' : 'auto', WebkitOverflowScrolling: 'touch', scrollbarWidth: 'thin', paddingTop: 6, paddingBottom: 2 }}
+                            >
                               <button type="button" onClick={() => openSelector('categoria')} aria-label="Elegir categoría" style={pillStyle(!!(selCat && selCat.parent_id))}>
                                 🏷️ {selCat && selCat.parent_id ? `${selCat.emoji} ${selCat.name}` : 'Categorías'}
                                 <span style={{ fontSize: 11, opacity: 0.6 }}>⌄</span>
                               </button>
                               <button type="button" onClick={() => setGalleryFilter('all')} style={pillStyle(galleryFilter === 'all')}>Todas</button>
-                              {categories.filter(c => !c.parent_id).map(c => (
+                              {[...categories.filter(c => !c.parent_id)].sort((a, b) => (/semilla/i.test(b.name) ? 1 : 0) - (/semilla/i.test(a.name) ? 1 : 0)).map(c => (
                                 <button
                                   key={c.id}
                                   type="button"
@@ -5145,37 +5151,92 @@ function Admin() {
                                     {triPill('📦', 'Stock', 'hasStock', 'noStock', 'Con stock', 'Sin stock')}
                                     {triPill('📷', 'Foto', 'hasPhoto', 'noPhoto', 'Con foto', 'Sin foto')}
                                     {triPill('📓', 'Notas', 'hasNotes', 'noNotes', 'Con notas', 'Sin notas')}
+                                    {triPill('🌸', 'Floreció', 'flowered', 'noFlowered', 'Sí', 'No')}
+                                    {triPill('💲', 'Precio', 'hasPrice', 'noPrice', 'Con precio', 'Sin precio')}
+                                    {triPill('🎥', 'Video', 'hasVideo', 'noVideo', 'Con video', 'Sin video')}
+                                    {triPill('📂', 'Categoría', 'hasCategory', 'noCategory', 'Con categoría', 'Sin categoría')}
                                   </div>
 
-                                  <p className="attr-label">Venta y floración</p>
+                                  <p className="attr-label">Otros</p>
                                   <div className="attr-row">
-                                    {smallPill('🌸', 'Floreció alguna vez', 'flowered')}
                                     {smallPill('🛒', 'Se vendió alguna vez', 'sold')}
-                                  </div>
-
-                                  <p className="attr-label">Datos faltantes</p>
-                                  <div className="attr-row">
-                                    {smallPill('📂', 'Sin categoría', 'noCategory', null, true)}
-                                    {smallPill('🏷️', 'Sin precio', 'noPrice', 'hasPrice', true)}
-                                    {smallPill('🏷️', 'Con precio', 'hasPrice', 'noPrice')}
-                                    {smallPill('🎥', 'Sin video', 'noVideo', 'hasVideo', true)}
-                                    {smallPill('🎥', 'Con video', 'hasVideo', 'noVideo')}
                                     {smallPill('🔤', 'Nombre con código', 'nombreCodigo', null, true)}
-                                  </div>
-
-                                  <p className="attr-label">Tipo</p>
-                                  <div className="attr-row">
-                                    {smallPill('🌰', 'Solo semillas', 'soloSemillas', 'sinSemillas')}
-                                    {smallPill('🪴', 'Sin semillas', 'sinSemillas', 'soloSemillas')}
-                                  </div>
-
-                                  <p className="attr-label">Marcas</p>
-                                  <div className="attr-row">
                                     {smallPill('🚩', 'Para revisar', 'flagged')}
                                     {smallPill('🟢', 'Marcadas para cliente', 'marcadoCliente')}
                                   </div>
                                 </details>
+                                <details className="attr-panel" open>
+                                  <summary className="attr-title" style={{ cursor: 'pointer' }}>Más filtros</summary>
 
+                                  <p className="attr-label">📦 Compra</p>
+                                  <div className="attr-row">
+                                    <button key="pedido" type="button" onClick={() => setGalleryCompraStatus(galleryCompraStatus === 'pedido' ? 'all' : 'pedido')} className={`attr-pill${galleryCompraStatus === 'pedido' ? ' is-active' : ''}`}>Pedido{galleryCompraStatus === 'pedido' ? ' ✓' : ''}</button>
+                                    <button key="pagado" type="button" onClick={() => setGalleryCompraStatus(galleryCompraStatus === 'pagado' ? 'all' : 'pagado')} className={`attr-pill${galleryCompraStatus === 'pagado' ? ' is-active' : ''}`}>Pagado{galleryCompraStatus === 'pagado' ? ' ✓' : ''}</button>
+                                    <button key="recibido" type="button" onClick={() => setGalleryCompraStatus(galleryCompraStatus === 'recibido' ? 'all' : 'recibido')} className={`attr-pill${galleryCompraStatus === 'recibido' ? ' is-active' : ''}`}>Recibido{galleryCompraStatus === 'recibido' ? ' ✓' : ''}</button>
+                                    <button type="button" onClick={() => openSelector('compra')}
+                                    style={{
+                                      display: 'flex', alignItems: 'center', gap: 6,
+                                      background: galleryLoteNumero !== 'all' ? QUICK_FILTER_TONES.sage.active : QUICK_FILTER_TONES.sage.bg,
+                                      border: `2px solid ${QUICK_FILTER_TONES.sage.border}`, borderRadius: 18,
+                                      padding: '9px 14px', fontWeight: galleryLoteNumero !== 'all' ? 700 : 600,
+                                      color: '#5B4636', fontSize: 13.5, cursor: 'pointer',
+                                    }}>
+                                    <span style={{ fontSize: 16 }}>🧾</span>
+                                    {galleryLoteNumero === 'all' ? 'N° de compra: Cualquiera' : (() => { const l = lotes.find(x => x.id === galleryLoteNumero); return l ? `Compra #${l.numero}${l.proveedor ? ` — ${l.proveedor}` : ''}` : 'Compra' })()}
+                                    <span style={{ fontSize: 11, opacity: 0.6 }}>⌄</span>
+                                  </button>
+                                  </div>
+
+                                  <p className="attr-label">🛒 Venta</p>
+                                  <div className="attr-row">
+                                    <button key="pedido" type="button" onClick={() => setGalleryVentaStatus(galleryVentaStatus === 'pedido' ? 'all' : 'pedido')} className={`attr-pill${galleryVentaStatus === 'pedido' ? ' is-active' : ''}`}>Pedido{galleryVentaStatus === 'pedido' ? ' ✓' : ''}</button>
+                                    <button key="pagado" type="button" onClick={() => setGalleryVentaStatus(galleryVentaStatus === 'pagado' ? 'all' : 'pagado')} className={`attr-pill${galleryVentaStatus === 'pagado' ? ' is-active' : ''}`}>Pagado{galleryVentaStatus === 'pagado' ? ' ✓' : ''}</button>
+                                    <button key="entregado" type="button" onClick={() => setGalleryVentaStatus(galleryVentaStatus === 'entregado' ? 'all' : 'entregado')} className={`attr-pill${galleryVentaStatus === 'entregado' ? ' is-active' : ''}`}>Entregado{galleryVentaStatus === 'entregado' ? ' ✓' : ''}</button>
+                                    <button type="button" onClick={() => openSelector('ventaLote')}
+                                    style={{
+                                      display: 'flex', alignItems: 'center', gap: 6,
+                                      background: galleryVentaLoteNumero !== 'all' ? QUICK_FILTER_TONES.rose.active : QUICK_FILTER_TONES.rose.bg,
+                                      border: `2px solid ${QUICK_FILTER_TONES.rose.border}`, borderRadius: 18,
+                                      padding: '9px 14px', fontWeight: galleryVentaLoteNumero !== 'all' ? 700 : 600,
+                                      color: '#5B4636', fontSize: 13.5, cursor: 'pointer',
+                                    }}>
+                                    <span style={{ fontSize: 16 }}>🧾</span>
+                                    {galleryVentaLoteNumero === 'all' ? 'N° de venta: Cualquiera' : (() => { const vl = ventaLotes.find(x => x.id === galleryVentaLoteNumero); return vl ? `Venta #${vl.numero}${vl.cliente ? ` — ${vl.cliente}` : ''}` : 'Venta' })()}
+                                    <span style={{ fontSize: 11, opacity: 0.6 }}>⌄</span>
+                                  </button>
+                                  </div>
+
+                                  <p className="attr-label">🚚 Proveedor</p>
+                                  <div className="attr-row">
+                                    <button type="button" onClick={() => openSelector('proveedor')}
+                                    style={{
+                                      display: 'flex', alignItems: 'center', gap: 6,
+                                      background: galleryProveedor !== 'all' ? QUICK_FILTER_TONES.sky.active : QUICK_FILTER_TONES.sky.bg,
+                                      border: `2px solid ${QUICK_FILTER_TONES.sky.border}`, borderRadius: 18,
+                                      padding: '9px 14px', fontWeight: galleryProveedor !== 'all' ? 700 : 600,
+                                      color: '#5B4636', fontSize: 13.5, cursor: 'pointer',
+                                    }}>
+                                    <span style={{ fontSize: 16 }}>🚚</span>
+                                    {galleryProveedor === 'all' ? 'Proveedor: Todos' : galleryProveedor === '__none__' ? 'Sin proveedor' : galleryProveedor}
+                                    <span style={{ fontSize: 11, opacity: 0.6 }}>⌄</span>
+                                  </button>
+                                  </div>
+
+                                  <p className="attr-label">🏷️ Etiquetas</p>
+                                  <div className="attr-row">
+                                    <QuickFilterButton
+                                    icon="🏷️" label="Etiquetas" tone="cream"
+                                    value={galleryLabelStatus}
+                                    onChange={v => setGalleryLabelStatus(v)}
+                                    options={[
+                                      { value: 'all', label: 'Todas' },
+                                      { value: 'disponible', label: '🟢 Nunca impresa', shortLabel: 'Nunca impresa' },
+                                      { value: 'sobrante', label: '📦 De sobra sin pegar', shortLabel: 'De sobra' },
+                                      { value: 'colocada', label: '✅ Todo colocado', shortLabel: 'Colocado' },
+                                    ]}
+                                  />
+                                  </div>
+                                </details>
                                 <details className="attr-panel">
                                   <summary className="attr-title" style={{ cursor: 'pointer' }}>🎨 Color y orden</summary>
                                   <div className="attr-row">
@@ -5220,81 +5281,6 @@ function Admin() {
                                   <p style={{ fontSize: 12, color: '#8a7a5c', margin: '6px 2px 0' }}>
                                     Si alguna sale mal, toca el 🎨 de su tarjeta para corregirla. Las que corrijas a mano no se vuelven a cambiar.
                                   </p>
-                                </details>
-
-                                <details className="attr-panel" open={galleryLabelStatus !== 'all' || galleryProveedor !== 'all' || galleryLoteNumero !== 'all' || galleryVentaLoteNumero !== 'all' || galleryCompraStatus !== 'all' || galleryVentaStatus !== 'all'}>
-                                  <summary className="attr-title" style={{ cursor: 'pointer' }}>Más filtros</summary>
-                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-                                  <QuickFilterButton
-                                    icon="🏷️" label="Etiquetas" tone="cream"
-                                    value={galleryLabelStatus}
-                                    onChange={v => setGalleryLabelStatus(v)}
-                                    options={[
-                                      { value: 'all', label: 'Todas' },
-                                      { value: 'disponible', label: '🟢 Nunca impresa', shortLabel: 'Nunca impresa' },
-                                      { value: 'sobrante', label: '📦 De sobra sin pegar', shortLabel: 'De sobra' },
-                                      { value: 'colocada', label: '✅ Todo colocado', shortLabel: 'Colocado' },
-                                    ]}
-                                  />
-                              <QuickFilterButton
-                                icon="📦" label="Compra" tone="sage"
-                                value={galleryCompraStatus}
-                                onChange={v => setGalleryCompraStatus(v)}
-                                options={[
-                                  { value: 'all', label: 'Todos' },
-                                  { value: 'pedido', label: 'Pedido', shortLabel: 'Pedido' },
-                                  { value: 'pagado', label: 'Pagado', shortLabel: 'Pagado' },
-                                  { value: 'recibido', label: 'Recibido', shortLabel: 'Recibido' },
-                                ]}
-                              />
-                              <QuickFilterButton
-                                icon="🛒" label="Venta" tone="rose"
-                                value={galleryVentaStatus}
-                                onChange={v => setGalleryVentaStatus(v)}
-                                options={[
-                                  { value: 'all', label: 'Todos' },
-                                  { value: 'pedido', label: 'Pedido', shortLabel: 'Pedido' },
-                                  { value: 'pagado', label: 'Pagado', shortLabel: 'Pagado' },
-                                  { value: 'entregado', label: 'Entregado', shortLabel: 'Entregado' },
-                                ]}
-                              />
-                                  <button type="button" onClick={() => openSelector('proveedor')}
-                                    style={{
-                                      display: 'flex', alignItems: 'center', gap: 6,
-                                      background: galleryProveedor !== 'all' ? QUICK_FILTER_TONES.sky.active : QUICK_FILTER_TONES.sky.bg,
-                                      border: `2px solid ${QUICK_FILTER_TONES.sky.border}`, borderRadius: 18,
-                                      padding: '9px 14px', fontWeight: galleryProveedor !== 'all' ? 700 : 600,
-                                      color: '#5B4636', fontSize: 13.5, cursor: 'pointer',
-                                    }}>
-                                    <span style={{ fontSize: 16 }}>🚚</span>
-                                    {galleryProveedor === 'all' ? 'Proveedor: Todos' : galleryProveedor === '__none__' ? 'Sin proveedor' : galleryProveedor}
-                                    <span style={{ fontSize: 11, opacity: 0.6 }}>⌄</span>
-                                  </button>
-                                  <button type="button" onClick={() => openSelector('compra')}
-                                    style={{
-                                      display: 'flex', alignItems: 'center', gap: 6,
-                                      background: galleryLoteNumero !== 'all' ? QUICK_FILTER_TONES.sage.active : QUICK_FILTER_TONES.sage.bg,
-                                      border: `2px solid ${QUICK_FILTER_TONES.sage.border}`, borderRadius: 18,
-                                      padding: '9px 14px', fontWeight: galleryLoteNumero !== 'all' ? 700 : 600,
-                                      color: '#5B4636', fontSize: 13.5, cursor: 'pointer',
-                                    }}>
-                                    <span style={{ fontSize: 16 }}>🧾</span>
-                                    {galleryLoteNumero === 'all' ? 'N° de compra: Cualquiera' : (() => { const l = lotes.find(x => x.id === galleryLoteNumero); return l ? `Compra #${l.numero}${l.proveedor ? ` — ${l.proveedor}` : ''}` : 'Compra' })()}
-                                    <span style={{ fontSize: 11, opacity: 0.6 }}>⌄</span>
-                                  </button>
-                                  <button type="button" onClick={() => openSelector('ventaLote')}
-                                    style={{
-                                      display: 'flex', alignItems: 'center', gap: 6,
-                                      background: galleryVentaLoteNumero !== 'all' ? QUICK_FILTER_TONES.rose.active : QUICK_FILTER_TONES.rose.bg,
-                                      border: `2px solid ${QUICK_FILTER_TONES.rose.border}`, borderRadius: 18,
-                                      padding: '9px 14px', fontWeight: galleryVentaLoteNumero !== 'all' ? 700 : 600,
-                                      color: '#5B4636', fontSize: 13.5, cursor: 'pointer',
-                                    }}>
-                                    <span style={{ fontSize: 16 }}>🧾</span>
-                                    {galleryVentaLoteNumero === 'all' ? 'N° de venta: Cualquiera' : (() => { const vl = ventaLotes.find(x => x.id === galleryVentaLoteNumero); return vl ? `Venta #${vl.numero}${vl.cliente ? ` — ${vl.cliente}` : ''}` : 'Venta' })()}
-                                    <span style={{ fontSize: 11, opacity: 0.6 }}>⌄</span>
-                                  </button>
-                                </div>
                                 </details>
                                 </div>
 
