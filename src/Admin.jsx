@@ -4710,6 +4710,16 @@ function Admin() {
             >
               🌿 Ver tienda
             </button>
+            <button
+              type="button"
+              onClick={() => { setView('galeria'); setHomeMenuOpen(false); window.scrollTo({ top: 0, behavior: 'smooth' }) }}
+              aria-label="Ir al inicio (Galería)"
+              title="Inicio (Galería)"
+              className="back-to-store"
+              style={{ background: '#fff', backgroundImage: 'none', border: '1px solid #C8B58A', color: '#4a3a2a', fontSize: 20, lineHeight: 1, padding: '6px 14px' }}
+            >
+              🏠
+            </button>
             <button onClick={handleLogout} className="back-to-store" style={{ background: 'transparent', border: '1px solid #b03434', color: '#b03434' }}>
               Cerrar sesión
             </button>
@@ -4927,14 +4937,21 @@ function Admin() {
                     const triPill = (icon, label, posKey, negKey, posText, negText) => {
                       const pos = galleryMissingFilters.has(posKey)
                       const neg = galleryMissingFilters.has(negKey)
+                      const active = pos || neg
+                      const estado = pos ? posText : neg ? negText : 'Todas'
+                      // Apagado: solo el ícono. Encendido: ícono + nombre + estado (Con / Sin).
                       return (
                         <button key={label} type="button" onClick={() => cycleTri(posKey, negKey)}
-                          className={`attr-pill attr-pill--big${pos ? ' is-active' : ''}${neg ? ' is-active is-neg' : ''}`}>
-                          <span className="attr-icon">{icon}</span>
-                          <span className="attr-text">
-                            <span>{label}</span>
-                            <small className="attr-state">{pos ? posText : neg ? negText : 'Todas'}</small>
-                          </span>
+                          title={label} aria-label={`${label}: ${estado}`}
+                          className={`attr-pill${pos ? ' is-active' : ''}${neg ? ' is-active is-neg' : ''}`}
+                          style={{ width: 'auto', minWidth: 0, flex: '0 0 auto', display: 'inline-flex', alignItems: 'center', padding: active ? '8px 14px' : '8px 12px' }}>
+                          <span className="attr-icon" style={{ fontSize: 22 }}>{icon}</span>
+                          {active && (
+                            <span style={{ display: 'inline-flex', flexDirection: 'column', textAlign: 'left', lineHeight: 1.15, marginLeft: 8 }}>
+                              <span style={{ fontWeight: 700 }}>{label}</span>
+                              <small className="attr-state">{estado}</small>
+                            </span>
+                          )}
                         </button>
                       )
                     }
@@ -4942,8 +4959,11 @@ function Admin() {
                       const on = galleryMissingFilters.has(key)
                       return (
                         <button key={key} type="button" onClick={() => toggleExclusive(key, otherKey)}
-                          className={`attr-pill${on ? ' is-active' : ''}${on && neg ? ' is-neg' : ''}`}>
-                          <span className="attr-icon">{icon}</span>{label}{on ? ' ✓' : ''}
+                          title={label} aria-label={label}
+                          className={`attr-pill${on ? ' is-active' : ''}${on && neg ? ' is-neg' : ''}`}
+                          style={{ width: 'auto', minWidth: 0, flex: '0 0 auto', display: 'inline-flex', alignItems: 'center', padding: on ? '8px 14px' : '8px 12px' }}>
+                          <span className="attr-icon" style={{ fontSize: 22 }}>{icon}</span>
+                          {on && <span style={{ marginLeft: 8, fontWeight: 600 }}>{label} ✓</span>}
                         </button>
                       )
                     }
@@ -5147,7 +5167,8 @@ function Admin() {
                               <div className="filter-sheet-body">
                                 <details className="attr-panel" open>
                                   <summary className="attr-title" style={{ cursor: 'pointer' }}>Atributos rápidos</summary>
-                                  <div className="attr-row">
+                                  <p style={{ fontSize: 12, color: '#7a7060', margin: '2px 0 8px' }}>Toca un ícono: 1 vez = Con · 2 veces = Sin · 3 veces = quitar. Al activarlo verás su nombre.</p>
+                                  <div className="attr-row" style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
                                     {triPill('📦', 'Stock', 'hasStock', 'noStock', 'Con stock', 'Sin stock')}
                                     {triPill('📷', 'Foto', 'hasPhoto', 'noPhoto', 'Con foto', 'Sin foto')}
                                     {triPill('📓', 'Notas', 'hasNotes', 'noNotes', 'Con notas', 'Sin notas')}
@@ -5158,7 +5179,7 @@ function Admin() {
                                   </div>
 
                                   <p className="attr-label">Otros</p>
-                                  <div className="attr-row">
+                                  <div className="attr-row" style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
                                     {smallPill('🛒', 'Se vendió alguna vez', 'sold')}
                                     {smallPill('🔤', 'Nombre con código', 'nombreCodigo', null, true)}
                                     {smallPill('🚩', 'Para revisar', 'flagged')}
