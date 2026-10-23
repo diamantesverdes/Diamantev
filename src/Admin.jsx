@@ -4993,6 +4993,110 @@ function Admin() {
                       markSeedBatchesCliente(seedIds, value)
                     }
 
+                    // ----- Íconos de filtro compartidos (celular: fila rápida; hoja de Filtros) -----
+                    const iconPills = (
+                      <>
+                                    {triPill('📦', 'Stock', 'hasStock', 'noStock', 'Con stock', 'Sin stock')}
+                                    {triPill('📷', 'Foto', 'hasPhoto', 'noPhoto', 'Con foto', 'Sin foto')}
+                                    {triPill('📓', 'Notas', 'hasNotes', 'noNotes', 'Con notas', 'Sin notas')}
+                                    {triPill('🌸', 'Floreció', 'flowered', 'noFlowered', 'Sí', 'No')}
+                                    {triPill('💲', 'Precio', 'hasPrice', 'noPrice', 'Con precio', 'Sin precio')}
+                                    {triPill('🎥', 'Video', 'hasVideo', 'noVideo', 'Con video', 'Sin video')}
+                                    {triPill('📂', 'Categoría', 'hasCategory', 'noCategory', 'Con categoría', 'Sin categoría')}
+                                    {smallPill('🛒', 'Se vendió alguna vez', 'sold')}
+                                    {smallPill('🔤', 'Nombre con código', 'nombreCodigo', null, true)}
+                                    {smallPill('🚩', 'Para revisar', 'flagged')}
+                                    {smallPill('🟢', 'Marcadas para cliente', 'marcadoCliente')}
+                                    {groupPill('compra', '🧺', 'Compra',
+                                      galleryCompraStatus !== 'all' || galleryLoteNumero !== 'all',
+                                      [galleryCompraStatus !== 'all' ? cap(galleryCompraStatus) : null, galleryLoteNumero !== 'all' ? `N° ${(lotes.find(x => x.id === galleryLoteNumero) || {}).numero ?? ''}` : null].filter(Boolean).join(' · '),
+                                      () => setFilterGroup(g => (g === 'compra' ? null : 'compra')))}
+                                    {groupPill('venta', '🧾', 'Venta',
+                                      galleryVentaStatus !== 'all' || galleryVentaLoteNumero !== 'all',
+                                      [galleryVentaStatus !== 'all' ? cap(galleryVentaStatus) : null, galleryVentaLoteNumero !== 'all' ? `N° ${(ventaLotes.find(x => x.id === galleryVentaLoteNumero) || {}).numero ?? ''}` : null].filter(Boolean).join(' · '),
+                                      () => setFilterGroup(g => (g === 'venta' ? null : 'venta')))}
+                                    {groupPill('proveedor', '🚚', 'Proveedor',
+                                      galleryProveedor !== 'all',
+                                      galleryProveedor === '__none__' ? 'Sin proveedor' : galleryProveedor,
+                                      () => openSelector('proveedor'))}
+                                    {groupPill('etiquetas', '🏷️', 'Etiquetas',
+                                      galleryLabelStatus !== 'all',
+                                      ({ disponible: 'Nunca impresa', sobrante: 'De sobra', colocada: 'Colocado' })[galleryLabelStatus] || '',
+                                      () => setFilterGroup(g => (g === 'etiquetas' ? null : 'etiquetas')))}
+                      </>
+                    )
+                    const colorChip = groupPill('color', '🎨', 'Color',
+                      galleryColorFilter !== 'all',
+                      galleryColorFilter === '__none__' ? 'Sin color' : galleryColorFilter,
+                      () => setFilterGroup(g => (g === 'color' ? null : 'color')))
+                    const renderGroupPanels = withColor => (
+                      <>
+                                  {filterGroup === 'compra' && (
+                                    <div className="attr-row" style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 10 }}>
+                                      <button key="pedido" type="button" onClick={() => setGalleryCompraStatus(galleryCompraStatus === 'pedido' ? 'all' : 'pedido')} className={`attr-pill${galleryCompraStatus === 'pedido' ? ' is-active' : ''}`}>Pedido{galleryCompraStatus === 'pedido' ? ' ✓' : ''}</button>
+                                      <button key="pagado" type="button" onClick={() => setGalleryCompraStatus(galleryCompraStatus === 'pagado' ? 'all' : 'pagado')} className={`attr-pill${galleryCompraStatus === 'pagado' ? ' is-active' : ''}`}>Pagado{galleryCompraStatus === 'pagado' ? ' ✓' : ''}</button>
+                                      <button key="recibido" type="button" onClick={() => setGalleryCompraStatus(galleryCompraStatus === 'recibido' ? 'all' : 'recibido')} className={`attr-pill${galleryCompraStatus === 'recibido' ? ' is-active' : ''}`}>Recibido{galleryCompraStatus === 'recibido' ? ' ✓' : ''}</button>
+                                      <button type="button" onClick={() => openSelector('compra')}
+                                    style={{
+                                      display: 'flex', alignItems: 'center', gap: 6,
+                                      background: galleryLoteNumero !== 'all' ? QUICK_FILTER_TONES.sage.active : QUICK_FILTER_TONES.sage.bg,
+                                      border: `2px solid ${QUICK_FILTER_TONES.sage.border}`, borderRadius: 18,
+                                      padding: '9px 14px', fontWeight: galleryLoteNumero !== 'all' ? 700 : 600,
+                                      color: '#5B4636', fontSize: 13.5, cursor: 'pointer',
+                                    }}>
+                                    <span style={{ fontSize: 16 }}>🧾</span>
+                                    {galleryLoteNumero === 'all' ? 'N° de compra: Cualquiera' : (() => { const l = lotes.find(x => x.id === galleryLoteNumero); return l ? `Compra #${l.numero}${l.proveedor ? ` — ${l.proveedor}` : ''}` : 'Compra' })()}
+                                    <span style={{ fontSize: 11, opacity: 0.6 }}>⌄</span>
+                                  </button>
+                                    </div>
+                                  )}
+                                  {filterGroup === 'venta' && (
+                                    <div className="attr-row" style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 10 }}>
+                                      <button key="pedido" type="button" onClick={() => setGalleryVentaStatus(galleryVentaStatus === 'pedido' ? 'all' : 'pedido')} className={`attr-pill${galleryVentaStatus === 'pedido' ? ' is-active' : ''}`}>Pedido{galleryVentaStatus === 'pedido' ? ' ✓' : ''}</button>
+                                      <button key="pagado" type="button" onClick={() => setGalleryVentaStatus(galleryVentaStatus === 'pagado' ? 'all' : 'pagado')} className={`attr-pill${galleryVentaStatus === 'pagado' ? ' is-active' : ''}`}>Pagado{galleryVentaStatus === 'pagado' ? ' ✓' : ''}</button>
+                                      <button key="entregado" type="button" onClick={() => setGalleryVentaStatus(galleryVentaStatus === 'entregado' ? 'all' : 'entregado')} className={`attr-pill${galleryVentaStatus === 'entregado' ? ' is-active' : ''}`}>Entregado{galleryVentaStatus === 'entregado' ? ' ✓' : ''}</button>
+                                      <button type="button" onClick={() => openSelector('ventaLote')}
+                                    style={{
+                                      display: 'flex', alignItems: 'center', gap: 6,
+                                      background: galleryVentaLoteNumero !== 'all' ? QUICK_FILTER_TONES.rose.active : QUICK_FILTER_TONES.rose.bg,
+                                      border: `2px solid ${QUICK_FILTER_TONES.rose.border}`, borderRadius: 18,
+                                      padding: '9px 14px', fontWeight: galleryVentaLoteNumero !== 'all' ? 700 : 600,
+                                      color: '#5B4636', fontSize: 13.5, cursor: 'pointer',
+                                    }}>
+                                    <span style={{ fontSize: 16 }}>🧾</span>
+                                    {galleryVentaLoteNumero === 'all' ? 'N° de venta: Cualquiera' : (() => { const vl = ventaLotes.find(x => x.id === galleryVentaLoteNumero); return vl ? `Venta #${vl.numero}${vl.cliente ? ` — ${vl.cliente}` : ''}` : 'Venta' })()}
+                                    <span style={{ fontSize: 11, opacity: 0.6 }}>⌄</span>
+                                  </button>
+                                    </div>
+                                  )}
+                                  {filterGroup === 'etiquetas' && (
+                                    <div className="attr-row" style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 10 }}>
+                                      <button key="disponible" type="button" onClick={() => setGalleryLabelStatus(galleryLabelStatus === 'disponible' ? 'all' : 'disponible')} className={`attr-pill${galleryLabelStatus === 'disponible' ? ' is-active' : ''}`}>Nunca impresa{galleryLabelStatus === 'disponible' ? ' ✓' : ''}</button>
+                                      <button key="sobrante" type="button" onClick={() => setGalleryLabelStatus(galleryLabelStatus === 'sobrante' ? 'all' : 'sobrante')} className={`attr-pill${galleryLabelStatus === 'sobrante' ? ' is-active' : ''}`}>De sobra sin pegar{galleryLabelStatus === 'sobrante' ? ' ✓' : ''}</button>
+                                      <button key="colocada" type="button" onClick={() => setGalleryLabelStatus(galleryLabelStatus === 'colocada' ? 'all' : 'colocada')} className={`attr-pill${galleryLabelStatus === 'colocada' ? ' is-active' : ''}`}>Todo colocado{galleryLabelStatus === 'colocada' ? ' ✓' : ''}</button>
+                                    </div>
+                                  )}
+                        {withColor && filterGroup === 'color' && (
+                      <div className="attr-row" style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 10 }}>
+                        {PLANT_COLORS.filter(c => colorCounts[c.name] || galleryColorFilter === c.name).map(c => {
+                          const on = galleryColorFilter === c.name
+                          return (
+                            <button key={c.name} type="button" onClick={() => setGalleryColorFilter(on ? 'all' : c.name)}
+                              className={`attr-pill${on ? ' is-active' : ''}`}>
+                              <span style={{ ...colorDotStyle(c.name, 13), marginRight: 6, verticalAlign: 'middle' }} />
+                              {c.name} ({colorCounts[c.name] || 0}){on ? ' ✓' : ''}
+                            </button>
+                          )
+                        })}
+                        <button type="button" onClick={() => setGalleryColorFilter(galleryColorFilter === '__none__' ? 'all' : '__none__')}
+                          className={`attr-pill${galleryColorFilter === '__none__' ? ' is-active is-neg' : ''}`}>
+                          <span className="attr-icon">❔</span>Sin color ({plantsSinColor.length}){galleryColorFilter === '__none__' ? ' ✓' : ''}
+                        </button>
+                      </div>
+                        )}
+                      </>
+                    )
+
                     return (
                       <>
                         <div id="gallery-sticky-bar" style={{ position: 'sticky', top: 0, zIndex: 40, background: '#F8F1E1', paddingTop: 4, paddingBottom: 6, marginBottom: 4 }}>
@@ -5028,7 +5132,6 @@ function Admin() {
 
                         {(() => {
                           const selCat = categories.find(x => x.id === galleryFilter)
-                          const selParentId = selCat ? (selCat.parent_id || selCat.id) : null
                           const pillStyle = active => ({
                             flex: '0 0 auto', display: 'flex', alignItems: 'center', gap: 5, whiteSpace: 'nowrap', cursor: 'pointer',
                             background: active ? QUICK_FILTER_TONES.cream.active : QUICK_FILTER_TONES.cream.bg,
@@ -5036,27 +5139,39 @@ function Admin() {
                             padding: '6px 12px', fontSize: 13, fontWeight: active ? 700 : 600, color: '#5B4636',
                             boxShadow: 'none', minHeight: 0, lineHeight: 1.2,
                           })
+                          if (!isWideScreen) {
+                            // Celular: un botón con todas las categorías + Limpiar, y una línea de íconos de filtro
+                            return (
+                              <>
+                                <div style={{ display: 'flex', gap: 6, alignItems: 'center', paddingTop: 6 }}>
+                                  <button type="button" onClick={() => openSelector('categoria')} aria-label="Elegir categoría"
+                                    style={{ ...pillStyle(!!selCat), flex: '1 1 auto', justifyContent: 'center' }}>
+                                    🏷️ {selCat ? `${selCat.emoji} ${selCat.name}` : 'Categorías'}
+                                    <span style={{ fontSize: 11, opacity: 0.6 }}>⌄</span>
+                                  </button>
+                                  {activeChips.length > 0 && (
+                                    <button type="button" onClick={clearAllGalleryFilters} aria-label="Limpiar filtros"
+                                      style={{ ...pillStyle(false), color: '#b03434', borderColor: '#b03434', background: '#fff' }}>
+                                      🧹 Limpiar
+                                    </button>
+                                  )}
+                                </div>
+                                <div style={{ display: 'flex', gap: 6, overflowX: 'auto', WebkitOverflowScrolling: 'touch', scrollbarWidth: 'thin', paddingTop: 6, paddingBottom: 2 }}>
+                                  {iconPills}
+                                  {colorChip}
+                                </div>
+                                {renderGroupPanels(true)}
+                              </>
+                            )
+                          }
+                          // PC: solo el desplegable de categorías (muestra la elegida) + "Todas"
                           return (
-                            <div
-                              // Celular: una fila de píldoras que se desliza con el dedo. PC: solo el desplegable de categorías (se ve limpio).
-                              onWheel={e => { if (!isWideScreen && e.deltaY !== 0) e.currentTarget.scrollLeft += e.deltaY }}
-                              style={{ display: 'flex', flexWrap: 'nowrap', gap: 6, overflowX: 'auto', WebkitOverflowScrolling: 'touch', scrollbarWidth: 'thin', paddingTop: 6, paddingBottom: 2 }}
-                            >
-                              <button type="button" onClick={() => openSelector('categoria')} aria-label="Elegir categoría" style={pillStyle(!!(selCat && (isWideScreen || selCat.parent_id)))}>
-                                🏷️ {selCat && (isWideScreen || selCat.parent_id) ? `${selCat.emoji} ${selCat.name}` : 'Categorías'}
+                            <div style={{ display: 'flex', gap: 6, overflowX: 'auto', scrollbarWidth: 'thin', paddingTop: 6, paddingBottom: 2 }}>
+                              <button type="button" onClick={() => openSelector('categoria')} aria-label="Elegir categoría" style={pillStyle(!!selCat)}>
+                                🏷️ {selCat ? `${selCat.emoji} ${selCat.name}` : 'Categorías'}
                                 <span style={{ fontSize: 11, opacity: 0.6 }}>⌄</span>
                               </button>
                               <button type="button" onClick={() => setGalleryFilter('all')} style={pillStyle(galleryFilter === 'all')}>Todas</button>
-                              {!isWideScreen && [...categories.filter(c => !c.parent_id)].sort((a, b) => (/semilla/i.test(b.name) ? 1 : 0) - (/semilla/i.test(a.name) ? 1 : 0)).map(c => (
-                                <button
-                                  key={c.id}
-                                  type="button"
-                                  onClick={() => setGalleryFilter(galleryFilter === c.id ? 'all' : c.id)}
-                                  style={pillStyle(selParentId === c.id)}
-                                >
-                                  {c.emoji} {c.name}
-                                </button>
-                              ))}
                             </div>
                           )
                         })()}
@@ -5184,80 +5299,10 @@ function Admin() {
                                 <details className="attr-panel" open>
                                   <summary className="attr-title" style={{ cursor: 'pointer' }}>Atributos rápidos</summary>
                                   <div className="attr-row" style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-                                    {triPill('📦', 'Stock', 'hasStock', 'noStock', 'Con stock', 'Sin stock')}
-                                    {triPill('📷', 'Foto', 'hasPhoto', 'noPhoto', 'Con foto', 'Sin foto')}
-                                    {triPill('📓', 'Notas', 'hasNotes', 'noNotes', 'Con notas', 'Sin notas')}
-                                    {triPill('🌸', 'Floreció', 'flowered', 'noFlowered', 'Sí', 'No')}
-                                    {triPill('💲', 'Precio', 'hasPrice', 'noPrice', 'Con precio', 'Sin precio')}
-                                    {triPill('🎥', 'Video', 'hasVideo', 'noVideo', 'Con video', 'Sin video')}
-                                    {triPill('📂', 'Categoría', 'hasCategory', 'noCategory', 'Con categoría', 'Sin categoría')}
-                                    {smallPill('🛒', 'Se vendió alguna vez', 'sold')}
-                                    {smallPill('🔤', 'Nombre con código', 'nombreCodigo', null, true)}
-                                    {smallPill('🚩', 'Para revisar', 'flagged')}
-                                    {smallPill('🟢', 'Marcadas para cliente', 'marcadoCliente')}
-                                    {groupPill('compra', '🧺', 'Compra',
-                                      galleryCompraStatus !== 'all' || galleryLoteNumero !== 'all',
-                                      [galleryCompraStatus !== 'all' ? cap(galleryCompraStatus) : null, galleryLoteNumero !== 'all' ? `N° ${(lotes.find(x => x.id === galleryLoteNumero) || {}).numero ?? ''}` : null].filter(Boolean).join(' · '),
-                                      () => setFilterGroup(g => (g === 'compra' ? null : 'compra')))}
-                                    {groupPill('venta', '🧾', 'Venta',
-                                      galleryVentaStatus !== 'all' || galleryVentaLoteNumero !== 'all',
-                                      [galleryVentaStatus !== 'all' ? cap(galleryVentaStatus) : null, galleryVentaLoteNumero !== 'all' ? `N° ${(ventaLotes.find(x => x.id === galleryVentaLoteNumero) || {}).numero ?? ''}` : null].filter(Boolean).join(' · '),
-                                      () => setFilterGroup(g => (g === 'venta' ? null : 'venta')))}
-                                    {groupPill('proveedor', '🚚', 'Proveedor',
-                                      galleryProveedor !== 'all',
-                                      galleryProveedor === '__none__' ? 'Sin proveedor' : galleryProveedor,
-                                      () => openSelector('proveedor'))}
-                                    {groupPill('etiquetas', '🏷️', 'Etiquetas',
-                                      galleryLabelStatus !== 'all',
-                                      ({ disponible: 'Nunca impresa', sobrante: 'De sobra', colocada: 'Colocado' })[galleryLabelStatus] || '',
-                                      () => setFilterGroup(g => (g === 'etiquetas' ? null : 'etiquetas')))}
+                                    {iconPills}
                                   </div>
 
-                                  {filterGroup === 'compra' && (
-                                    <div className="attr-row" style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 10 }}>
-                                      <button key="pedido" type="button" onClick={() => setGalleryCompraStatus(galleryCompraStatus === 'pedido' ? 'all' : 'pedido')} className={`attr-pill${galleryCompraStatus === 'pedido' ? ' is-active' : ''}`}>Pedido{galleryCompraStatus === 'pedido' ? ' ✓' : ''}</button>
-                                      <button key="pagado" type="button" onClick={() => setGalleryCompraStatus(galleryCompraStatus === 'pagado' ? 'all' : 'pagado')} className={`attr-pill${galleryCompraStatus === 'pagado' ? ' is-active' : ''}`}>Pagado{galleryCompraStatus === 'pagado' ? ' ✓' : ''}</button>
-                                      <button key="recibido" type="button" onClick={() => setGalleryCompraStatus(galleryCompraStatus === 'recibido' ? 'all' : 'recibido')} className={`attr-pill${galleryCompraStatus === 'recibido' ? ' is-active' : ''}`}>Recibido{galleryCompraStatus === 'recibido' ? ' ✓' : ''}</button>
-                                      <button type="button" onClick={() => openSelector('compra')}
-                                    style={{
-                                      display: 'flex', alignItems: 'center', gap: 6,
-                                      background: galleryLoteNumero !== 'all' ? QUICK_FILTER_TONES.sage.active : QUICK_FILTER_TONES.sage.bg,
-                                      border: `2px solid ${QUICK_FILTER_TONES.sage.border}`, borderRadius: 18,
-                                      padding: '9px 14px', fontWeight: galleryLoteNumero !== 'all' ? 700 : 600,
-                                      color: '#5B4636', fontSize: 13.5, cursor: 'pointer',
-                                    }}>
-                                    <span style={{ fontSize: 16 }}>🧾</span>
-                                    {galleryLoteNumero === 'all' ? 'N° de compra: Cualquiera' : (() => { const l = lotes.find(x => x.id === galleryLoteNumero); return l ? `Compra #${l.numero}${l.proveedor ? ` — ${l.proveedor}` : ''}` : 'Compra' })()}
-                                    <span style={{ fontSize: 11, opacity: 0.6 }}>⌄</span>
-                                  </button>
-                                    </div>
-                                  )}
-                                  {filterGroup === 'venta' && (
-                                    <div className="attr-row" style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 10 }}>
-                                      <button key="pedido" type="button" onClick={() => setGalleryVentaStatus(galleryVentaStatus === 'pedido' ? 'all' : 'pedido')} className={`attr-pill${galleryVentaStatus === 'pedido' ? ' is-active' : ''}`}>Pedido{galleryVentaStatus === 'pedido' ? ' ✓' : ''}</button>
-                                      <button key="pagado" type="button" onClick={() => setGalleryVentaStatus(galleryVentaStatus === 'pagado' ? 'all' : 'pagado')} className={`attr-pill${galleryVentaStatus === 'pagado' ? ' is-active' : ''}`}>Pagado{galleryVentaStatus === 'pagado' ? ' ✓' : ''}</button>
-                                      <button key="entregado" type="button" onClick={() => setGalleryVentaStatus(galleryVentaStatus === 'entregado' ? 'all' : 'entregado')} className={`attr-pill${galleryVentaStatus === 'entregado' ? ' is-active' : ''}`}>Entregado{galleryVentaStatus === 'entregado' ? ' ✓' : ''}</button>
-                                      <button type="button" onClick={() => openSelector('ventaLote')}
-                                    style={{
-                                      display: 'flex', alignItems: 'center', gap: 6,
-                                      background: galleryVentaLoteNumero !== 'all' ? QUICK_FILTER_TONES.rose.active : QUICK_FILTER_TONES.rose.bg,
-                                      border: `2px solid ${QUICK_FILTER_TONES.rose.border}`, borderRadius: 18,
-                                      padding: '9px 14px', fontWeight: galleryVentaLoteNumero !== 'all' ? 700 : 600,
-                                      color: '#5B4636', fontSize: 13.5, cursor: 'pointer',
-                                    }}>
-                                    <span style={{ fontSize: 16 }}>🧾</span>
-                                    {galleryVentaLoteNumero === 'all' ? 'N° de venta: Cualquiera' : (() => { const vl = ventaLotes.find(x => x.id === galleryVentaLoteNumero); return vl ? `Venta #${vl.numero}${vl.cliente ? ` — ${vl.cliente}` : ''}` : 'Venta' })()}
-                                    <span style={{ fontSize: 11, opacity: 0.6 }}>⌄</span>
-                                  </button>
-                                    </div>
-                                  )}
-                                  {filterGroup === 'etiquetas' && (
-                                    <div className="attr-row" style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 10 }}>
-                                      <button key="disponible" type="button" onClick={() => setGalleryLabelStatus(galleryLabelStatus === 'disponible' ? 'all' : 'disponible')} className={`attr-pill${galleryLabelStatus === 'disponible' ? ' is-active' : ''}`}>Nunca impresa{galleryLabelStatus === 'disponible' ? ' ✓' : ''}</button>
-                                      <button key="sobrante" type="button" onClick={() => setGalleryLabelStatus(galleryLabelStatus === 'sobrante' ? 'all' : 'sobrante')} className={`attr-pill${galleryLabelStatus === 'sobrante' ? ' is-active' : ''}`}>De sobra sin pegar{galleryLabelStatus === 'sobrante' ? ' ✓' : ''}</button>
-                                      <button key="colocada" type="button" onClick={() => setGalleryLabelStatus(galleryLabelStatus === 'colocada' ? 'all' : 'colocada')} className={`attr-pill${galleryLabelStatus === 'colocada' ? ' is-active' : ''}`}>Todo colocado{galleryLabelStatus === 'colocada' ? ' ✓' : ''}</button>
-                                    </div>
-                                  )}
+                                  {renderGroupPanels(false)}
                                 </details>
                                 <details className="attr-panel">
                                   <summary className="attr-title" style={{ cursor: 'pointer' }}>🎨 Color y orden</summary>
