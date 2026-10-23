@@ -5002,16 +5002,16 @@ function Admin() {
                           })
                           return (
                             <div
-                              // Celular: una fila que se desliza con el dedo. PC: las píldoras pasan a la siguiente línea (con mouse no se puede deslizar).
+                              // Celular: una fila de píldoras que se desliza con el dedo. PC: solo el desplegable de categorías (se ve limpio).
                               onWheel={e => { if (!isWideScreen && e.deltaY !== 0) e.currentTarget.scrollLeft += e.deltaY }}
-                              style={{ display: 'flex', flexWrap: isWideScreen ? 'wrap' : 'nowrap', gap: 6, overflowX: isWideScreen ? 'visible' : 'auto', WebkitOverflowScrolling: 'touch', scrollbarWidth: 'thin', paddingTop: 6, paddingBottom: 2 }}
+                              style={{ display: 'flex', flexWrap: 'nowrap', gap: 6, overflowX: 'auto', WebkitOverflowScrolling: 'touch', scrollbarWidth: 'thin', paddingTop: 6, paddingBottom: 2 }}
                             >
-                              <button type="button" onClick={() => openSelector('categoria')} aria-label="Elegir categoría" style={pillStyle(!!(selCat && selCat.parent_id))}>
-                                🏷️ {selCat && selCat.parent_id ? `${selCat.emoji} ${selCat.name}` : 'Categorías'}
+                              <button type="button" onClick={() => openSelector('categoria')} aria-label="Elegir categoría" style={pillStyle(!!(selCat && (isWideScreen || selCat.parent_id)))}>
+                                🏷️ {selCat && (isWideScreen || selCat.parent_id) ? `${selCat.emoji} ${selCat.name}` : 'Categorías'}
                                 <span style={{ fontSize: 11, opacity: 0.6 }}>⌄</span>
                               </button>
                               <button type="button" onClick={() => setGalleryFilter('all')} style={pillStyle(galleryFilter === 'all')}>Todas</button>
-                              {[...categories.filter(c => !c.parent_id)].sort((a, b) => (/semilla/i.test(b.name) ? 1 : 0) - (/semilla/i.test(a.name) ? 1 : 0)).map(c => (
+                              {!isWideScreen && [...categories.filter(c => !c.parent_id)].sort((a, b) => (/semilla/i.test(b.name) ? 1 : 0) - (/semilla/i.test(a.name) ? 1 : 0)).map(c => (
                                 <button
                                   key={c.id}
                                   type="button"
@@ -5309,7 +5309,7 @@ function Admin() {
                                     ...(() => {
                                       const term = catFilterSearch.trim().toLowerCase()
                                       const result = []
-                                      categories.filter(c => !c.parent_id).forEach(parent => {
+                                      ;[...categories.filter(c => !c.parent_id)].sort((a, b) => (/semilla/i.test(b.name) ? 1 : 0) - (/semilla/i.test(a.name) ? 1 : 0)).forEach(parent => {
                                         const children = categories.filter(c => c.parent_id === parent.id)
                                         const parentMatches = parent.name.toLowerCase().includes(term)
                                         const matchingChildren = children.filter(ch => term === '' || ch.name.toLowerCase().includes(term))
