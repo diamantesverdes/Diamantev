@@ -475,6 +475,7 @@ function Admin() {
   const [gallerySearch, setGallerySearch] = useState('')
   const [galleryMissingFilters, setGalleryMissingFilters] = useState(new Set())
   const [galleryFiltersOpen, setGalleryFiltersOpen] = useState(false)
+  const [filterGroup, setFilterGroup] = useState(null) // 'compra' | 'venta' | 'etiquetas' | null (grupo de filtros desplegado)
   const [galleryColorFilter, setGalleryColorFilter] = useState('all') // 'all' | '__none__' | nombre de color
   const [gallerySortBy, setGallerySortBy] = useState('nombre') // 'nombre' | 'color'
   const [colorPickerFor, setColorPickerFor] = useState(null) // { ids: [...], title }
@@ -4967,6 +4968,21 @@ function Admin() {
                         </button>
                       )
                     }
+                    const cap = t => (t ? t.charAt(0).toUpperCase() + t.slice(1) : '')
+                    // Botón de grupo: solo el ícono; al estar activo muestra el nombre y lo elegido
+                    const groupPill = (key, icon, label, active, summary, onClick) => (
+                      <button key={key} type="button" onClick={onClick} title={label} aria-label={label}
+                        className={`attr-pill${active ? ' is-active' : ''}`}
+                        style={{ width: 'auto', minWidth: 0, flex: '0 0 auto', display: 'inline-flex', alignItems: 'center', padding: active ? '8px 14px' : '8px 12px', outline: filterGroup === key ? '2px solid #8b7a52' : 'none', outlineOffset: 1 }}>
+                        <span className="attr-icon" style={{ fontSize: 22 }}>{icon}</span>
+                        {active && (
+                          <span style={{ display: 'inline-flex', flexDirection: 'column', textAlign: 'left', lineHeight: 1.15, marginLeft: 8 }}>
+                            <span style={{ fontWeight: 700 }}>{label}</span>
+                            {summary ? <small className="attr-state">{summary}</small> : null}
+                          </span>
+                        )}
+                      </button>
+                    )
                     function setClienteParaVisibles(value) {
                       const ids = new Set(galleryRealPlants.map(p => p.id))
                       const seedIds = galleryPlants.filter(p => p.isSeed).map(p => p.seedBatchId)
@@ -5167,7 +5183,6 @@ function Admin() {
                               <div className="filter-sheet-body">
                                 <details className="attr-panel" open>
                                   <summary className="attr-title" style={{ cursor: 'pointer' }}>Atributos rápidos</summary>
-                                  <p style={{ fontSize: 12, color: '#7a7060', margin: '2px 0 8px' }}>Toca un ícono: 1 vez = Con · 2 veces = Sin · 3 veces = quitar. Al activarlo verás su nombre.</p>
                                   <div className="attr-row" style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
                                     {triPill('📦', 'Stock', 'hasStock', 'noStock', 'Con stock', 'Sin stock')}
                                     {triPill('📷', 'Foto', 'hasPhoto', 'noPhoto', 'Con foto', 'Sin foto')}
@@ -5176,25 +5191,34 @@ function Admin() {
                                     {triPill('💲', 'Precio', 'hasPrice', 'noPrice', 'Con precio', 'Sin precio')}
                                     {triPill('🎥', 'Video', 'hasVideo', 'noVideo', 'Con video', 'Sin video')}
                                     {triPill('📂', 'Categoría', 'hasCategory', 'noCategory', 'Con categoría', 'Sin categoría')}
-                                  </div>
-
-                                  <p className="attr-label">Otros</p>
-                                  <div className="attr-row" style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
                                     {smallPill('🛒', 'Se vendió alguna vez', 'sold')}
                                     {smallPill('🔤', 'Nombre con código', 'nombreCodigo', null, true)}
                                     {smallPill('🚩', 'Para revisar', 'flagged')}
                                     {smallPill('🟢', 'Marcadas para cliente', 'marcadoCliente')}
+                                    {groupPill('compra', '🧺', 'Compra',
+                                      galleryCompraStatus !== 'all' || galleryLoteNumero !== 'all',
+                                      [galleryCompraStatus !== 'all' ? cap(galleryCompraStatus) : null, galleryLoteNumero !== 'all' ? `N° ${(lotes.find(x => x.id === galleryLoteNumero) || {}).numero ?? ''}` : null].filter(Boolean).join(' · '),
+                                      () => setFilterGroup(g => (g === 'compra' ? null : 'compra')))}
+                                    {groupPill('venta', '🧾', 'Venta',
+                                      galleryVentaStatus !== 'all' || galleryVentaLoteNumero !== 'all',
+                                      [galleryVentaStatus !== 'all' ? cap(galleryVentaStatus) : null, galleryVentaLoteNumero !== 'all' ? `N° ${(ventaLotes.find(x => x.id === galleryVentaLoteNumero) || {}).numero ?? ''}` : null].filter(Boolean).join(' · '),
+                                      () => setFilterGroup(g => (g === 'venta' ? null : 'venta')))}
+                                    {groupPill('proveedor', '🚚', 'Proveedor',
+                                      galleryProveedor !== 'all',
+                                      galleryProveedor === '__none__' ? 'Sin proveedor' : galleryProveedor,
+                                      () => openSelector('proveedor'))}
+                                    {groupPill('etiquetas', '🏷️', 'Etiquetas',
+                                      galleryLabelStatus !== 'all',
+                                      ({ disponible: 'Nunca impresa', sobrante: 'De sobra', colocada: 'Colocado' })[galleryLabelStatus] || '',
+                                      () => setFilterGroup(g => (g === 'etiquetas' ? null : 'etiquetas')))}
                                   </div>
-                                </details>
-                                <details className="attr-panel" open>
-                                  <summary className="attr-title" style={{ cursor: 'pointer' }}>Más filtros</summary>
 
-                                  <p className="attr-label">📦 Compra</p>
-                                  <div className="attr-row">
-                                    <button key="pedido" type="button" onClick={() => setGalleryCompraStatus(galleryCompraStatus === 'pedido' ? 'all' : 'pedido')} className={`attr-pill${galleryCompraStatus === 'pedido' ? ' is-active' : ''}`}>Pedido{galleryCompraStatus === 'pedido' ? ' ✓' : ''}</button>
-                                    <button key="pagado" type="button" onClick={() => setGalleryCompraStatus(galleryCompraStatus === 'pagado' ? 'all' : 'pagado')} className={`attr-pill${galleryCompraStatus === 'pagado' ? ' is-active' : ''}`}>Pagado{galleryCompraStatus === 'pagado' ? ' ✓' : ''}</button>
-                                    <button key="recibido" type="button" onClick={() => setGalleryCompraStatus(galleryCompraStatus === 'recibido' ? 'all' : 'recibido')} className={`attr-pill${galleryCompraStatus === 'recibido' ? ' is-active' : ''}`}>Recibido{galleryCompraStatus === 'recibido' ? ' ✓' : ''}</button>
-                                    <button type="button" onClick={() => openSelector('compra')}
+                                  {filterGroup === 'compra' && (
+                                    <div className="attr-row" style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 10 }}>
+                                      <button key="pedido" type="button" onClick={() => setGalleryCompraStatus(galleryCompraStatus === 'pedido' ? 'all' : 'pedido')} className={`attr-pill${galleryCompraStatus === 'pedido' ? ' is-active' : ''}`}>Pedido{galleryCompraStatus === 'pedido' ? ' ✓' : ''}</button>
+                                      <button key="pagado" type="button" onClick={() => setGalleryCompraStatus(galleryCompraStatus === 'pagado' ? 'all' : 'pagado')} className={`attr-pill${galleryCompraStatus === 'pagado' ? ' is-active' : ''}`}>Pagado{galleryCompraStatus === 'pagado' ? ' ✓' : ''}</button>
+                                      <button key="recibido" type="button" onClick={() => setGalleryCompraStatus(galleryCompraStatus === 'recibido' ? 'all' : 'recibido')} className={`attr-pill${galleryCompraStatus === 'recibido' ? ' is-active' : ''}`}>Recibido{galleryCompraStatus === 'recibido' ? ' ✓' : ''}</button>
+                                      <button type="button" onClick={() => openSelector('compra')}
                                     style={{
                                       display: 'flex', alignItems: 'center', gap: 6,
                                       background: galleryLoteNumero !== 'all' ? QUICK_FILTER_TONES.sage.active : QUICK_FILTER_TONES.sage.bg,
@@ -5206,14 +5230,14 @@ function Admin() {
                                     {galleryLoteNumero === 'all' ? 'N° de compra: Cualquiera' : (() => { const l = lotes.find(x => x.id === galleryLoteNumero); return l ? `Compra #${l.numero}${l.proveedor ? ` — ${l.proveedor}` : ''}` : 'Compra' })()}
                                     <span style={{ fontSize: 11, opacity: 0.6 }}>⌄</span>
                                   </button>
-                                  </div>
-
-                                  <p className="attr-label">🛒 Venta</p>
-                                  <div className="attr-row">
-                                    <button key="pedido" type="button" onClick={() => setGalleryVentaStatus(galleryVentaStatus === 'pedido' ? 'all' : 'pedido')} className={`attr-pill${galleryVentaStatus === 'pedido' ? ' is-active' : ''}`}>Pedido{galleryVentaStatus === 'pedido' ? ' ✓' : ''}</button>
-                                    <button key="pagado" type="button" onClick={() => setGalleryVentaStatus(galleryVentaStatus === 'pagado' ? 'all' : 'pagado')} className={`attr-pill${galleryVentaStatus === 'pagado' ? ' is-active' : ''}`}>Pagado{galleryVentaStatus === 'pagado' ? ' ✓' : ''}</button>
-                                    <button key="entregado" type="button" onClick={() => setGalleryVentaStatus(galleryVentaStatus === 'entregado' ? 'all' : 'entregado')} className={`attr-pill${galleryVentaStatus === 'entregado' ? ' is-active' : ''}`}>Entregado{galleryVentaStatus === 'entregado' ? ' ✓' : ''}</button>
-                                    <button type="button" onClick={() => openSelector('ventaLote')}
+                                    </div>
+                                  )}
+                                  {filterGroup === 'venta' && (
+                                    <div className="attr-row" style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 10 }}>
+                                      <button key="pedido" type="button" onClick={() => setGalleryVentaStatus(galleryVentaStatus === 'pedido' ? 'all' : 'pedido')} className={`attr-pill${galleryVentaStatus === 'pedido' ? ' is-active' : ''}`}>Pedido{galleryVentaStatus === 'pedido' ? ' ✓' : ''}</button>
+                                      <button key="pagado" type="button" onClick={() => setGalleryVentaStatus(galleryVentaStatus === 'pagado' ? 'all' : 'pagado')} className={`attr-pill${galleryVentaStatus === 'pagado' ? ' is-active' : ''}`}>Pagado{galleryVentaStatus === 'pagado' ? ' ✓' : ''}</button>
+                                      <button key="entregado" type="button" onClick={() => setGalleryVentaStatus(galleryVentaStatus === 'entregado' ? 'all' : 'entregado')} className={`attr-pill${galleryVentaStatus === 'entregado' ? ' is-active' : ''}`}>Entregado{galleryVentaStatus === 'entregado' ? ' ✓' : ''}</button>
+                                      <button type="button" onClick={() => openSelector('ventaLote')}
                                     style={{
                                       display: 'flex', alignItems: 'center', gap: 6,
                                       background: galleryVentaLoteNumero !== 'all' ? QUICK_FILTER_TONES.rose.active : QUICK_FILTER_TONES.rose.bg,
@@ -5225,38 +5249,15 @@ function Admin() {
                                     {galleryVentaLoteNumero === 'all' ? 'N° de venta: Cualquiera' : (() => { const vl = ventaLotes.find(x => x.id === galleryVentaLoteNumero); return vl ? `Venta #${vl.numero}${vl.cliente ? ` — ${vl.cliente}` : ''}` : 'Venta' })()}
                                     <span style={{ fontSize: 11, opacity: 0.6 }}>⌄</span>
                                   </button>
-                                  </div>
-
-                                  <p className="attr-label">🚚 Proveedor</p>
-                                  <div className="attr-row">
-                                    <button type="button" onClick={() => openSelector('proveedor')}
-                                    style={{
-                                      display: 'flex', alignItems: 'center', gap: 6,
-                                      background: galleryProveedor !== 'all' ? QUICK_FILTER_TONES.sky.active : QUICK_FILTER_TONES.sky.bg,
-                                      border: `2px solid ${QUICK_FILTER_TONES.sky.border}`, borderRadius: 18,
-                                      padding: '9px 14px', fontWeight: galleryProveedor !== 'all' ? 700 : 600,
-                                      color: '#5B4636', fontSize: 13.5, cursor: 'pointer',
-                                    }}>
-                                    <span style={{ fontSize: 16 }}>🚚</span>
-                                    {galleryProveedor === 'all' ? 'Proveedor: Todos' : galleryProveedor === '__none__' ? 'Sin proveedor' : galleryProveedor}
-                                    <span style={{ fontSize: 11, opacity: 0.6 }}>⌄</span>
-                                  </button>
-                                  </div>
-
-                                  <p className="attr-label">🏷️ Etiquetas</p>
-                                  <div className="attr-row">
-                                    <QuickFilterButton
-                                    icon="🏷️" label="Etiquetas" tone="cream"
-                                    value={galleryLabelStatus}
-                                    onChange={v => setGalleryLabelStatus(v)}
-                                    options={[
-                                      { value: 'all', label: 'Todas' },
-                                      { value: 'disponible', label: '🟢 Nunca impresa', shortLabel: 'Nunca impresa' },
-                                      { value: 'sobrante', label: '📦 De sobra sin pegar', shortLabel: 'De sobra' },
-                                      { value: 'colocada', label: '✅ Todo colocado', shortLabel: 'Colocado' },
-                                    ]}
-                                  />
-                                  </div>
+                                    </div>
+                                  )}
+                                  {filterGroup === 'etiquetas' && (
+                                    <div className="attr-row" style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 10 }}>
+                                      <button key="disponible" type="button" onClick={() => setGalleryLabelStatus(galleryLabelStatus === 'disponible' ? 'all' : 'disponible')} className={`attr-pill${galleryLabelStatus === 'disponible' ? ' is-active' : ''}`}>Nunca impresa{galleryLabelStatus === 'disponible' ? ' ✓' : ''}</button>
+                                      <button key="sobrante" type="button" onClick={() => setGalleryLabelStatus(galleryLabelStatus === 'sobrante' ? 'all' : 'sobrante')} className={`attr-pill${galleryLabelStatus === 'sobrante' ? ' is-active' : ''}`}>De sobra sin pegar{galleryLabelStatus === 'sobrante' ? ' ✓' : ''}</button>
+                                      <button key="colocada" type="button" onClick={() => setGalleryLabelStatus(galleryLabelStatus === 'colocada' ? 'all' : 'colocada')} className={`attr-pill${galleryLabelStatus === 'colocada' ? ' is-active' : ''}`}>Todo colocado{galleryLabelStatus === 'colocada' ? ' ✓' : ''}</button>
+                                    </div>
+                                  )}
                                 </details>
                                 <details className="attr-panel">
                                   <summary className="attr-title" style={{ cursor: 'pointer' }}>🎨 Color y orden</summary>
