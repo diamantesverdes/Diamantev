@@ -496,6 +496,7 @@ function Admin() {
   const [labelQtyModalOpen, setLabelQtyModalOpen] = useState(false)
   const [pendingLabelAction, setPendingLabelAction] = useState(null) // 'print' | 'pdf' | 'pptx'
   const [labelQuantities, setLabelQuantities] = useState(() => (readLabelsDraft() || {}).idQty || {}) // { plantId: cantidad }
+  const [actionMenu, setActionMenu] = useState(null) // 'etiquetas' | 'tienda' | 'compartir' (menú abierto al tener plantas seleccionadas)
   const iconRowRef = useRef(null) // fila deslizable de íconos de filtro
   const [iconRowEdge, setIconRowEdge] = useState({ start: true, end: false }) // ¿está al inicio / al final?
   const [labelBulk, setLabelBulk] = useState({ id: null, name: null }) // valor de la fila "Todas" del modal de cantidades
@@ -5402,40 +5403,69 @@ function Admin() {
                         <style>{`
                           .gallery-actions-row > button { flex: 0 0 auto !important; width: auto !important; margin: 0 !important; white-space: nowrap !important; }
                         `}</style>
-                          {galleryMode === 'acciones' && selectedLabels.size > 0 && (
-                            <div className="gallery-actions-row" style={{ display: 'flex', flexWrap: 'nowrap', gap: 6, overflowX: 'auto', WebkitOverflowScrolling: 'touch', paddingTop: 8, paddingBottom: 2 }}>
-                              <button type="button" className="print-btn" onClick={() => { setLabelQuantities(prev => { const next = { ...prev }; selectedLabels.forEach(id => { if (!next[id]) next[id] = 1 }); return next }); setPendingLabelAction('print'); setLabelQtyModalOpen(true) }}>
-                                🏷️ Imprimir ({selectedLabels.size})
+                          {galleryMode === 'acciones' && selectedLabels.size > 0 && (() => {
+                            const n = selectedLabels.size
+                            const yaEnTienda = plants.filter(x => selectedLabels.has(x.id) && x.marcado_cliente).length
+                            const abrirEtiquetas = accion => {
+                              setLabelQuantities(prev => { const next = { ...prev }; selectedLabels.forEach(id => { if (!next[id]) next[id] = 1 }); return next })
+                              setPendingLabelAction(accion)
+                              setLabelQtyModalOpen(true)
+                            }
+                            const principal = (key, icon, nombre) => (
+                              <button key={key} type="button" className="print-btn"
+                                onClick={() => setActionMenu(m => (m === key ? null : key))}
+                                style={{ flex: '1 1 0', minWidth: 0, padding: '8px 4px', whiteSpace: 'normal', lineHeight: 1.15, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2, outline: actionMenu === key ? '2px solid #8b7a52' : 'none', outlineOffset: 1 }}>
+                                <span style={{ fontSize: 14, fontWeight: 700 }}>{icon} {nombre}</span>
+                                <span style={{ fontSize: 13 }}>({n}) <span style={{ fontSize: 10, opacity: 0.6 }}>{actionMenu === key ? '▲' : '▼'}</span></span>
                               </button>
-                              <button type="button" className="print-btn" onClick={() => { setLabelQuantities(prev => { const next = { ...prev }; selectedLabels.forEach(id => { if (!next[id]) next[id] = 1 }); return next }); setPendingLabelAction('pdf'); setLabelQtyModalOpen(true) }} disabled={sharingNotes}>
-                                {sharingNotes ? 'Generando...' : `🔖 Etiquetas (${selectedLabels.size})`}
+                            )
+                            const opcion = (icon, texto, sub, onClick, deshabilitado) => (
+                              <button key={texto} type="button" className="print-btn" disabled={!!deshabilitado}
+                                onClick={() => { setActionMenu(null); onClick() }}
+                                style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 10, textAlign: 'left', padding: '10px 12px', whiteSpace: 'normal' }}>
+                                <span style={{ fontSize: 18 }}>{icon}</span>
+                                <span style={{ display: 'flex', flexDirection: 'column' }}>
+                                  <span style={{ fontWeight: 600 }}>{texto}</span>
+                                  {sub ? <small style={{ opacity: 0.7 }}>{sub}</small> : null}
+                                </span>
                               </button>
-                              <button type="button" className="print-btn" onClick={() => { setLabelQuantities(prev => { const next = { ...prev }; selectedLabels.forEach(id => { if (!next[id]) next[id] = 1 }); return next }); setPendingLabelAction('pptx'); setLabelQtyModalOpen(true) }} disabled={sharingNotes}>
-                                {sharingNotes ? 'Generando...' : `📽️ Descargar PowerPoint (${selectedLabels.size})`}
-                              </button>
-                              <button type="button" className="print-btn" onClick={() => setShareModalOpen(true)}>
-                                📤 Compartir/Enviar ({selectedLabels.size})
-                              </button>
-                              <button type="button" className="print-btn" onClick={() => shareSelectedPhotosDirect(galleryRealPlants)} disabled={sharingNotes}>
-                                {sharingNotes ? 'Preparando...' : `📲 Enviar fotos (${selectedLabels.size})`}
-                              </button>
-                              <button type="button" className="print-btn" onClick={() => { const ids = requireRealPlantIds(); if (ids.length) markAllPlacedForSelected(ids) }}>
-                                ✅ Marcar todo colocado ({selectedLabels.size})
-                              </button>
-                              <button type="button" className="print-btn" onClick={() => { const ids = requireRealPlantIds(); if (ids.length) applyBulkDiscount(ids) }}>
-                                🏷️ Aplicar descuento ({selectedLabels.size})
-                              </button>
-                              <button type="button" className="print-btn" onClick={() => markSelectedClienteAll(selectedLabels, true)}>
-                                🟢 Marcar para cliente ({selectedLabels.size})
-                              </button>
-                              <button type="button" className="print-btn" onClick={() => markSelectedClienteAll(selectedLabels, false)}>
-                                ⚪ Quitar de cliente ({selectedLabels.size})
-                              </button>
-                              <button type="button" className="print-btn" onClick={() => { const ids = requireRealPlantIds(); if (ids.length) setColorPickerFor({ ids, title: `${ids.length} plantas seleccionadas` }) }}>
-                                🎨 Color ({selectedLabels.size})
-                              </button>
-                            </div>
-                          )}
+                            )
+                            return (
+                              <div style={{ paddingTop: 8 }}>
+                                <div style={{ display: 'flex', gap: 6 }}>
+                                  {principal('etiquetas', '🔖', 'Etiquetas')}
+                                  {principal('tienda', '🛍️', 'Tienda')}
+                                  {principal('compartir', '📤', 'Compartir')}
+                                </div>
+                                {actionMenu && (
+                                  <div style={{ marginTop: 6, display: 'flex', flexDirection: 'column', gap: 6, background: '#FBF3E6', border: '1px solid #E8DFC8', borderRadius: 12, padding: 8 }}>
+                                    {actionMenu === 'etiquetas' && (
+                                      <>
+                                        {opcion('🔖', sharingNotes ? 'Generando...' : 'Etiquetas e identificaciones (PDF)', 'Revisas las cantidades y construyes el PDF', () => abrirEtiquetas('pdf'), sharingNotes)}
+                                        {opcion('🏷️', 'Imprimir', null, () => abrirEtiquetas('print'))}
+                                        {opcion('📽️', sharingNotes ? 'Generando...' : 'Descargar PowerPoint', null, () => abrirEtiquetas('pptx'), sharingNotes)}
+                                        {opcion('✅', 'Marcar todo colocado', null, () => { const ids = requireRealPlantIds(); if (ids.length) markAllPlacedForSelected(ids) })}
+                                      </>
+                                    )}
+                                    {actionMenu === 'tienda' && (
+                                      <>
+                                        {opcion('🟢', 'Poner en la tienda', `Ya están en la tienda: ${yaEnTienda} de ${n}`, () => markSelectedClienteAll(selectedLabels, true))}
+                                        {opcion('⚪', 'Quitar de la tienda', null, () => markSelectedClienteAll(selectedLabels, false))}
+                                        {opcion('🏷️', 'Aplicar descuento', null, () => { const ids = requireRealPlantIds(); if (ids.length) applyBulkDiscount(ids) })}
+                                        {opcion('🎨', 'Color', null, () => { const ids = requireRealPlantIds(); if (ids.length) setColorPickerFor({ ids, title: `${ids.length} plantas seleccionadas` }) })}
+                                      </>
+                                    )}
+                                    {actionMenu === 'compartir' && (
+                                      <>
+                                        {opcion('📤', 'Compartir / Enviar', null, () => setShareModalOpen(true))}
+                                        {opcion('📲', sharingNotes ? 'Preparando...' : 'Enviar fotos', null, () => shareSelectedPhotosDirect(galleryRealPlants), sharingNotes)}
+                                      </>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                            )
+                          })()}
                         </div>
 
                         {lastLabelsPdf && (
