@@ -175,6 +175,28 @@ function normalizarBusqueda(t) {
   return String(t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
 }
 
+// ---------- Último PDF de etiquetas: se guarda en este navegador hasta que se marque como impreso ----------
+function openLabelsDB() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open('diamantev-etiquetas', 1)
+    req.onupgradeneeded = () => req.result.createObjectStore('pdf')
+    req.onsuccess = () => resolve(req.result)
+    req.onerror = () => reject(req.error)
+  })
+}
+async function labelsDbRun(mode, fn) {
+  const db = await openLabelsDB()
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction('pdf', mode)
+    const req = fn(tx.objectStore('pdf'))
+    tx.oncomplete = () => { db.close(); resolve(req ? req.result : undefined) }
+    tx.onerror = () => { db.close(); reject(tx.error) }
+  })
+}
+const saveLastLabelsPDF = (blob, meta) => labelsDbRun('readwrite', st => st.put({ blob, ...meta }, 'last'))
+const loadLastLabelsPDF = () => labelsDbRun('readonly', st => st.get('last'))
+const clearLastLabelsPDF = () => labelsDbRun('readwrite', st => st.delete('last'))
+
 // Antes de correr la migración (columnas pagado/entregado/recibido), se deduce del texto de "status".
 function pagadoDe(row) { return row.pagado != null ? !!row.pagado : esPagada(row.status) }
 function entregadoDe(row) { return row.entregado != null ? !!row.entregado : row.status === 'entregado' }
@@ -475,6 +497,9 @@ function Admin() {
   const [gallerySearch, setGallerySearch] = useState('')
   const [galleryMissingFilters, setGalleryMissingFilters] = useState(new Set())
   const [galleryFiltersOpen, setGalleryFiltersOpen] = useState(false)
+  const [globalSearchOpen, setGlobalSearchOpen] = useState(false) // buscador único (🔍)
+  const [lastLabelsPdf, setLastLabelsPdf] = useState(null) // último PDF de etiquetas guardado (hasta marcarlo como impreso)
+  const [globalSearchTerm, setGlobalSearchTerm] = useState('')
   const [filterGroup, setFilterGroup] = useState(null) // 'compra' | 'venta' | 'etiquetas' | null (grupo de filtros desplegado)
   const [galleryColorFilter, setGalleryColorFilter] = useState('all') // 'all' | '__none__' | nombre de color
   const [gallerySortBy, setGallerySortBy] = useState('nombre') // 'nombre' | 'color'
@@ -964,6 +989,8 @@ function Admin() {
   useBackableModal(!!bulkCategoryPickerFor, () => { setBulkCategoryPickerFor(null); setBulkCategorySearch('') })
   useBackableModal(labelQtyModalOpen, () => setLabelQtyModalOpen(false))
   useBackableModal(categoryNoteModalOpen, () => setCategoryNoteModalOpen(false))
+  useBackableModal(globalSearchOpen, () => setGlobalSearchOpen(false))
+  useEffect(() => { loadLastLabelsPDF().then(v => { if (v) setLastLabelsPdf(v) }).catch(() => {}) }, [])
   useBackableModal(!!photoModalPlantId, () => { setPhotoModalPlantId(null); setPhotoModalMenuOpen(false); setPhotoModalSection('fotos') })
   useBackableModal(plantNoteModalOpen, () => { setPlantNoteModalOpen(false); setEditingPlantNoteId(null) })
   useBackableModal(loteNoteModalOpen, () => setLoteNoteModalOpen(false))
@@ -4035,6 +4062,50 @@ function Admin() {
     setSharingNotes(false)
   }
 
+  // ---------- Último PDF de etiquetas guardado ----------
+  function openLastLabelsPdf() {
+    if (!lastLabelsPdf) return
+    const url = URL.createObjectURL(lastLabelsPdf.blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.target = '_blank'
+    a.rel = 'noopener'
+    a.download = 'etiquetas-diamantev.pdf'
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    setTimeout(() => URL.revokeObjectURL(url), 60000)
+  }
+
+  async function shareLastLabelsPdf() {
+    if (!lastLabelsPdf) return
+    try {
+      const file = new File([lastLabelsPdf.blob], 'etiquetas-diamantev.pdf', { type: 'application/pdf' })
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        await navigator.share({ files: [file], title: 'Etiquetas Diamantev' })
+      } else {
+        openLastLabelsPdf()
+      }
+    } catch (err) {
+      if (!(err && err.name === 'AbortError')) alert('No se pudo compartir el PDF.')
+    }
+  }
+
+  async function markLastLabelsPrinted() {
+    if (!lastLabelsPdf) return
+    if (!confirm('¿Ya se imprimieron estas etiquetas? Se marcarán como impresas y se borrará el PDF guardado.')) return
+    await markPlantsAction(lastLabelsPdf.ids || [], 'printed_at')
+    try { await clearLastLabelsPDF() } catch (e) { /* nada */ }
+    setLastLabelsPdf(null)
+  }
+
+  async function discardLastLabelsPdf() {
+    if (!lastLabelsPdf) return
+    if (!confirm('¿Borrar el PDF guardado SIN marcarlo como impreso?')) return
+    try { await clearLastLabelsPDF() } catch (e) { /* nada */ }
+    setLastLabelsPdf(null)
+  }
+
   // PDF único: "Identificación" (foto grande 5x6 cm) y/o "Etiqueta" (mini foto + nombre 6,5x1 cm
   // para grapar en la hoja), según las cantidades elegidas para cada planta (0 = ese tipo no se imprime). Primero van las identificaciones y
   // las etiquetas empiezan en una hoja nueva.
@@ -4172,6 +4243,13 @@ function Admin() {
         hasContent = true
       }
 
+      // Se guarda una copia en este navegador para poder abrirla otra vez hasta marcarla como impresa
+      try {
+        const blob = doc.output('blob')
+        const meta = { createdAt: new Date().toISOString(), ids: idUnique.map(p => p.id), idCount: idItems.length, nameCount: nameItems.length }
+        await saveLastLabelsPDF(blob, meta)
+        setLastLabelsPdf({ blob, ...meta })
+      } catch (e) { /* si el navegador no deja guardar, el PDF igual se descarga */ }
       doc.save('etiquetas-diamantev.pdf')
       // Solo las identificaciones cuentan para el contador de etiquetas impresas/colocadas.
       if (idUnique.length > 0) {
@@ -4833,6 +4911,9 @@ function Admin() {
                     const galleryRealPlants = galleryPlants.filter(p => !p.isSeed)
 
                     const activeChips = []
+                    if (gallerySearch.trim()) {
+                      activeChips.push({ key: 'search', label: `🔍 ${gallerySearch.trim()}`, onRemove: () => setGallerySearch('') })
+                    }
                     if (galleryFilter !== 'all') {
                       const cat = categories.find(c => c.id === galleryFilter)
                       activeChips.push({ key: 'cat', label: cat ? `Categoría: ${cat.emoji} ${cat.name}` : 'Categoría', onRemove: () => setGalleryFilter('all') })
@@ -4883,6 +4964,7 @@ function Admin() {
                     })
 
                     function clearAllGalleryFilters() {
+                      setGallerySearch('')
                       setGalleryFilter('all')
                       setGalleryProveedor('all')
                       setGalleryCompraStatus('all')
@@ -5101,25 +5183,16 @@ function Admin() {
                       <>
                         <div id="gallery-sticky-bar" style={{ position: 'sticky', top: 0, zIndex: 40, background: '#F8F1E1', paddingTop: 4, paddingBottom: 6, marginBottom: 4 }}>
                         <div className="filter-bar" style={{ flexWrap: 'wrap', rowGap: 8 }}>
-                          <div style={{ position: 'relative', flex: '1 1 160px', minWidth: 0 }}>
-                            <input
-                              className="order-search"
-                              placeholder="🔍 Buscar planta por nombre..."
-                              value={gallerySearch}
-                              onChange={e => setGallerySearch(e.target.value)}
-                              style={{ width: '100%', boxSizing: 'border-box', paddingRight: gallerySearch ? 30 : undefined }}
-                            />
-                            {gallerySearch && (
-                              <button
-                                type="button"
-                                onClick={() => setGallerySearch('')}
-                                aria-label="Borrar búsqueda"
-                                style={{ position: 'absolute', right: 6, top: '50%', transform: 'translateY(-50%)', border: 'none', background: 'none', boxShadow: 'none', padding: 4, fontSize: 15, color: '#8a7a5c', cursor: 'pointer' }}
-                              >
-                                ✕
-                              </button>
-                            )}
-                          </div>
+                          <button
+                            type="button"
+                            className="filter-trigger-btn"
+                            onClick={() => { setGlobalSearchTerm(gallerySearch); setGlobalSearchOpen(true) }}
+                            aria-label="Buscar"
+                            title="Buscar planta, proveedor, nota, cliente…"
+                            style={{ fontSize: 22, lineHeight: 1, padding: '8px 14px', flex: '0 0 auto' }}
+                          >
+                            🔍
+                          </button>
                           <button
                             type="button"
                             className={activeChips.length > 0 ? 'filter-trigger-btn has-filters' : 'filter-trigger-btn'}
@@ -5130,6 +5203,84 @@ function Admin() {
                         </div>
 
 
+                        {globalSearchOpen && createPortal(
+                          (() => {
+                            const raw = globalSearchTerm.trim()
+                            const term = normalizarBusqueda(raw)
+                            const cierra = () => setGlobalSearchOpen(false)
+                            const fila = (key, icon, titulo, sub, onClick) => (
+                              <button key={key} type="button" onClick={onClick}
+                                style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', textAlign: 'left', background: '#fff', border: '1px solid #E8DFC8', borderRadius: 10, padding: '10px 12px', margin: '0 0 6px', boxShadow: 'none', minHeight: 0, color: '#3b3b32' }}>
+                                <span style={{ fontSize: 20 }}>{icon}</span>
+                                <span style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+                                  <span style={{ fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{titulo}</span>
+                                  {sub ? <small style={{ color: '#7a7060' }}>{sub}</small> : null}
+                                </span>
+                              </button>
+                            )
+                            const titulo = txt => <p style={{ margin: '10px 2px 6px', fontSize: 12, fontWeight: 700, color: '#7a7060', letterSpacing: '0.04em', textTransform: 'uppercase' }}>{txt}</p>
+                            const coincide = t => term && normalizarBusqueda(t).includes(term)
+                            const itemsBusq = [...plants, ...seedBatchesAsItems()].filter(x => coincide(textoBuscableItem(x)))
+                            const proveedoresRes = [...new Set([...compras.map(c => c.proveedor), ...lotes.map(l => l.proveedor)].filter(Boolean))].filter(coincide).sort()
+                            const clientesRes = [...new Set([...ventaLotes.map(v => v.cliente), ...orders.map(o => o.customer_name)].filter(Boolean))].filter(coincide).sort()
+                            return (
+                              <div onClick={cierra} style={{ position: 'fixed', inset: 0, zIndex: 3000, background: 'rgba(0,0,0,0.35)', display: 'flex', justifyContent: 'center', alignItems: 'flex-start', paddingTop: 'max(12px, env(safe-area-inset-top))' }}>
+                                <div onClick={e => e.stopPropagation()} style={{ width: 'min(640px, 96vw)', maxHeight: '88vh', overflowY: 'auto', background: '#FBF3E6', borderRadius: 14, boxShadow: '0 10px 30px rgba(0,0,0,0.25)', padding: 12, boxSizing: 'border-box' }}>
+                                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                                    <input
+                                      autoFocus
+                                      className="order-search"
+                                      value={globalSearchTerm}
+                                      onChange={e => setGlobalSearchTerm(e.target.value)}
+                                      onKeyDown={e => { if (e.key === 'Escape') cierra() }}
+                                      placeholder="Buscar planta, proveedor, nota, cliente…"
+                                      style={{ flex: 1, minWidth: 0, boxSizing: 'border-box' }}
+                                    />
+                                    <button type="button" onClick={cierra} aria-label="Cerrar búsqueda" style={{ border: 'none', background: 'none', boxShadow: 'none', fontSize: 20, padding: 6, minHeight: 0 }}>✕</button>
+                                  </div>
+
+                                  {!term && (
+                                    <p style={{ color: '#7a7060', fontSize: 13, margin: '12px 2px 4px' }}>Escribe para buscar en plantas, proveedores, clientes, notas, ventas e ingresos.</p>
+                                  )}
+
+                                  {term && itemsBusq.length > 0 && (
+                                    <>
+                                      {titulo(`🪴 Plantas (${itemsBusq.length})`)}
+                                      {fila('ver-galeria', '🖼️', `Ver las ${itemsBusq.length} en la galería`, `Filtra la galería por «${raw}»`, () => { setGallerySearch(raw); setView('galeria'); cierra() })}
+                                      {itemsBusq.slice(0, 6).map(x => fila(`p-${x.id}`, x.isSeed ? '🌰' : '🪴', x.name, x.isSeed ? 'Semillas' : `Stock ${x.stock ?? 0}`, () => {
+                                        if (x.isSeed) { setGallerySearch(raw); setView('galeria'); cierra() } else { setView('galeria'); setPhotoModalPlantId(x.id); cierra() }
+                                      }))}
+                                    </>
+                                  )}
+
+                                  {term && proveedoresRes.length > 0 && (
+                                    <>
+                                      {titulo('🚚 Proveedores')}
+                                      {proveedoresRes.slice(0, 6).map(n => fila(`prov-${n}`, '🚚', n, 'Ver sus plantas en la galería', () => { setGallerySearch(''); setGalleryProveedor(n); setView('galeria'); cierra() }))}
+                                    </>
+                                  )}
+
+                                  {term && clientesRes.length > 0 && (
+                                    <>
+                                      {titulo('🧾 Clientes')}
+                                      {clientesRes.slice(0, 6).map(n => fila(`cli-${n}`, '🧾', n, 'Ver sus ventas', () => { setMovSearch(n); setMovMenuOpen(true); setView('pedidos'); cierra() }))}
+                                    </>
+                                  )}
+
+                                  {term && (
+                                    <>
+                                      {titulo('Buscar «' + raw + '» también en…')}
+                                      {fila('en-notas', '📝', 'Notas', 'Plantas, compras, semillas y categorías', () => { setGlobalNoteSearch(raw); setView('notas'); cierra() })}
+                                      {fila('en-ventas', '🧾', 'Ventas y decrementos', 'Por cliente, planta o motivo', () => { setMovSearch(raw); setMovMenuOpen(true); setView('pedidos'); cierra() })}
+                                      {fila('en-ingresos', '📦', 'Ingresos (compras)', 'Por proveedor o planta', () => { setIngresosSearch(raw); setIngresosMenuOpen(true); setView('ingresos'); cierra() })}
+                                    </>
+                                  )}
+                                </div>
+                              </div>
+                            )
+                          })(),
+                          document.body
+                        )}
                         {(() => {
                           const selCat = categories.find(x => x.id === galleryFilter)
                           const pillStyle = active => ({
@@ -5216,6 +5367,22 @@ function Admin() {
                           )}
                         </div>
 
+                        {lastLabelsPdf && (
+                          <div style={{ margin: '8px 0', padding: '10px 12px', background: '#fff8e1', border: '1px solid #e0c97a', borderRadius: 10, display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+                            <div style={{ flex: '1 1 200px', minWidth: 0 }}>
+                              <strong>📄 PDF de etiquetas guardado</strong>
+                              <div style={{ fontSize: 12, color: '#7a7060' }}>
+                                {[lastLabelsPdf.idCount ? `${lastLabelsPdf.idCount} identificaciones` : null, lastLabelsPdf.nameCount ? `${lastLabelsPdf.nameCount} etiquetas` : null, new Date(lastLabelsPdf.createdAt).toLocaleString()].filter(Boolean).join(' · ')}
+                              </div>
+                            </div>
+                            <button type="button" onClick={openLastLabelsPdf} style={{ padding: '6px 10px', fontSize: '0.8rem', minHeight: 0, lineHeight: 1.2, borderRadius: 8, boxShadow: 'none', whiteSpace: 'nowrap' }}>📄 Abrir</button>
+                            {!isWideScreen && typeof navigator !== 'undefined' && navigator.share && (
+                              <button type="button" onClick={shareLastLabelsPdf} style={{ padding: '6px 10px', fontSize: '0.8rem', minHeight: 0, lineHeight: 1.2, borderRadius: 8, boxShadow: 'none', whiteSpace: 'nowrap' }}>📤 Compartir</button>
+                            )}
+                            <button type="button" onClick={markLastLabelsPrinted} style={{ padding: '6px 10px', fontSize: '0.8rem', minHeight: 0, lineHeight: 1.2, borderRadius: 8, boxShadow: 'none', whiteSpace: 'nowrap', background: '#4a5d3a', color: '#fff', border: 'none' }}>🖨️ Ya se imprimió</button>
+                            <button type="button" onClick={discardLastLabelsPdf} aria-label="Descartar PDF guardado" title="Descartar sin marcar como impreso" style={{ padding: '6px 10px', fontSize: '0.8rem', minHeight: 0, lineHeight: 1.2, borderRadius: 8, boxShadow: 'none', whiteSpace: 'nowrap', background: '#fff', border: '1px solid #ccc' }}>🗑️</button>
+                          </div>
+                        )}
                         {activeChips.length > 0 && (
                           <div className="filter-chips-row">
                             {activeChips.map(chip => (
