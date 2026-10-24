@@ -175,6 +175,15 @@ function normalizarBusqueda(t) {
   return String(t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
 }
 
+// ---------- Borrador de etiquetas: plantas y cantidades guardadas para revisarlas antes de construir el PDF ----------
+const LABELS_DRAFT_KEY = 'diamantev_labels_draft'
+function readLabelsDraft() {
+  try {
+    const v = JSON.parse(localStorage.getItem(LABELS_DRAFT_KEY) || 'null')
+    return v && Array.isArray(v.ids) && v.ids.length ? v : null
+  } catch (e) { return null }
+}
+
 // ---------- Último PDF de etiquetas: se guarda en este navegador hasta que se marque como impreso ----------
 function openLabelsDB() {
   return new Promise((resolve, reject) => {
@@ -487,6 +496,10 @@ function Admin() {
   const [labelQtyModalOpen, setLabelQtyModalOpen] = useState(false)
   const [pendingLabelAction, setPendingLabelAction] = useState(null) // 'print' | 'pdf' | 'pptx'
   const [labelQuantities, setLabelQuantities] = useState({}) // { plantId: cantidad }
+  const iconRowRef = useRef(null) // fila deslizable de íconos de filtro
+  const [iconRowEdge, setIconRowEdge] = useState({ start: true, end: false }) // ¿está al inicio / al final?
+  const [labelBulk, setLabelBulk] = useState({ id: null, name: null }) // valor de la fila "Todas" del modal de cantidades
+  const [labelsDraft, setLabelsDraft] = useState(() => readLabelsDraft()) // borrador de etiquetas por revisar
   const [labelNameQuantities, setLabelNameQuantities] = useState({}) // { plantId: cantidad de etiquetas con mini foto (por defecto 1) }
   const [galleryProveedor, setGalleryProveedor] = useState('all')
   const [galleryCompraStatus, setGalleryCompraStatus] = useState('all')
@@ -989,7 +1002,7 @@ function Admin() {
   useBackableModal(galleryFiltersOpen, () => setGalleryFiltersOpen(false))
   useBackableModal(shareModalOpen, () => setShareModalOpen(false))
   useBackableModal(!!bulkCategoryPickerFor, () => { setBulkCategoryPickerFor(null); setBulkCategorySearch('') })
-  useBackableModal(labelQtyModalOpen, () => setLabelQtyModalOpen(false))
+  useBackableModal(labelQtyModalOpen, () => closeLabelModal())
   useBackableModal(categoryNoteModalOpen, () => setCategoryNoteModalOpen(false))
   useBackableModal(globalSearchOpen, () => setGlobalSearchOpen(false))
   useEffect(() => { loadLastLabelsPDF().then(v => { if (v) setLastLabelsPdf(v) }).catch(() => {}) }, [])
@@ -3842,6 +3855,59 @@ function Admin() {
     return 'all'
   }
 
+  // ---------- Fila de íconos de filtro: flechas para deslizarla ----------
+  function updateIconEdge() {
+    const el = iconRowRef.current
+    if (!el) return
+    const start = el.scrollLeft <= 2
+    const end = el.scrollLeft + el.clientWidth >= el.scrollWidth - 2
+    setIconRowEdge(prev => (prev.start === start && prev.end === end ? prev : { start, end }))
+  }
+  function scrollIconRow(dir) {
+    const el = iconRowRef.current
+    if (!el) return
+    el.scrollBy({ left: dir * Math.max(120, el.clientWidth * 0.7), behavior: 'smooth' })
+  }
+
+  // ---------- Borrador de etiquetas ----------
+  function saveLabelsDraft() {
+    const ids = Array.from(selectedLabels)
+    if (ids.length === 0) return
+    const draft = {
+      ids,
+      idQty: Object.fromEntries(ids.map(id => [id, labelQuantities[id] ?? 1])),
+      nameQty: Object.fromEntries(ids.map(id => [id, labelNameQuantities[id] ?? 1])),
+      savedAt: new Date().toISOString(),
+    }
+    try { localStorage.setItem(LABELS_DRAFT_KEY, JSON.stringify(draft)) } catch (e) { /* nada */ }
+    setLabelsDraft(draft)
+  }
+  function clearLabelsDraft() {
+    try { localStorage.removeItem(LABELS_DRAFT_KEY) } catch (e) { /* nada */ }
+    setLabelsDraft(null)
+  }
+  function closeLabelModal() {
+    if (pendingLabelAction === 'pdf') { if (selectedLabels.size > 0) saveLabelsDraft(); else clearLabelsDraft() } // lo que dejaste queda guardado para revisarlo después
+    setLabelQtyModalOpen(false)
+    setLabelBulk({ id: null, name: null })
+  }
+  function reviewLabelsDraft() {
+    if (!labelsDraft) return
+    const validIds = new Set(labelItemsList().map(x => x.id))
+    const ids = labelsDraft.ids.filter(id => validIds.has(id))
+    if (ids.length === 0) { alert('Las plantas de ese borrador ya no existen.'); clearLabelsDraft(); return }
+    setSelectedLabels(new Set(ids))
+    setLabelQuantities(labelsDraft.idQty || {})
+    setLabelNameQuantities(labelsDraft.nameQty || {})
+    setLabelBulk({ id: null, name: null })
+    setPendingLabelAction('pdf')
+    setLabelQtyModalOpen(true)
+  }
+  function discardLabelsDraft() {
+    if (!confirm('¿Descartar el borrador de etiquetas?')) return
+    clearLabelsDraft()
+  }
+
   function selectAllLabels(list) {
     setSelectedLabels(new Set(list.map(p => p.id)))
   }
@@ -5230,7 +5296,7 @@ function Admin() {
                                   className={selCat ? 'filter-trigger-btn has-filters' : 'filter-trigger-btn'}
                                   onClick={() => openSelector('categoria')}
                                   aria-label="Elegir categoría"
-                                  style={{ flex: '1 1 0', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                                  style={{ flex: '1 1 0', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', padding: '8px 10px', fontSize: 15 }}
                                 >
                                   🏷️ {selCat ? `${selCat.emoji} ${selCat.name}` : 'Categorías'} <span style={{ fontSize: 11, opacity: 0.6 }}>⌄</span>
                                 </button>
@@ -5243,7 +5309,7 @@ function Admin() {
                                     else selectAllLabels(galleryPlants)
                                   }}
                                   title={todasSel ? 'Quitar la selección' : 'Seleccionar todas las plantas visibles'}
-                                  style={{ flex: '0 0 auto' }}
+                                  style={{ flex: '0 0 auto', padding: '8px 10px', fontSize: 15 }}
                                 >
                                   {todasSel ? '☐ Ninguna' : '☑ Todas'}
                                 </button>
@@ -5331,10 +5397,24 @@ function Admin() {
                           })(),
                           document.body
                         )}
-                        <div style={{ display: 'flex', flexWrap: isWideScreen ? 'wrap' : 'nowrap', gap: 6, overflowX: isWideScreen ? 'visible' : 'auto', WebkitOverflowScrolling: 'touch', scrollbarWidth: 'thin', paddingTop: 6, paddingBottom: 2 }}>
+                        <div
+                          ref={el => { iconRowRef.current = el; if (el && !isWideScreen) requestAnimationFrame(updateIconEdge) }}
+                          onScroll={updateIconEdge}
+                          style={{ display: 'flex', flexWrap: isWideScreen ? 'wrap' : 'nowrap', gap: 6, overflowX: isWideScreen ? 'visible' : 'auto', WebkitOverflowScrolling: 'touch', scrollbarWidth: 'none', paddingTop: 6, paddingBottom: 2 }}
+                        >
                           {iconPills}
                           {colorChip}
                         </div>
+                        {!isWideScreen && (
+                          <div style={{ display: 'flex', justifyContent: 'center', gap: 12, marginTop: 2 }}>
+                            {[['◀', -1, iconRowEdge.start, 'Ver los filtros anteriores'], ['▶', 1, iconRowEdge.end, 'Ver más filtros']].map(([txt, dir, off, label]) => (
+                              <button key={txt} type="button" aria-label={label} title={label} disabled={off} onClick={() => scrollIconRow(dir)}
+                                style={{ padding: '2px 22px', fontSize: 14, minHeight: 0, lineHeight: 1.3, borderRadius: 12, boxShadow: 'none', background: '#F3ECDD', border: '1px solid #d8cfb8', color: '#5B4636', opacity: off ? 0.35 : 1 }}>
+                                {txt}
+                              </button>
+                            ))}
+                          </div>
+                        )}
                         {renderGroupPanels(true)}
 
                         {/* ---------- Barra fija: conmutador de modo + acciones ---------- */}
@@ -5377,6 +5457,18 @@ function Admin() {
                           )}
                         </div>
 
+                        {labelsDraft && !labelQtyModalOpen && (
+                          <div style={{ margin: '8px 0', padding: '10px 12px', background: '#eef6ff', border: '1px solid #b9d4f0', borderRadius: 10, display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+                            <div style={{ flex: '1 1 200px', minWidth: 0 }}>
+                              <strong>🗂️ Etiquetas por revisar</strong>
+                              <div style={{ fontSize: 12, color: '#5a6b7a' }}>
+                                {[`${labelsDraft.ids.length} planta${labelsDraft.ids.length === 1 ? '' : 's'}`, `${Object.values(labelsDraft.idQty || {}).reduce((a, b) => a + Number(b || 0), 0)} identificaciones`, `${Object.values(labelsDraft.nameQty || {}).reduce((a, b) => a + Number(b || 0), 0)} etiquetas`, new Date(labelsDraft.savedAt).toLocaleString()].join(' · ')}
+                              </div>
+                            </div>
+                            <button type="button" onClick={reviewLabelsDraft} style={{ padding: '6px 10px', fontSize: '0.8rem', minHeight: 0, lineHeight: 1.2, borderRadius: 8, boxShadow: 'none', whiteSpace: 'nowrap', background: '#4a5d3a', color: '#fff', border: 'none' }}>✏️ Revisar y editar</button>
+                            <button type="button" onClick={discardLabelsDraft} aria-label="Descartar borrador" title="Descartar borrador" style={{ padding: '6px 10px', fontSize: '0.8rem', minHeight: 0, lineHeight: 1.2, borderRadius: 8, boxShadow: 'none', whiteSpace: 'nowrap', background: '#fff', border: '1px solid #ccc' }}>🗑️</button>
+                          </div>
+                        )}
                         {lastLabelsPdf && (
                           <div style={{ margin: '8px 0', padding: '10px 12px', background: '#fff8e1', border: '1px solid #e0c97a', borderRadius: 10, display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
                             <div style={{ flex: '1 1 200px', minWidth: 0 }}>
@@ -8939,122 +9031,115 @@ function Admin() {
         </div>
       </div>
 
-      {/* ---------- Cantidad de copias por etiqueta, antes de generar ---------- */}
+      {/* ---------- Revisar cantidades y construir el PDF ---------- */}
       {labelQtyModalOpen && createPortal(
-        <div
-          className="admin-sheet-overlay"
-          onClick={() => setLabelQtyModalOpen(false)}
-          style={{ position: 'fixed', inset: 0, zIndex: 3000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-        >
-          <div className="free-note-modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 420, width: '100%', maxHeight: '80vh', display: 'flex', flexDirection: 'column' }}>
-            <div className="free-note-modal-header">
-              <h4>¿Cuántas copias de cada una?</h4>
-              <button type="button" className="modal-close-btn" onClick={() => setLabelQtyModalOpen(false)}>✕</button>
-            </div>
-            {pendingLabelAction === 'pdf' && (
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center', margin: '4px 2px 8px', fontSize: 13 }}>
-                <span>Todas:</span>
-                <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <span>🆔 Identificación</span>
-                  <input
-                    type="number"
-                    min="0"
-                    placeholder="–"
-                    style={{ width: 48, textAlign: 'center' }}
-                    onChange={e => {
-                      if (e.target.value === '') return
-                      const v = Math.max(0, Math.floor(Number(e.target.value) || 0))
-                      setLabelQuantities(prev => { const next = { ...prev }; selectedLabels.forEach(id => { next[id] = v }); return next })
-                    }}
-                  />
-                </label>
-                <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <span>🔖 Etiqueta</span>
-                  <input
-                    type="number"
-                    min="0"
-                    placeholder="–"
-                    style={{ width: 48, textAlign: 'center' }}
-                    onChange={e => {
-                      if (e.target.value === '') return
-                      const v = Math.max(0, Math.floor(Number(e.target.value) || 0))
-                      setLabelNameQuantities(prev => { const next = { ...prev }; selectedLabels.forEach(id => { next[id] = v }); return next })
-                    }}
-                  />
-                </label>
-              </div>
-            )}
-            <div style={{ overflowY: 'auto', padding: '4px 2px' }}>
-              {labelItemsList().filter(p => selectedLabels.has(p.id)).map(p => (
-                <div key={p.id} style={{ padding: '8px 4px', borderBottom: '1px solid #eee' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
-                      {p.image_url ? (
-                        <img
-                          src={p.image_url}
-                          alt=""
-                          loading="lazy"
-                          style={{ width: 48, height: 48, objectFit: 'cover', borderRadius: 8, flexShrink: 0, border: '1px solid #ddd' }}
-                        />
-                      ) : (
-                        <div style={{ width: 48, height: 48, borderRadius: 8, flexShrink: 0, border: '1px dashed #ccc', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, color: '#bbb' }}>🌱</div>
-                      )}
-                      <span style={{ fontSize: 14 }}>{p.name}</span>
-                    </div>
-                    {pendingLabelAction !== 'pdf' && (
-                      <input
-                        type="number"
-                        min="1"
-                        value={labelQuantities[p.id] ?? 1}
-                        onChange={e => setLabelQuantities(prev => ({ ...prev, [p.id]: Math.max(1, Number(e.target.value) || 1) }))}
-                        style={{ width: 60, textAlign: 'center' }}
-                      />
-                    )}
-                  </div>
-                  {pendingLabelAction === 'pdf' && (
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, marginTop: 6 }}>
-                      <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
-                        <span>🆔 Identificación</span>
-                        <input
-                          type="number"
-                          min="0"
-                          value={labelQuantities[p.id] ?? 1}
-                          onChange={e => setLabelQuantities(prev => ({ ...prev, [p.id]: Math.max(0, Math.floor(Number(e.target.value) || 0)) }))}
-                          style={{ width: 48, textAlign: 'center' }}
-                        />
-                      </label>
-                      <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
-                        <span>🔖 Etiqueta</span>
-                        <input
-                          type="number"
-                          min="0"
-                          value={labelNameQuantities[p.id] ?? 1}
-                          onChange={e => setLabelNameQuantities(prev => ({ ...prev, [p.id]: Math.max(0, Math.floor(Number(e.target.value) || 0)) }))}
-                          style={{ width: 48, textAlign: 'center' }}
-                        />
-                      </label>
-                    </div>
-                  )}
+        (() => {
+          const items = labelItemsList().filter(p => selectedLabels.has(p.id))
+          const isPdf = pendingLabelAction === 'pdf'
+          const idOf = id => labelQuantities[id] ?? 1
+          const nameOf = id => labelNameQuantities[id] ?? 1
+          const totalId = items.reduce((sum, p) => sum + idOf(p.id), 0)
+          const totalName = items.reduce((sum, p) => sum + nameOf(p.id), 0)
+          const stepBtn = { width: 28, height: 34, minHeight: 0, padding: 0, border: 'none', background: '#F3ECDD', boxShadow: 'none', borderRadius: 0, fontSize: 12, color: '#5B4636', cursor: 'pointer', flex: '0 0 auto' }
+          // Contador con flechitas: ▼ baja, ▲ sube (también se puede escribir el número)
+          const stepper = (value, min, onChange) => (
+            <span style={{ display: 'inline-flex', alignItems: 'stretch', width: 94, border: '1px solid #d8cfb8', borderRadius: 8, overflow: 'hidden', background: '#fff', flex: '0 0 auto' }}>
+              <button type="button" aria-label="Menos" onClick={() => onChange(Math.max(min, value - 1))} style={stepBtn}>▼</button>
+              <input
+                type="number"
+                inputMode="numeric"
+                className="stepper-input"
+                min={min}
+                value={value}
+                onChange={e => onChange(Math.max(min, Math.floor(Number(e.target.value) || 0)))}
+                style={{ flex: 1, minWidth: 0, width: 36, textAlign: 'center', border: 'none', outline: 'none', padding: 0, minHeight: 0, boxShadow: 'none', background: 'transparent', fontSize: 15 }}
+              />
+              <button type="button" aria-label="Más" onClick={() => onChange(value + 1)} style={stepBtn}>▲</button>
+            </span>
+          )
+          const aplicarATodas = (tipo, v) => {
+            setLabelBulk(b => ({ ...b, [tipo]: v }))
+            if (tipo === 'id') setLabelQuantities(prev => { const next = { ...prev }; items.forEach(p => { next[p.id] = v }); return next })
+            else setLabelNameQuantities(prev => { const next = { ...prev }; items.forEach(p => { next[p.id] = v }); return next })
+          }
+          const colHead = txt => <span style={{ width: 94, textAlign: 'center', fontSize: 12, fontWeight: 700, color: '#7a7060', flex: '0 0 auto' }}>{txt}</span>
+          return (
+            <div
+              className="admin-sheet-overlay"
+              onClick={() => closeLabelModal()}
+              style={{ position: 'fixed', inset: 0, zIndex: 3000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+            >
+              <style>{`.stepper-input::-webkit-outer-spin-button,.stepper-input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}.stepper-input{-moz-appearance:textfield}`}</style>
+              <div className="free-note-modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 460, width: '100%', maxHeight: '86vh', display: 'flex', flexDirection: 'column' }}>
+                <div className="free-note-modal-header">
+                  <h4>{isPdf ? 'Revisar etiquetas antes del PDF' : '¿Cuántas copias de cada una?'}</h4>
+                  <button type="button" className="modal-close-btn" onClick={() => closeLabelModal()}>✕</button>
                 </div>
-              ))}
+
+                {/* Encabezados de las columnas: aquí se dice una sola vez qué es cada número */}
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8, padding: '2px 2px 4px' }}>
+                  {isPdf ? (<>{colHead('🆔 Identificación')}{colHead('🔖 Etiqueta')}</>) : colHead(pendingLabelAction === 'pptx' ? '📽️ Copias' : '🏷️ Copias')}
+                  <span style={{ width: 28, flex: '0 0 auto' }} />
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 2px 8px', borderBottom: '2px solid #E8DFC8' }}>
+                  <span style={{ flex: 1, fontSize: 13, fontWeight: 600 }}>Todas ({items.length})</span>
+                  {isPdf ? (
+                    <>
+                      {stepper(labelBulk.id ?? 1, 0, v => aplicarATodas('id', v))}
+                      {stepper(labelBulk.name ?? 1, 0, v => aplicarATodas('name', v))}
+                    </>
+                  ) : stepper(labelBulk.id ?? 1, 1, v => aplicarATodas('id', v))}
+                  <span style={{ width: 28, flex: '0 0 auto' }} />
+                </div>
+
+                <div style={{ overflowY: 'auto', padding: '2px 2px' }}>
+                  {items.length === 0 && <p className="status-msg">No hay plantas en la lista.</p>}
+                  {items.map(p => (
+                    <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 2px', borderBottom: '1px solid #eee' }}>
+                      {p.image_url ? (
+                        <img src={p.image_url} alt="" loading="lazy" style={{ width: 40, height: 40, objectFit: 'cover', borderRadius: 8, flexShrink: 0, border: '1px solid #ddd' }} />
+                      ) : (
+                        <div style={{ width: 40, height: 40, borderRadius: 8, flexShrink: 0, border: '1px dashed #ccc', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16, color: '#bbb' }}>🌱</div>
+                      )}
+                      <span style={{ flex: 1, minWidth: 0, fontSize: 14, lineHeight: 1.2, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{p.name}</span>
+                      {isPdf ? (
+                        <>
+                          {stepper(idOf(p.id), 0, v => setLabelQuantities(prev => ({ ...prev, [p.id]: v })))}
+                          {stepper(nameOf(p.id), 0, v => setLabelNameQuantities(prev => ({ ...prev, [p.id]: v })))}
+                        </>
+                      ) : stepper(idOf(p.id), 1, v => setLabelQuantities(prev => ({ ...prev, [p.id]: v })))}
+                      <button type="button" aria-label="Quitar de la lista" title="Quitar de la lista" onClick={() => toggleLabelSelect(p.id)}
+                        style={{ width: 28, flex: '0 0 auto', border: 'none', background: 'none', boxShadow: 'none', padding: 0, minHeight: 0, fontSize: 16, color: '#b03434', cursor: 'pointer' }}>✕</button>
+                    </div>
+                  ))}
+                </div>
+
+                {isPdf && (
+                  <p style={{ margin: '8px 2px 0', fontSize: 13, color: '#5a5040', fontWeight: 600 }}>
+                    {items.length} planta{items.length === 1 ? '' : 's'} · {totalId} identificaciones · {totalName} etiquetas
+                  </p>
+                )}
+                <div style={{ display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
+                  <button type="button" onClick={() => closeLabelModal()}>{isPdf ? 'Cerrar (queda guardado)' : 'Cancelar'}</button>
+                  <button
+                    type="button"
+                    className="save-note-btn-inline"
+                    disabled={items.length === 0}
+                    onClick={() => {
+                      setLabelQtyModalOpen(false)
+                      setLabelBulk({ id: null, name: null })
+                      if (pendingLabelAction === 'print') printLabels()
+                      if (pendingLabelAction === 'pdf') { downloadLabelsPDF(labelItemsList()); clearLabelsDraft() }
+                      if (pendingLabelAction === 'pptx') downloadLabelsPPTX(labelItemsList())
+                    }}
+                  >
+                    {isPdf ? '📄 Construir PDF' : 'Continuar'}
+                  </button>
+                </div>
+              </div>
             </div>
-            <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
-              <button type="button" onClick={() => setLabelQtyModalOpen(false)}>Cancelar</button>
-              <button
-                type="button"
-                className="save-note-btn-inline"
-                onClick={() => {
-                  setLabelQtyModalOpen(false)
-                  if (pendingLabelAction === 'print') printLabels()
-                  if (pendingLabelAction === 'pdf') downloadLabelsPDF(labelItemsList())
-                  if (pendingLabelAction === 'pptx') downloadLabelsPPTX(labelItemsList())
-                }}
-              >
-                Continuar
-              </button>
-            </div>
-          </div>
-        </div>,
+          )
+        })(),
         document.body
       )}
 
