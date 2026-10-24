@@ -5159,6 +5159,7 @@ function Admin() {
                                     </div>
                                   )}
                         {withColor && filterGroup === 'color' && (
+                          <>
                       <div className="attr-row" style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 10 }}>
                         {PLANT_COLORS.filter(c => colorCounts[c.name] || galleryColorFilter === c.name).map(c => {
                           const on = galleryColorFilter === c.name
@@ -5175,6 +5176,22 @@ function Admin() {
                           <span className="attr-icon">❔</span>Sin color ({plantsSinColor.length}){galleryColorFilter === '__none__' ? ' ✓' : ''}
                         </button>
                       </div>
+                          <p className="attr-label" style={{ marginTop: 10 }}>Ordenar</p>
+                          <div className="attr-row" style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                            <button type="button" onClick={() => setGallerySortBy('nombre')} className={`attr-pill${gallerySortBy === 'nombre' ? ' is-active' : ''}`}>
+                              <span className="attr-icon">🔤</span>Por nombre{gallerySortBy === 'nombre' ? ' ✓' : ''}
+                            </button>
+                            <button type="button" onClick={() => setGallerySortBy('color')} className={`attr-pill${gallerySortBy === 'color' ? ' is-active' : ''}`}>
+                              <span className="attr-icon">🎨</span>Por color{gallerySortBy === 'color' ? ' ✓' : ''}
+                            </button>
+                            <button type="button" disabled={!!colorScan || plantsPorDetectar.length === 0}
+                              onClick={() => runColorDetection(plantsPorDetectar)}
+                              className="attr-pill">
+                              <span className="attr-icon">🪄</span>
+                              {colorScan ? `Detectando ${colorScan.done}/${colorScan.total}...` : `Detectar colores (${plantsPorDetectar.length})`}
+                            </button>
+                          </div>
+                          </>
                         )}
                       </>
                     )
@@ -5193,13 +5210,38 @@ function Admin() {
                           >
                             🔍
                           </button>
-                          <button
-                            type="button"
-                            className={activeChips.length > 0 ? 'filter-trigger-btn has-filters' : 'filter-trigger-btn'}
-                            onClick={() => setGalleryFiltersOpen(true)}
-                          >
-                            🎛️ Filtros{activeChips.length > 0 ? ` (${activeChips.length})` : ''}
-                          </button>
+                          {(() => {
+                            const selCat = categories.find(x => x.id === galleryFilter)
+                            const todasSel = galleryPlants.length > 0 && (galleryMode === 'cliente'
+                              ? galleryPlants.every(p => p.marcado_cliente)
+                              : galleryPlants.every(p => selectedLabels.has(p.id)))
+                            return (
+                              <>
+                                <button
+                                  type="button"
+                                  className={selCat ? 'filter-trigger-btn has-filters' : 'filter-trigger-btn'}
+                                  onClick={() => openSelector('categoria')}
+                                  aria-label="Elegir categoría"
+                                  style={{ flex: '1 1 0', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                                >
+                                  🏷️ {selCat ? `${selCat.emoji} ${selCat.name}` : 'Categorías'} <span style={{ fontSize: 11, opacity: 0.6 }}>⌄</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  className={todasSel ? 'filter-trigger-btn has-filters' : 'filter-trigger-btn'}
+                                  onClick={() => {
+                                    if (galleryMode === 'cliente') setClienteParaVisibles(!todasSel)
+                                    else if (todasSel) clearLabels()
+                                    else selectAllLabels(galleryPlants)
+                                  }}
+                                  title={todasSel ? 'Quitar la selección' : 'Seleccionar todas las plantas visibles'}
+                                  style={{ flex: '0 0 auto' }}
+                                >
+                                  {todasSel ? '☐ Ninguna' : '☑ Todas'}
+                                </button>
+                              </>
+                            )
+                          })()}
                         </div>
 
 
@@ -5281,51 +5323,11 @@ function Admin() {
                           })(),
                           document.body
                         )}
-                        {(() => {
-                          const selCat = categories.find(x => x.id === galleryFilter)
-                          const pillStyle = active => ({
-                            flex: '0 0 auto', display: 'flex', alignItems: 'center', gap: 5, whiteSpace: 'nowrap', cursor: 'pointer',
-                            background: active ? QUICK_FILTER_TONES.cream.active : QUICK_FILTER_TONES.cream.bg,
-                            border: `2px solid ${QUICK_FILTER_TONES.cream.border}`, borderRadius: 18,
-                            padding: '6px 12px', fontSize: 13, fontWeight: active ? 700 : 600, color: '#5B4636',
-                            boxShadow: 'none', minHeight: 0, lineHeight: 1.2,
-                          })
-                          if (!isWideScreen) {
-                            // Celular: un botón con todas las categorías + Limpiar, y una línea de íconos de filtro
-                            return (
-                              <>
-                                <div style={{ display: 'flex', gap: 6, alignItems: 'center', paddingTop: 6 }}>
-                                  <button type="button" onClick={() => openSelector('categoria')} aria-label="Elegir categoría"
-                                    style={{ ...pillStyle(!!selCat), flex: '1 1 auto', justifyContent: 'center' }}>
-                                    🏷️ {selCat ? `${selCat.emoji} ${selCat.name}` : 'Categorías'}
-                                    <span style={{ fontSize: 11, opacity: 0.6 }}>⌄</span>
-                                  </button>
-                                  {activeChips.length > 0 && (
-                                    <button type="button" onClick={clearAllGalleryFilters} aria-label="Limpiar filtros"
-                                      style={{ ...pillStyle(false), color: '#b03434', borderColor: '#b03434', background: '#fff' }}>
-                                      🧹 Limpiar
-                                    </button>
-                                  )}
-                                </div>
-                                <div style={{ display: 'flex', gap: 6, overflowX: 'auto', WebkitOverflowScrolling: 'touch', scrollbarWidth: 'thin', paddingTop: 6, paddingBottom: 2 }}>
-                                  {iconPills}
-                                  {colorChip}
-                                </div>
-                                {renderGroupPanels(true)}
-                              </>
-                            )
-                          }
-                          // PC: solo el desplegable de categorías (muestra la elegida) + "Todas"
-                          return (
-                            <div style={{ display: 'flex', gap: 6, overflowX: 'auto', scrollbarWidth: 'thin', paddingTop: 6, paddingBottom: 2 }}>
-                              <button type="button" onClick={() => openSelector('categoria')} aria-label="Elegir categoría" style={pillStyle(!!selCat)}>
-                                🏷️ {selCat ? `${selCat.emoji} ${selCat.name}` : 'Categorías'}
-                                <span style={{ fontSize: 11, opacity: 0.6 }}>⌄</span>
-                              </button>
-                              <button type="button" onClick={() => setGalleryFilter('all')} style={pillStyle(galleryFilter === 'all')}>Todas</button>
-                            </div>
-                          )
-                        })()}
+                        <div style={{ display: 'flex', flexWrap: isWideScreen ? 'wrap' : 'nowrap', gap: 6, overflowX: isWideScreen ? 'visible' : 'auto', WebkitOverflowScrolling: 'touch', scrollbarWidth: 'thin', paddingTop: 6, paddingBottom: 2 }}>
+                          {iconPills}
+                          {colorChip}
+                        </div>
+                        {renderGroupPanels(true)}
 
                         {/* ---------- Barra fija: conmutador de modo + acciones ---------- */}
                         <style>{`
@@ -5410,41 +5412,6 @@ function Admin() {
                               </button>
                             </div>
 
-                            <div className="label-select-bar" style={{ margin: 0, padding: 0, border: 'none', position: 'relative', display: 'inline-block' }}>
-                              <button type="button" onClick={() => setLabelSelectMenuOpen(o => !o)}>
-                                Seleccionar ⌄
-                              </button>
-                              {labelSelectMenuOpen && (
-                                <>
-                                  <div onClick={() => setLabelSelectMenuOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 19 }} />
-                                  <div style={{
-                                    position: 'absolute', top: '100%', left: 0, marginTop: 4, zIndex: 20,
-                                    background: '#fff', border: '1px solid #E8DFC8', borderRadius: 10,
-                                    minWidth: 190, boxShadow: '0 4px 12px rgba(0,0,0,0.15)', overflow: 'hidden',
-                                  }}>
-                                    {galleryMode === 'acciones' ? (
-                                      <>
-                                        <div className="sub-sheet-option" style={{ cursor: 'pointer' }} onClick={() => { selectAllLabels(galleryPlants); setLabelSelectMenuOpen(false) }}>
-                                          Todas
-                                        </div>
-                                        <div className="sub-sheet-option" style={{ cursor: 'pointer' }} onClick={() => { clearLabels(); setLabelSelectMenuOpen(false) }}>
-                                          Ninguna
-                                        </div>
-                                      </>
-                                    ) : (
-                                      <>
-                                        <div className="sub-sheet-option" style={{ cursor: 'pointer' }} onClick={() => { setLabelSelectMenuOpen(false); setClienteParaVisibles(true) }}>
-                                          🟢 Todas ({galleryPlants.length} visibles)
-                                        </div>
-                                        <div className="sub-sheet-option" style={{ cursor: 'pointer' }} onClick={() => { setLabelSelectMenuOpen(false); setClienteParaVisibles(false) }}>
-                                          ⚪ Ninguna ({galleryPlants.length} visibles)
-                                        </div>
-                                      </>
-                                    )}
-                                  </div>
-                                </>
-                              )}
-                            </div>
                             {galleryMode === 'cliente' && (
                               <span style={{ fontSize: 13, color: '#2E6B47', fontWeight: 600 }}>
                                 🟢 {clienteCount} marcada{clienteCount === 1 ? '' : 's'} para cliente
