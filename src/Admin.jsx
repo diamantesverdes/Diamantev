@@ -495,12 +495,11 @@ function Admin() {
   const [galleryLabelStatus, setGalleryLabelStatus] = useState('all')
   const [labelQtyModalOpen, setLabelQtyModalOpen] = useState(false)
   const [pendingLabelAction, setPendingLabelAction] = useState(null) // 'print' | 'pdf' | 'pptx'
-  const [labelQuantities, setLabelQuantities] = useState({}) // { plantId: cantidad }
+  const [labelQuantities, setLabelQuantities] = useState(() => (readLabelsDraft() || {}).idQty || {}) // { plantId: cantidad }
   const iconRowRef = useRef(null) // fila deslizable de íconos de filtro
   const [iconRowEdge, setIconRowEdge] = useState({ start: true, end: false }) // ¿está al inicio / al final?
   const [labelBulk, setLabelBulk] = useState({ id: null, name: null }) // valor de la fila "Todas" del modal de cantidades
-  const [labelsDraft, setLabelsDraft] = useState(() => readLabelsDraft()) // borrador de etiquetas por revisar
-  const [labelNameQuantities, setLabelNameQuantities] = useState({}) // { plantId: cantidad de etiquetas con mini foto (por defecto 1) }
+  const [labelNameQuantities, setLabelNameQuantities] = useState(() => (readLabelsDraft() || {}).nameQty || {}) // { plantId: cantidad de etiquetas con mini foto (por defecto 1) }
   const [galleryProveedor, setGalleryProveedor] = useState('all')
   const [galleryCompraStatus, setGalleryCompraStatus] = useState('all')
   const [galleryLoteNumero, setGalleryLoteNumero] = useState('all')
@@ -531,7 +530,7 @@ function Admin() {
   const [ventaLoteFilterSearch, setVentaLoteFilterSearch] = useState('')
   const [activeSelector, setActiveSelector] = useState(null)
   const [categoriesSearch, setCategoriesSearch] = useState('')
-  const [selectedLabels, setSelectedLabels] = useState(new Set())
+  const [selectedLabels, setSelectedLabels] = useState(() => new Set((readLabelsDraft() || {}).ids || [])) // se conserva al cerrar la app
   const [photoModalPlantId, setPhotoModalPlantId] = useState(null)
   const [seedSheetId, setSeedSheetId] = useState(null) // lote de semillas abierto desde Galería/Tabla
   const [seedSheetSection, setSeedSheetSection] = useState('resumen')
@@ -1006,6 +1005,22 @@ function Admin() {
   useBackableModal(categoryNoteModalOpen, () => setCategoryNoteModalOpen(false))
   useBackableModal(globalSearchOpen, () => setGlobalSearchOpen(false))
   useEffect(() => { loadLastLabelsPDF().then(v => { if (v) setLastLabelsPdf(v) }).catch(() => {}) }, [])
+  // Las plantas cargadas en Etiquetas (y sus cantidades) se guardan solas en este navegador
+  useEffect(() => {
+    try {
+      if (selectedLabels.size === 0) localStorage.removeItem(LABELS_DRAFT_KEY)
+      else localStorage.setItem(LABELS_DRAFT_KEY, JSON.stringify({ ids: Array.from(selectedLabels), idQty: labelQuantities, nameQty: labelNameQuantities, savedAt: new Date().toISOString() }))
+    } catch (e) { /* nada */ }
+  }, [selectedLabels, labelQuantities, labelNameQuantities])
+  // Si una planta guardada ya no existe, sale de la selección
+  useEffect(() => {
+    if (!plants.length) return
+    const validos = new Set(plants.map(x => x.id))
+    setSelectedLabels(prev => {
+      const next = new Set(Array.from(prev).filter(id => isSeedId(id) || validos.has(id)))
+      return next.size === prev.size ? prev : next
+    })
+  }, [plants])
   useBackableModal(!!photoModalPlantId, () => { setPhotoModalPlantId(null); setPhotoModalMenuOpen(false); setPhotoModalSection('fotos') })
   useBackableModal(plantNoteModalOpen, () => { setPlantNoteModalOpen(false); setEditingPlantNoteId(null) })
   useBackableModal(loteNoteModalOpen, () => setLoteNoteModalOpen(false))
@@ -3869,43 +3884,9 @@ function Admin() {
     el.scrollBy({ left: dir * Math.max(120, el.clientWidth * 0.7), behavior: 'smooth' })
   }
 
-  // ---------- Borrador de etiquetas ----------
-  function saveLabelsDraft() {
-    const ids = Array.from(selectedLabels)
-    if (ids.length === 0) return
-    const draft = {
-      ids,
-      idQty: Object.fromEntries(ids.map(id => [id, labelQuantities[id] ?? 1])),
-      nameQty: Object.fromEntries(ids.map(id => [id, labelNameQuantities[id] ?? 1])),
-      savedAt: new Date().toISOString(),
-    }
-    try { localStorage.setItem(LABELS_DRAFT_KEY, JSON.stringify(draft)) } catch (e) { /* nada */ }
-    setLabelsDraft(draft)
-  }
-  function clearLabelsDraft() {
-    try { localStorage.removeItem(LABELS_DRAFT_KEY) } catch (e) { /* nada */ }
-    setLabelsDraft(null)
-  }
   function closeLabelModal() {
-    if (pendingLabelAction === 'pdf') { if (selectedLabels.size > 0) saveLabelsDraft(); else clearLabelsDraft() } // lo que dejaste queda guardado para revisarlo después
     setLabelQtyModalOpen(false)
     setLabelBulk({ id: null, name: null })
-  }
-  function reviewLabelsDraft() {
-    if (!labelsDraft) return
-    const validIds = new Set(labelItemsList().map(x => x.id))
-    const ids = labelsDraft.ids.filter(id => validIds.has(id))
-    if (ids.length === 0) { alert('Las plantas de ese borrador ya no existen.'); clearLabelsDraft(); return }
-    setSelectedLabels(new Set(ids))
-    setLabelQuantities(labelsDraft.idQty || {})
-    setLabelNameQuantities(labelsDraft.nameQty || {})
-    setLabelBulk({ id: null, name: null })
-    setPendingLabelAction('pdf')
-    setLabelQtyModalOpen(true)
-  }
-  function discardLabelsDraft() {
-    if (!confirm('¿Descartar el borrador de etiquetas?')) return
-    clearLabelsDraft()
   }
 
   function selectAllLabels(list) {
@@ -5457,18 +5438,6 @@ function Admin() {
                           )}
                         </div>
 
-                        {labelsDraft && !labelQtyModalOpen && (
-                          <div style={{ margin: '8px 0', padding: '10px 12px', background: '#eef6ff', border: '1px solid #b9d4f0', borderRadius: 10, display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
-                            <div style={{ flex: '1 1 200px', minWidth: 0 }}>
-                              <strong>🗂️ Etiquetas por revisar</strong>
-                              <div style={{ fontSize: 12, color: '#5a6b7a' }}>
-                                {[`${labelsDraft.ids.length} planta${labelsDraft.ids.length === 1 ? '' : 's'}`, `${Object.values(labelsDraft.idQty || {}).reduce((a, b) => a + Number(b || 0), 0)} identificaciones`, `${Object.values(labelsDraft.nameQty || {}).reduce((a, b) => a + Number(b || 0), 0)} etiquetas`, new Date(labelsDraft.savedAt).toLocaleString()].join(' · ')}
-                              </div>
-                            </div>
-                            <button type="button" onClick={reviewLabelsDraft} style={{ padding: '6px 10px', fontSize: '0.8rem', minHeight: 0, lineHeight: 1.2, borderRadius: 8, boxShadow: 'none', whiteSpace: 'nowrap', background: '#4a5d3a', color: '#fff', border: 'none' }}>✏️ Revisar y editar</button>
-                            <button type="button" onClick={discardLabelsDraft} aria-label="Descartar borrador" title="Descartar borrador" style={{ padding: '6px 10px', fontSize: '0.8rem', minHeight: 0, lineHeight: 1.2, borderRadius: 8, boxShadow: 'none', whiteSpace: 'nowrap', background: '#fff', border: '1px solid #ccc' }}>🗑️</button>
-                          </div>
-                        )}
                         {lastLabelsPdf && (
                           <div style={{ margin: '8px 0', padding: '10px 12px', background: '#fff8e1', border: '1px solid #e0c97a', borderRadius: 10, display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
                             <div style={{ flex: '1 1 200px', minWidth: 0 }}>
@@ -9120,7 +9089,7 @@ function Admin() {
                   </p>
                 )}
                 <div style={{ display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
-                  <button type="button" onClick={() => closeLabelModal()}>{isPdf ? 'Cerrar (queda guardado)' : 'Cancelar'}</button>
+                  <button type="button" onClick={() => closeLabelModal()}>{isPdf ? 'Cerrar' : 'Cancelar'}</button>
                   <button
                     type="button"
                     className="save-note-btn-inline"
@@ -9129,7 +9098,7 @@ function Admin() {
                       setLabelQtyModalOpen(false)
                       setLabelBulk({ id: null, name: null })
                       if (pendingLabelAction === 'print') printLabels()
-                      if (pendingLabelAction === 'pdf') { downloadLabelsPDF(labelItemsList()); clearLabelsDraft() }
+                      if (pendingLabelAction === 'pdf') downloadLabelsPDF(labelItemsList())
                       if (pendingLabelAction === 'pptx') downloadLabelsPPTX(labelItemsList())
                     }}
                   >
