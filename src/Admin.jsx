@@ -498,6 +498,8 @@ function Admin() {
   const [galleryMissingFilters, setGalleryMissingFilters] = useState(new Set())
   const [galleryFiltersOpen, setGalleryFiltersOpen] = useState(false)
   const [globalSearchOpen, setGlobalSearchOpen] = useState(false) // buscador único (🔍)
+  const [openCards, setOpenCards] = useState(() => new Set()) // tarjetas (ventas, compras, notas…) abiertas; por defecto solo se ve el título
+  const toggleCard = key => setOpenCards(prev => { const n = new Set(prev); if (n.has(key)) n.delete(key); else n.add(key); return n })
   const [lastLabelsPdf, setLastLabelsPdf] = useState(null) // último PDF de etiquetas guardado (hasta marcarlo como impreso)
   const [globalSearchTerm, setGlobalSearchTerm] = useState('')
   const [filterGroup, setFilterGroup] = useState(null) // 'compra' | 'venta' | 'etiquetas' | null (grupo de filtros desplegado)
@@ -4687,6 +4689,12 @@ function Admin() {
       overflowX: 'clip', boxSizing: 'border-box',
       display: isWideScreen ? 'flex' : 'block', alignItems: 'flex-start',
     }}>
+      <style>{`
+        .collapsible-card[data-open="false"] > :not(.admin-item-info):not(.card-title-row) { display: none !important; }
+        .collapsible-card[data-open="false"] .admin-item-info > :not(.card-title-row) { display: none !important; }
+        .collapsible-card[data-open="false"] .card-title-row button { display: none !important; }
+        .collapsible-card[data-open="false"] { padding-top: 10px; padding-bottom: 10px; }
+      `}</style>
       {(homeMenuOpen || isWideScreen) && (
         <>
           {!isWideScreen && (
@@ -5198,7 +5206,7 @@ function Admin() {
 
                     return (
                       <>
-                        <div id="gallery-sticky-bar" style={{ position: 'sticky', top: 0, zIndex: 40, background: '#F8F1E1', paddingTop: 4, paddingBottom: 6, marginBottom: 4 }}>
+                        <div id="gallery-sticky-bar" style={{ position: 'sticky', top: 0, zIndex: 40, background: '#fff', border: '1px solid #E8DFC8', borderRadius: 14, boxShadow: '0 2px 8px rgba(0,0,0,0.08)', padding: '8px 8px 6px', marginBottom: 8 }}>
                         <div className="filter-bar" style={{ flexWrap: 'wrap', rowGap: 8 }}>
                           <button
                             type="button"
@@ -6920,11 +6928,11 @@ function Admin() {
                       const { subtotal, lineas: lineasConProrrateo, total: totalLote } = ventaLoteProration(lote, lineas)
                       const editingV = editingVentaLoteId === lote.id
                       return (
-                        <div key={`vl-${lote.id}`} className="admin-item lote-group" style={{ width: '100%', maxWidth: '100%', minWidth: 0, overflow: 'hidden', boxSizing: 'border-box', opacity: lote.status === 'cancelada' ? 0.6 : 1, background: ventaPastelBg(lineas) }}>
+                        <div key={`vl-${lote.id}`} className="admin-item lote-group collapsible-card" data-open={(openCards.has(`vl-${lote.id}`) || editingV) ? 'true' : 'false'} style={{ width: '100%', maxWidth: '100%', minWidth: 0, overflow: 'hidden', boxSizing: 'border-box', opacity: lote.status === 'cancelada' ? 0.6 : 1, background: ventaPastelBg(lineas) }}>
                           <div className="admin-item-info" style={{ width: '100%', maxWidth: '100%', minWidth: 0, boxSizing: 'border-box' }}>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                              <strong style={lote.status === 'cancelada' ? { textDecoration: 'line-through' } : undefined}>
-                                🧾 Venta #{lote.numero}{lote.cliente ? ` — ${lote.cliente}` : ''}
+                            <div className="card-title-row" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+                              <strong onClick={() => toggleCard(`vl-${lote.id}`)} style={{ flex: 1, minWidth: 0, cursor: 'pointer', ...(lote.status === 'cancelada' ? { textDecoration: 'line-through' } : {}) }}>
+                                {(openCards.has(`vl-${lote.id}`) || editingV) ? '▾' : '▸'} 🧾 Venta #{lote.numero}{lote.cliente ? ` — ${lote.cliente}` : ''}
                               </strong>
                               <button type="button" onClick={() => setEditingVentaLoteId(editingV ? null : lote.id)}>
                                 {editingV ? '✅ Listo' : '✏️ Editar'}
@@ -7159,9 +7167,9 @@ function Admin() {
                     {movimientosFiltrados.filter(m => !(m._type === 'decremento' && m.lote_id)).length === 0 && ventaLotesFiltrados.length === 0 && <p className="status-msg">No se encontraron movimientos.</p>}
                     {movimientosFiltrados.filter(m => !(m._type === 'decremento' && m.lote_id)).map(m => (
                       m._type === 'venta' ? (
-                        <div key={`o-${m.id}`} className="admin-item" style={{ width: '100%', maxWidth: '100%', minWidth: 0, overflow: 'hidden', boxSizing: 'border-box' }}>
+                        <div key={`o-${m.id}`} className="admin-item collapsible-card" data-open={openCards.has(`o-${m.id}`) ? 'true' : 'false'} style={{ width: '100%', maxWidth: '100%', minWidth: 0, overflow: 'hidden', boxSizing: 'border-box' }}>
                           <div className="admin-item-info" style={{ width: '100%', maxWidth: '100%', minWidth: 0, boxSizing: 'border-box' }}>
-                            <strong>🛒 Pedido #{m.id}{m.customer_name ? ` — ${m.customer_name}` : ''}</strong>
+                            <strong className="card-title-row" onClick={() => toggleCard(`o-${m.id}`)} style={{ display: 'block', cursor: 'pointer' }}>{openCards.has(`o-${m.id}`) ? '▾' : '▸'} 🛒 Pedido #{m.id}{m.customer_name ? ` — ${m.customer_name}` : ''}</strong>
                             <span>{m.customer_phone}</span>
                             <span className={`order-badge order-${m.status}`}>{m.status}</span>
                             <span>Pedido: {new Date(m.created_at).toLocaleDateString()}</span>
@@ -7390,9 +7398,9 @@ function Admin() {
                           {filteredNotes.map(note => {
                             const cat = categories.find(c => c.id === note.category_id)
                             return (
-                              <div key={note.id} className="admin-item" style={{ flexDirection: 'column', alignItems: 'stretch' }}>
-                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                  <strong>{cat ? `${cat.emoji} ${cat.name}` : '📝 General (sin categoría)'}</strong>
+                              <div key={note.id} className="admin-item collapsible-card" data-open={openCards.has(`n-${note.id}`) ? 'true' : 'false'} style={{ flexDirection: 'column', alignItems: 'stretch' }}>
+                                <div className="card-title-row" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+                                  <strong onClick={() => toggleCard(`n-${note.id}`)} style={{ flex: 1, minWidth: 0, cursor: 'pointer', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: openCards.has(`n-${note.id}`) ? 'normal' : 'nowrap' }}>{openCards.has(`n-${note.id}`) ? '▾ ' : '▸ '}{cat ? `${cat.emoji} ${cat.name}` : '📝 General (sin categoría)'}{!openCards.has(`n-${note.id}`) && (() => { const t = ((note.content_blocks || []).find(b => b.type === 'text') || {}).content; return t ? ` — ${String(t).replace(/\s+/g, ' ').slice(0, 40)}${String(t).length > 40 ? '…' : ''}` : '' })()}</strong>
                                   <div style={{ display: 'flex', gap: 6 }}>
                                     <button type="button" onClick={() => openEditCategoryNote(note)}>✏️ Editar</button>
                                     <button type="button" className="danger" onClick={() => deleteCategoryNote(note.id)}>🗑️</button>
@@ -8186,10 +8194,10 @@ function Admin() {
                         const editing = editingLoteId === lote.id
                         const loteDraft = loteDrafts[lote.id] || {}
                         return (
-                          <div key={lote.id} className="admin-item lote-group" style={{ width: '100%', maxWidth: '100%', minWidth: 0, overflow: 'hidden', boxSizing: 'border-box', background: statusPastelBg(lineas, 'recibido') }}>
+                          <div key={lote.id} className="admin-item lote-group collapsible-card" data-open={(openCards.has(`cl-${lote.id}`) || editing) ? 'true' : 'false'} style={{ width: '100%', maxWidth: '100%', minWidth: 0, overflow: 'hidden', boxSizing: 'border-box', background: statusPastelBg(lineas, 'recibido') }}>
                             <div className="admin-item-info" style={{ width: '100%', maxWidth: '100%', minWidth: 0, boxSizing: 'border-box' }}>
-                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                <strong>🧺 Compra #{lote.numero}{lote.nota ? ` — ${lote.nota}` : ''}</strong>
+                              <div className="card-title-row" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+                                <strong onClick={() => toggleCard(`cl-${lote.id}`)} style={{ flex: 1, minWidth: 0, cursor: 'pointer' }}>{(openCards.has(`cl-${lote.id}`) || editing) ? `▾ 🧺 Compra #${lote.numero}${lote.nota ? ` — ${lote.nota}` : ''}` : `▸ 🧺 Compra #${lote.numero}${(lote.proveedor || lote.nota) ? ` — ${lote.proveedor || lote.nota}` : ''}`}</strong>
                                 <button type="button" onClick={() => editing ? finishEditingLote(lote, lineasConProrrateo) : setEditingLoteId(lote.id)}>
                                   {editing ? '✅ Listo' : '✏️ Editar'}
                                 </button>
@@ -8659,10 +8667,10 @@ function Admin() {
                               const converting = sbConvertId === batch.id
                               const editingBatch = editingSeedBatchId === batch.id
                               return (
-                                <div key={batch.id} className="admin-item lote-group" style={{ width: '100%', maxWidth: '100%', minWidth: 0, overflow: 'hidden', boxSizing: 'border-box' }}>
+                                <div key={batch.id} className="admin-item lote-group collapsible-card" data-open={(openCards.has(`sb-${batch.id}`) || editingBatch) ? 'true' : 'false'} style={{ width: '100%', maxWidth: '100%', minWidth: 0, overflow: 'hidden', boxSizing: 'border-box' }}>
                                   <div className="admin-item-info" style={{ width: '100%', maxWidth: '100%', minWidth: 0, boxSizing: 'border-box' }}>
-                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                      <strong>🌰 {batch.es_noid ? 'NOID' : (batch.nombre || 'Sin nombre')}{categoria ? ` · ${categoria.emoji} ${categoria.name}` : ''}</strong>
+                                    <div className="card-title-row" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+                                      <strong onClick={() => toggleCard(`sb-${batch.id}`)} style={{ flex: 1, minWidth: 0, cursor: 'pointer' }}>{(openCards.has(`sb-${batch.id}`) || editingBatch) ? '▾' : '▸'} 🌰 {batch.es_noid ? 'NOID' : (batch.nombre || 'Sin nombre')}{categoria ? ` · ${categoria.emoji} ${categoria.name}` : ''}</strong>
                                       <button type="button" onClick={() => setEditingSeedBatchId(editingBatch ? null : batch.id)}>
                                         {editingBatch ? '✅ Listo' : '✏️ Editar'}
                                       </button>
