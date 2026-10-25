@@ -269,7 +269,8 @@ export default function App() {
 
   const newPlants = plants.filter(p => p.is_new)
   const salePlants = plants.filter(p => p.on_sale)
-  const heroPlants = plants.filter(p => p.image_url && p.coming_soon).slice(0, 8)
+  // El carrusel muestra una foto por planta: la que se eligió en el panel (carousel_image_url) o, si no, la portada
+  const heroPlants = plants.filter(p => (p.carousel_image_url || p.image_url) && p.coming_soon).slice(0, 8)
 
   useEffect(() => {
     if (heroPlants.length <= 1) return
@@ -505,7 +506,7 @@ export default function App() {
 
       {heroPlants.length > 0 && (
         <div className="hero-carousel">
-          <img src={heroPlants[heroIndex].image_url} alt={heroPlants[heroIndex].name} />
+          <img src={heroPlants[heroIndex].carousel_image_url || heroPlants[heroIndex].image_url} alt={heroPlants[heroIndex].name} />
           <span className="hero-carousel-badge">🔜 Próximamente</span>
           <div className="hero-carousel-caption">{heroPlants[heroIndex].name}</div>
           {heroPlants.length > 1 && (
