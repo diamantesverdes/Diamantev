@@ -496,7 +496,9 @@ function Admin() {
   const [labelQtyModalOpen, setLabelQtyModalOpen] = useState(false)
   const [pendingLabelAction, setPendingLabelAction] = useState(null) // 'print' | 'pdf' | 'pptx'
   const [labelQuantities, setLabelQuantities] = useState(() => (readLabelsDraft() || {}).idQty || {}) // { plantId: cantidad }
-  const [actionMenu, setActionMenu] = useState(null) // 'etiquetas' | 'tienda' | 'compartir' (menú abierto al tener plantas seleccionadas)
+  const [storeModalOpen, setStoreModalOpen] = useState(false) // pantalla "Tienda" (poner/quitar, descuento, carrusel)
+  const [storeDiscount, setStoreDiscount] = useState('') // % de descuento escrito en la pantalla Tienda
+  const galleryVisibleRef = useRef([]) // plantas que se ven ahora en la galería (para "Todas" en las pantallas)
   const iconRowRef = useRef(null) // fila deslizable de íconos de filtro
   const [iconRowEdge, setIconRowEdge] = useState({ start: true, end: false }) // ¿está al inicio / al final?
   const [labelBulk, setLabelBulk] = useState({ id: null, name: null }) // valor de la fila "Todas" del modal de cantidades
@@ -1005,7 +1007,21 @@ function Admin() {
   useBackableModal(labelQtyModalOpen, () => closeLabelModal())
   useBackableModal(categoryNoteModalOpen, () => setCategoryNoteModalOpen(false))
   useBackableModal(globalSearchOpen, () => setGlobalSearchOpen(false))
+  useBackableModal(storeModalOpen, () => setStoreModalOpen(false))
   useEffect(() => { loadLastLabelsPDF().then(v => { if (v) setLastLabelsPdf(v) }).catch(() => {}) }, [])
+  // La tienda y el link compartido ahora son lo mismo: una sola vez se ofrece poner en la tienda lo que solo estaba en el link
+  useEffect(() => {
+    if (!plants.length) return
+    try {
+      if (localStorage.getItem('diamantev_tienda_unificada')) return
+      localStorage.setItem('diamantev_tienda_unificada', '1')
+    } catch (e) { return }
+    const pendientes = plants.filter(x => x.shared_visible && !x.marcado_cliente)
+    if (pendientes.length === 0) return
+    if (confirm(`Ahora la tienda y el link compartido son lo mismo.\n\nHay ${pendientes.length} planta(s) que solo estaban en el link. ¿Ponerlas también en la tienda?`)) {
+      markSelectedCliente(new Set(pendientes.map(x => x.id)), true)
+    }
+  }, [plants])
   // Las plantas cargadas en Etiquetas (y sus cantidades) se guardan solas en este navegador
   useEffect(() => {
     try {
@@ -2820,6 +2836,40 @@ function Admin() {
     loadData()
   }
 
+  // Descuento escrito en la pantalla Tienda (0 lo quita). Solo plantas, no semillas.
+  async function applyDiscountPercent(ids, value) {
+    if (ids.length === 0) { alert('El descuento es solo para plantas. Las semillas seleccionadas se ignoran.'); return }
+    if (String(value).trim() === '') { alert('Escribe el % de descuento (0 para quitarlo).'); return }
+    const percent = Math.max(0, Math.min(100, Number(value) || 0))
+    for (let i = 0; i < ids.length; i += 50) {
+      const { error } = await supabase.from('plants').update({ discount_percent: percent, on_sale: percent > 0 }).in('id', ids.slice(i, i + 50))
+      if (error) { alert('No se pudo aplicar el descuento: ' + error.message); break }
+    }
+    await loadData()
+  }
+
+  // Carrusel de la tienda ("🔜 Próximamente"): pone o quita a varias plantas a la vez
+  async function setComingSoonBulk(ids, value) {
+    if (ids.length === 0) { alert('El carrusel es solo para plantas. Las semillas seleccionadas se ignoran.'); return }
+    for (let i = 0; i < ids.length; i += 50) {
+      const { error } = await supabase.from('plants').update({ coming_soon: value }).in('id', ids.slice(i, i + 50))
+      if (error) { alert('No se pudo actualizar el carrusel: ' + error.message); break }
+    }
+    await loadData()
+  }
+
+  // Link de la tienda (es el mismo catálogo que ve el cliente): no marca nada, solo lo envía
+  async function sendStoreLink() {
+    const link = `${window.location.origin}/?shared=1`
+    const shareText = `🌿 Catálogo Diamantev:\n${link}`
+    try {
+      if (navigator.share) await navigator.share({ title: 'Plantas Diamantev', text: shareText })
+      else window.open(`https://wa.me/?text=${encodeURIComponent(shareText)}`, '_blank')
+    } catch (err) {
+      if (!(err && err.name === 'AbortError')) alert('No se pudo compartir. Intenta de nuevo.')
+    }
+  }
+
   async function applyBulkDiscount(ids) {
     if (ids.length === 0) return
     const input = prompt(`¿Qué % de descuento querés aplicar a las ${ids.length} planta(s) seleccionada(s)? (0 para quitar el descuento)`)
@@ -2971,7 +3021,7 @@ function Admin() {
   async function copySharedLink() {
     const link = `${window.location.origin}/?shared=1`
     await navigator.clipboard.writeText(link)
-    alert('Link copiado. Este link solo muestra las plantas marcadas para compartir. Pégalo en WhatsApp para enviarlo.')
+    alert('Link copiado. Muestra las plantas que están en la tienda. Pégalo en WhatsApp para enviarlo.')
   }
 
   async function markSelectedShared(idsSet, value) {
@@ -4965,6 +5015,7 @@ function Admin() {
 
                     // Las semillas se muestran pero no entran en etiquetas / PDF / enviar / marcar cliente (solo aplican a plantas).
                     const galleryRealPlants = galleryPlants.filter(p => !p.isSeed)
+                    galleryVisibleRef.current = galleryPlants
 
                     const activeChips = []
                     if (gallerySearch.trim()) {
@@ -5405,64 +5456,22 @@ function Admin() {
                         `}</style>
                           {galleryMode === 'acciones' && selectedLabels.size > 0 && (() => {
                             const n = selectedLabels.size
-                            const yaEnTienda = plants.filter(x => selectedLabels.has(x.id) && x.marcado_cliente).length
-                            const abrirEtiquetas = accion => {
-                              setLabelQuantities(prev => { const next = { ...prev }; selectedLabels.forEach(id => { if (!next[id]) next[id] = 1 }); return next })
-                              setPendingLabelAction(accion)
-                              setLabelQtyModalOpen(true)
-                            }
-                            const principal = (key, icon, nombre) => (
-                              <button key={key} type="button" className="print-btn"
-                                onClick={() => setActionMenu(m => (m === key ? null : key))}
-                                style={{ flex: '1 1 0', minWidth: 0, padding: '8px 4px', whiteSpace: 'normal', lineHeight: 1.15, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2, outline: actionMenu === key ? '2px solid #8b7a52' : 'none', outlineOffset: 1 }}>
+                            const boton = (icon, nombre, onClick) => (
+                              <button type="button" className="print-btn" onClick={onClick}
+                                style={{ flex: '1 1 0', minWidth: 0, padding: '8px 4px', whiteSpace: 'normal', lineHeight: 1.15, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
                                 <span style={{ fontSize: 14, fontWeight: 700 }}>{icon} {nombre}</span>
-                                <span style={{ fontSize: 13 }}>({n}) <span style={{ fontSize: 10, opacity: 0.6 }}>{actionMenu === key ? '▲' : '▼'}</span></span>
-                              </button>
-                            )
-                            const opcion = (icon, texto, sub, onClick, deshabilitado) => (
-                              <button key={texto} type="button" className="print-btn" disabled={!!deshabilitado}
-                                onClick={() => { setActionMenu(null); onClick() }}
-                                style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 10, textAlign: 'left', padding: '10px 12px', whiteSpace: 'normal' }}>
-                                <span style={{ fontSize: 18 }}>{icon}</span>
-                                <span style={{ display: 'flex', flexDirection: 'column' }}>
-                                  <span style={{ fontWeight: 600 }}>{texto}</span>
-                                  {sub ? <small style={{ opacity: 0.7 }}>{sub}</small> : null}
-                                </span>
+                                <span style={{ fontSize: 13 }}>({n})</span>
                               </button>
                             )
                             return (
-                              <div style={{ paddingTop: 8 }}>
-                                <div style={{ display: 'flex', gap: 6 }}>
-                                  {principal('etiquetas', '🔖', 'Etiquetas')}
-                                  {principal('tienda', '🛍️', 'Tienda')}
-                                  {principal('compartir', '📤', 'Compartir')}
-                                </div>
-                                {actionMenu && (
-                                  <div style={{ marginTop: 6, display: 'flex', flexDirection: 'column', gap: 6, background: '#FBF3E6', border: '1px solid #E8DFC8', borderRadius: 12, padding: 8 }}>
-                                    {actionMenu === 'etiquetas' && (
-                                      <>
-                                        {opcion('🔖', sharingNotes ? 'Generando...' : 'Etiquetas e identificaciones (PDF)', 'Revisas las cantidades y construyes el PDF', () => abrirEtiquetas('pdf'), sharingNotes)}
-                                        {opcion('🏷️', 'Imprimir', null, () => abrirEtiquetas('print'))}
-                                        {opcion('📽️', sharingNotes ? 'Generando...' : 'Descargar PowerPoint', null, () => abrirEtiquetas('pptx'), sharingNotes)}
-                                        {opcion('✅', 'Marcar todo colocado', null, () => { const ids = requireRealPlantIds(); if (ids.length) markAllPlacedForSelected(ids) })}
-                                      </>
-                                    )}
-                                    {actionMenu === 'tienda' && (
-                                      <>
-                                        {opcion('🟢', 'Poner en la tienda', `Ya están en la tienda: ${yaEnTienda} de ${n}`, () => markSelectedClienteAll(selectedLabels, true))}
-                                        {opcion('⚪', 'Quitar de la tienda', null, () => markSelectedClienteAll(selectedLabels, false))}
-                                        {opcion('🏷️', 'Aplicar descuento', null, () => { const ids = requireRealPlantIds(); if (ids.length) applyBulkDiscount(ids) })}
-                                        {opcion('🎨', 'Color', null, () => { const ids = requireRealPlantIds(); if (ids.length) setColorPickerFor({ ids, title: `${ids.length} plantas seleccionadas` }) })}
-                                      </>
-                                    )}
-                                    {actionMenu === 'compartir' && (
-                                      <>
-                                        {opcion('📤', 'Compartir / Enviar', null, () => setShareModalOpen(true))}
-                                        {opcion('📲', sharingNotes ? 'Preparando...' : 'Enviar fotos', null, () => shareSelectedPhotosDirect(galleryRealPlants), sharingNotes)}
-                                      </>
-                                    )}
-                                  </div>
-                                )}
+                              <div style={{ display: 'flex', gap: 6, paddingTop: 8 }}>
+                                {boton('🔖', 'Etiquetas', () => {
+                                  setLabelQuantities(prev => { const next = { ...prev }; selectedLabels.forEach(id => { if (!next[id]) next[id] = 1 }); return next })
+                                  setPendingLabelAction('pdf')
+                                  setLabelQtyModalOpen(true)
+                                })}
+                                {boton('🛍️', 'Tienda', () => setStoreModalOpen(true))}
+                                {boton('📤', 'Compartir', () => setShareModalOpen(true))}
                               </div>
                             )
                           })()}
@@ -5798,48 +5807,105 @@ function Admin() {
                           document.body
                         )}
 
-                        {shareModalOpen && (() => {
-                          let toSend = galleryRealPlants.filter(p => selectedLabels.has(p.id))
-                          if (shareOnlyStock) toSend = toSend.filter(p => p.stock > 0)
+                        {shareModalOpen && createPortal(
+                          <div
+                            className="admin-sheet-overlay"
+                            onClick={() => setShareModalOpen(false)}
+                            style={{ position: 'fixed', inset: 0, zIndex: 3000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                          >
+                            <div className="free-note-modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 460, width: '100%' }}>
+                              <div className="free-note-modal-header">
+                                <h4>📤 Compartir ({selectedLabels.size})</h4>
+                                <button type="button" className="modal-close-btn" onClick={() => setShareModalOpen(false)}>✕</button>
+                              </div>
+                              <div className="free-note-sheet" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                                <button type="button" className="save-note-btn-inline" onClick={sendStoreLink} style={{ textAlign: 'left', padding: '12px 14px' }}>
+                                  <strong>🔗 Enviar el link de la tienda</strong>
+                                  <div style={{ fontSize: 12, fontWeight: 400, opacity: 0.85 }}>El cliente ve las plantas que están en la tienda: fotos y precio.</div>
+                                </button>
+                                <button type="button" onClick={copySharedLink} style={{ textAlign: 'left', padding: '10px 14px' }}>
+                                  📋 Copiar el link
+                                </button>
+                                <button type="button" onClick={() => shareSelectedPhotosDirect(galleryRealPlants)} disabled={sharingNotes} style={{ textAlign: 'left', padding: '12px 14px' }}>
+                                  <strong>{sharingNotes ? 'Preparando...' : `📲 Enviar fotos (${galleryRealPlants.filter(p => selectedLabels.has(p.id)).length})`}</strong>
+                                  <div style={{ fontSize: 12, fontWeight: 400, opacity: 0.8 }}>Las fotos de las plantas seleccionadas, con el nombre y sin precio.</div>
+                                </button>
+                              </div>
+                            </div>
+                          </div>,
+                          document.body
+                        )}
+
+                        {storeModalOpen && (() => {
+                          const items = labelItemsList().filter(x => selectedLabels.has(x.id))
+                          const idsReales = items.filter(x => !x.isSeed).map(x => x.id)
+                          const enTienda = items.filter(x => x.marcado_cliente).length
+                          const chico = { padding: '6px 10px', fontSize: 13, minHeight: 0, lineHeight: 1.2, borderRadius: 8, boxShadow: 'none', whiteSpace: 'nowrap' }
+                          const titulo = txt => <p style={{ margin: '12px 2px 6px', fontSize: 12, fontWeight: 700, color: '#7a7060', letterSpacing: '0.04em', textTransform: 'uppercase' }}>{txt}</p>
                           return createPortal(
                             <div
                               className="admin-sheet-overlay"
-                              onClick={() => setShareModalOpen(false)}
+                              onClick={() => setStoreModalOpen(false)}
                               style={{ position: 'fixed', inset: 0, zIndex: 3000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
                             >
-                              <div className="free-note-modal" onClick={e => e.stopPropagation()}>
+                              <div className="free-note-modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 460, width: '100%', maxHeight: '88vh', display: 'flex', flexDirection: 'column' }}>
                                 <div className="free-note-modal-header">
-                                  <h4>Marcar y enviar link</h4>
-                                  <button type="button" className="modal-close-btn" onClick={() => setShareModalOpen(false)}>✕</button>
+                                  <h4>🛍️ Tienda ({items.length})</h4>
+                                  <button type="button" className="modal-close-btn" onClick={() => setStoreModalOpen(false)}>✕</button>
                                 </div>
-                                <div className="free-note-sheet">
-                                  <p className="status-msg">Estas plantas se marcarán como disponibles en el link compartido y se enviará solo el enlace por WhatsApp (el cliente ve fotos, precio y stock al abrirlo).</p>
-                                  <label style={{ display: 'block', marginBottom: 10 }}>
-                                    <input type="checkbox" checked={shareOnlyStock} onChange={e => setShareOnlyStock(e.target.checked)} /> Solo las que tienen stock
-                                  </label>
 
-                                  <div className="admin-list">
-                                    {toSend.length === 0 && <p className="status-msg">Ninguna planta seleccionada cumple el filtro.</p>}
-                                    {toSend.map(p => (
-                                      <div key={p.id} className="admin-item">
-                                        {p.image_url ? <img src={p.image_url} alt={p.name} /> : <div className="no-img-sm">Sin foto</div>}
-                                        <div className="admin-item-info">
-                                          <strong>{p.name}</strong>
-                                          <span>${Number(p.price).toFixed(2)}</span>
-                                        </div>
-                                      </div>
-                                    ))}
-                                  </div>
-
-                                  <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
-                                    <button type="button" onClick={copySharedLink} style={{ flex: 1 }}>
-                                      🔗 Copiar link
-                                    </button>
-                                    <button type="button" className="save-note-btn-inline" onClick={() => shareSelectedPhotos(galleryRealPlants)} disabled={sharingNotes || toSend.length === 0} style={{ flex: 1 }}>
-                                      {sharingNotes ? 'Preparando...' : `📲 Marcar y enviar (${toSend.length})`}
-                                    </button>
-                                  </div>
+                                <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', padding: '2px 2px 8px', borderBottom: '2px solid #E8DFC8' }}>
+                                  <button type="button" onClick={() => selectAllLabels(galleryPlants)} style={chico}>☑ Todas</button>
+                                  <button type="button" onClick={() => clearLabels()} style={chico}>🧹 Limpiar</button>
+                                  <span style={{ flex: 1, textAlign: 'right', fontSize: 12, color: '#7a7060' }}>En la tienda: {enTienda} de {items.length}</span>
                                 </div>
+
+                                <div style={{ overflowY: 'auto', maxHeight: '32vh', padding: '2px' }}>
+                                  {items.length === 0 && <p className="status-msg">No hay plantas en la lista.</p>}
+                                  {items.map(x => (
+                                    <div key={x.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 2px', borderBottom: '1px solid #eee' }}>
+                                      {x.image_url ? (
+                                        <img src={x.image_url} alt="" loading="lazy" style={{ width: 36, height: 36, objectFit: 'cover', borderRadius: 8, flexShrink: 0, border: '1px solid #ddd' }} />
+                                      ) : (
+                                        <div style={{ width: 36, height: 36, borderRadius: 8, flexShrink: 0, border: '1px dashed #ccc', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#bbb' }}>🌱</div>
+                                      )}
+                                      <span style={{ flex: 1, minWidth: 0, fontSize: 14, lineHeight: 1.2, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{x.name}</span>
+                                      <span style={{ fontSize: 12, whiteSpace: 'nowrap' }}>
+                                        {x.marcado_cliente ? '🟢' : '⚪'}{!x.isSeed && x.coming_soon ? ' 🔜' : ''}{!x.isSeed && Number(x.discount_percent) > 0 ? ` −${x.discount_percent}%` : ''}
+                                      </span>
+                                      <button type="button" aria-label="Quitar de la lista" title="Quitar de la lista" onClick={() => toggleLabelSelect(x.id)}
+                                        style={{ width: 24, border: 'none', background: 'none', boxShadow: 'none', padding: 0, minHeight: 0, fontSize: 16, color: '#b03434', cursor: 'pointer' }}>✕</button>
+                                    </div>
+                                  ))}
+                                </div>
+
+                                {titulo('En la tienda')}
+                                <div style={{ display: 'flex', gap: 8 }}>
+                                  <button type="button" className="save-note-btn-inline" disabled={items.length === 0} onClick={() => markSelectedClienteAll(selectedLabels, true)} style={{ flex: 1 }}>🟢 Poner</button>
+                                  <button type="button" disabled={items.length === 0} onClick={() => markSelectedClienteAll(selectedLabels, false)} style={{ flex: 1 }}>⚪ Quitar</button>
+                                </div>
+
+                                {titulo('Descuento')}
+                                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                                  <input
+                                    type="number"
+                                    inputMode="decimal"
+                                    min="0"
+                                    max="100"
+                                    placeholder="% (0 lo quita)"
+                                    value={storeDiscount}
+                                    onChange={e => setStoreDiscount(e.target.value)}
+                                    style={{ flex: 1, minWidth: 0, boxSizing: 'border-box' }}
+                                  />
+                                  <button type="button" disabled={idsReales.length === 0} onClick={() => applyDiscountPercent(idsReales, storeDiscount)}>Aplicar</button>
+                                </div>
+
+                                {titulo('Carrusel de la tienda (🔜 Próximamente)')}
+                                <div style={{ display: 'flex', gap: 8 }}>
+                                  <button type="button" disabled={idsReales.length === 0} onClick={() => setComingSoonBulk(idsReales, true)} style={{ flex: 1 }}>🔜 Poner</button>
+                                  <button type="button" disabled={idsReales.length === 0} onClick={() => setComingSoonBulk(idsReales, false)} style={{ flex: 1 }}>Quitar</button>
+                                </div>
+                                <p style={{ margin: '6px 2px 0', fontSize: 12, color: '#7a7060' }}>El carrusel de arriba de la tienda muestra hasta 8 plantas con foto que estén en la tienda.</p>
                               </div>
                             </div>,
                             document.body
@@ -9071,13 +9137,28 @@ function Admin() {
               <style>{`.stepper-input::-webkit-outer-spin-button,.stepper-input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}.stepper-input{-moz-appearance:textfield}`}</style>
               <div className="free-note-modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 460, width: '100%', maxHeight: '86vh', display: 'flex', flexDirection: 'column' }}>
                 <div className="free-note-modal-header">
-                  <h4>{isPdf ? 'Revisar etiquetas antes del PDF' : '¿Cuántas copias de cada una?'}</h4>
+                  <h4>🔖 Etiquetas ({items.length})</h4>
                   <button type="button" className="modal-close-btn" onClick={() => closeLabelModal()}>✕</button>
+                </div>
+
+                {/* Formato (PDF o PowerPoint) y selección rápida */}
+                <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', padding: '2px 2px 8px' }}>
+                  <div style={{ display: 'inline-flex', border: '1px solid #d8cfb8', borderRadius: 10, overflow: 'hidden' }}>
+                    {[['pdf', '📄 PDF'], ['pptx', '📽️ PowerPoint']].map(([k, l]) => (
+                      <button key={k} type="button" onClick={() => setPendingLabelAction(k)}
+                        style={{ padding: '6px 10px', fontSize: 13, minHeight: 0, lineHeight: 1.2, border: 'none', borderRadius: 0, boxShadow: 'none', background: pendingLabelAction === k ? '#E8F1E0' : '#fff', fontWeight: pendingLabelAction === k ? 700 : 500, color: '#5B4636' }}>
+                        {l}
+                      </button>
+                    ))}
+                  </div>
+                  <span style={{ flex: 1 }} />
+                  <button type="button" onClick={() => selectAllLabels(galleryVisibleRef.current)} style={{ padding: '6px 10px', fontSize: 13, minHeight: 0, lineHeight: 1.2, borderRadius: 8, boxShadow: 'none', whiteSpace: 'nowrap' }}>☑ Todas</button>
+                  <button type="button" onClick={() => clearLabels()} style={{ padding: '6px 10px', fontSize: 13, minHeight: 0, lineHeight: 1.2, borderRadius: 8, boxShadow: 'none', whiteSpace: 'nowrap' }}>🧹 Limpiar</button>
                 </div>
 
                 {/* Encabezados de las columnas: aquí se dice una sola vez qué es cada número */}
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8, padding: '2px 2px 4px' }}>
-                  {isPdf ? (<>{colHead('🆔 Identificación')}{colHead('🔖 Etiqueta')}</>) : colHead(pendingLabelAction === 'pptx' ? '📽️ Copias' : '🏷️ Copias')}
+                  {isPdf ? (<>{colHead('🆔 Identificación')}{colHead('🔖 Etiqueta')}</>) : colHead('📽️ Copias')}
                   <span style={{ width: 28, flex: '0 0 auto' }} />
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 2px 8px', borderBottom: '2px solid #E8DFC8' }}>
@@ -9119,7 +9200,8 @@ function Admin() {
                   </p>
                 )}
                 <div style={{ display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
-                  <button type="button" onClick={() => closeLabelModal()}>{isPdf ? 'Cerrar' : 'Cancelar'}</button>
+                  <button type="button" onClick={() => closeLabelModal()}>Cerrar</button>
+                  <button type="button" disabled={items.length === 0} onClick={() => { const ids = requireRealPlantIds(); if (ids.length) markAllPlacedForSelected(ids) }}>✅ Marcar todo colocado</button>
                   <button
                     type="button"
                     className="save-note-btn-inline"
@@ -9132,7 +9214,7 @@ function Admin() {
                       if (pendingLabelAction === 'pptx') downloadLabelsPPTX(labelItemsList())
                     }}
                   >
-                    {isPdf ? '📄 Construir PDF' : 'Continuar'}
+                    {isPdf ? '📄 Construir PDF' : '📽️ Construir PowerPoint'}
                   </button>
                 </div>
               </div>
