@@ -496,6 +496,8 @@ function Admin() {
   const [labelQtyModalOpen, setLabelQtyModalOpen] = useState(false)
   const [pendingLabelAction, setPendingLabelAction] = useState(null) // 'print' | 'pdf' | 'pptx'
   const [labelQuantities, setLabelQuantities] = useState(() => (readLabelsDraft() || {}).idQty || {}) // { plantId: cantidad }
+  const [carouselModalOpen, setCarouselModalOpen] = useState(false) // pantalla Carrusel
+  const [carouselPickFor, setCarouselPickFor] = useState(null) // planta a la que se le elige la foto del carrusel
   const [storeModalOpen, setStoreModalOpen] = useState(false) // pantalla "Tienda" (poner/quitar, descuento, carrusel)
   const [storeDiscount, setStoreDiscount] = useState('') // % de descuento escrito en la pantalla Tienda
   const galleryVisibleRef = useRef([]) // plantas que se ven ahora en la galería (para "Todas" en las pantallas)
@@ -1008,6 +1010,7 @@ function Admin() {
   useBackableModal(categoryNoteModalOpen, () => setCategoryNoteModalOpen(false))
   useBackableModal(globalSearchOpen, () => setGlobalSearchOpen(false))
   useBackableModal(storeModalOpen, () => setStoreModalOpen(false))
+  useBackableModal(carouselModalOpen, () => { setCarouselModalOpen(false); setCarouselPickFor(null) })
   useEffect(() => { loadLastLabelsPDF().then(v => { if (v) setLastLabelsPdf(v) }).catch(() => {}) }, [])
   // La tienda y el link compartido ahora son lo mismo: una sola vez se ofrece poner en la tienda lo que solo estaba en el link
   useEffect(() => {
@@ -2834,6 +2837,22 @@ function Admin() {
     const value = percent === '' ? 0 : Math.max(0, Math.min(100, Number(percent) || 0))
     await supabase.from('plants').update({ discount_percent: value }).eq('id', id)
     loadData()
+  }
+
+  // Foto que muestra el carrusel de la tienda para una planta (null = la portada, Foto 1)
+  async function setCarouselPhoto(id, url) {
+    const plant = plants.find(x => x.id === id)
+    if (!plant) return
+    const value = url && url !== plant.image_url ? url : null
+    const { error } = await supabase.from('plants').update({ carousel_image_url: value }).eq('id', id)
+    if (error) {
+      alert(/carousel_image_url/i.test(error.message)
+        ? 'Falta crear una columna en la base de datos. Pega esto en Supabase (SQL Editor) y vuelve a intentar:\n\nalter table plants add column if not exists carousel_image_url text;'
+        : 'No se pudo guardar la foto del carrusel: ' + error.message)
+      return
+    }
+    setCarouselPickFor(null)
+    await loadData()
   }
 
   // Descuento escrito en la pantalla Tienda (0 lo quita). Solo plantas, no semillas.
@@ -5134,8 +5153,8 @@ function Admin() {
                         <button key={label} type="button" onClick={() => cycleTri(posKey, negKey)}
                           title={label} aria-label={`${label}: ${estado}`}
                           className={`attr-pill${pos ? ' is-active' : ''}${neg ? ' is-active is-neg' : ''}`}
-                          style={{ width: 'auto', minWidth: 0, flex: '0 0 auto', display: 'inline-flex', alignItems: 'center', padding: active ? '8px 14px' : '8px 12px' }}>
-                          <span className="attr-icon" style={{ fontSize: 22 }}>{icon}</span>
+                          style={{ width: 'auto', minWidth: 0, minHeight: 0, flex: '0 0 auto', display: 'inline-flex', alignItems: 'center', padding: active ? '4px 12px' : '4px 9px' }}>
+                          <span className="attr-icon" style={{ fontSize: 19 }}>{icon}</span>
                           {active && (
                             <span style={{ display: 'inline-flex', flexDirection: 'column', textAlign: 'left', lineHeight: 1.15, marginLeft: 8 }}>
                               <span style={{ fontWeight: 700 }}>{label}</span>
@@ -5151,8 +5170,8 @@ function Admin() {
                         <button key={key} type="button" onClick={() => toggleExclusive(key, otherKey)}
                           title={label} aria-label={label}
                           className={`attr-pill${on ? ' is-active' : ''}${on && neg ? ' is-neg' : ''}`}
-                          style={{ width: 'auto', minWidth: 0, flex: '0 0 auto', display: 'inline-flex', alignItems: 'center', padding: on ? '8px 14px' : '8px 12px' }}>
-                          <span className="attr-icon" style={{ fontSize: 22 }}>{icon}</span>
+                          style={{ width: 'auto', minWidth: 0, minHeight: 0, flex: '0 0 auto', display: 'inline-flex', alignItems: 'center', padding: on ? '4px 12px' : '4px 9px' }}>
+                          <span className="attr-icon" style={{ fontSize: 19 }}>{icon}</span>
                           {on && <span style={{ marginLeft: 8, fontWeight: 600 }}>{label} ✓</span>}
                         </button>
                       )
@@ -5162,8 +5181,8 @@ function Admin() {
                     const groupPill = (key, icon, label, active, summary, onClick) => (
                       <button key={key} type="button" onClick={onClick} title={label} aria-label={label}
                         className={`attr-pill${active ? ' is-active' : ''}`}
-                        style={{ width: 'auto', minWidth: 0, flex: '0 0 auto', display: 'inline-flex', alignItems: 'center', padding: active ? '8px 14px' : '8px 12px', outline: filterGroup === key ? '2px solid #8b7a52' : 'none', outlineOffset: 1 }}>
-                        <span className="attr-icon" style={{ fontSize: 22 }}>{icon}</span>
+                        style={{ width: 'auto', minWidth: 0, minHeight: 0, flex: '0 0 auto', display: 'inline-flex', alignItems: 'center', padding: active ? '4px 12px' : '4px 9px', outline: filterGroup === key ? '2px solid #8b7a52' : 'none', outlineOffset: 1 }}>
+                        <span className="attr-icon" style={{ fontSize: 19 }}>{icon}</span>
                         {active && (
                           <span style={{ display: 'inline-flex', flexDirection: 'column', textAlign: 'left', lineHeight: 1.15, marginLeft: 8 }}>
                             <span style={{ fontWeight: 700 }}>{label}</span>
@@ -5431,14 +5450,14 @@ function Admin() {
                           document.body
                         )}
                         <div
-                          ref={el => { iconRowRef.current = el; if (el && !isWideScreen) requestAnimationFrame(updateIconEdge) }}
+                          ref={el => { iconRowRef.current = el; if (el) requestAnimationFrame(updateIconEdge) }}
                           onScroll={updateIconEdge}
-                          style={{ display: 'flex', flexWrap: isWideScreen ? 'wrap' : 'nowrap', gap: 6, overflowX: isWideScreen ? 'visible' : 'auto', WebkitOverflowScrolling: 'touch', scrollbarWidth: 'none', paddingTop: 6, paddingBottom: 2 }}
+                          style={{ display: 'flex', flexWrap: 'nowrap', gap: 6, overflowX: 'auto', WebkitOverflowScrolling: 'touch', scrollbarWidth: 'none', paddingTop: 6, paddingBottom: 2 }}
                         >
                           {iconPills}
                           {colorChip}
                         </div>
-                        {!isWideScreen && (
+                        {!(iconRowEdge.start && iconRowEdge.end) && (
                           <div style={{ display: 'flex', justifyContent: 'center', gap: 12, marginTop: 2 }}>
                             {[['◀', -1, iconRowEdge.start, 'Ver los filtros anteriores'], ['▶', 1, iconRowEdge.end, 'Ver más filtros']].map(([txt, dir, off, label]) => (
                               <button key={txt} type="button" aria-label={label} title={label} disabled={off} onClick={() => scrollIconRow(dir)}
@@ -5454,24 +5473,26 @@ function Admin() {
                         <style>{`
                           .gallery-actions-row > button { flex: 0 0 auto !important; width: auto !important; margin: 0 !important; white-space: nowrap !important; }
                         `}</style>
-                          {galleryMode === 'acciones' && selectedLabels.size > 0 && (() => {
+                          {galleryMode === 'acciones' && (() => {
                             const n = selectedLabels.size
-                            const boton = (icon, nombre, onClick) => (
-                              <button type="button" className="print-btn" onClick={onClick}
-                                style={{ flex: '1 1 0', minWidth: 0, padding: '8px 4px', whiteSpace: 'normal', lineHeight: 1.15, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
-                                <span style={{ fontSize: 14, fontWeight: 700 }}>{icon} {nombre}</span>
+                            const boton = (icon, nombre, accion) => (
+                              <button type="button" className="print-btn"
+                                onClick={() => { if (n === 0) { alert('Primero elige plantas: toca ☑ Todas o la casilla de cada foto.'); return } accion() }}
+                                style={{ flex: '1 1 0', minWidth: 0, padding: '8px 4px', whiteSpace: 'normal', lineHeight: 1.15, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2, opacity: n === 0 ? 0.55 : 1 }}>
+                                <span style={{ fontSize: 13, fontWeight: 700 }}>{icon} {nombre}</span>
                                 <span style={{ fontSize: 13 }}>({n})</span>
                               </button>
                             )
                             return (
-                              <div style={{ display: 'flex', gap: 6, paddingTop: 8 }}>
+                              <div style={{ display: 'flex', gap: 4, paddingTop: 8 }}>
                                 {boton('🔖', 'Etiquetas', () => {
                                   setLabelQuantities(prev => { const next = { ...prev }; selectedLabels.forEach(id => { if (!next[id]) next[id] = 1 }); return next })
                                   setPendingLabelAction('pdf')
                                   setLabelQtyModalOpen(true)
                                 })}
                                 {boton('🛍️', 'Tienda', () => setStoreModalOpen(true))}
-                                {boton('📤', 'Compartir', () => setShareModalOpen(true))}
+                                {boton('📲', 'Fotos', () => setShareModalOpen(true))}
+                                {boton('🎠', 'Carrusel', () => setCarouselModalOpen(true))}
                               </div>
                             )
                           })()}
@@ -5504,30 +5525,6 @@ function Admin() {
                             <button type="button" className="filter-chip filter-chip-clear" onClick={clearAllGalleryFilters}>Limpiar todo</button>
                           </div>
                         )}
-
-                        <div style={{ marginTop: 6, paddingTop: 6, borderTop: '1px solid #E8DFC8' }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                            <div role="group" aria-label="Modo de la galería" style={{ display: 'inline-flex', border: `2px solid ${PILL_BORDER}`, borderRadius: 18, overflow: 'hidden', background: PILL_BG, boxShadow: PILL_SHADOW, flexShrink: 0 }}>
-                              <button type="button" aria-pressed={galleryMode === 'acciones'}
-                                onClick={() => { setGalleryMode('acciones'); setLabelSelectMenuOpen(false) }}
-                                style={modeBtnStyle(galleryMode === 'acciones', '#F3ECDD', '#5B4636')}>
-                                🛠️ Acciones
-                              </button>
-                              <button type="button" aria-pressed={galleryMode === 'cliente'}
-                                onClick={() => { setGalleryMode('cliente'); setLabelSelectMenuOpen(false) }}
-                                style={modeBtnStyle(galleryMode === 'cliente', '#2E8B57', '#fff')}>
-                                🛍️ Tienda Cliente
-                              </button>
-                            </div>
-
-                            {galleryMode === 'cliente' && (
-                              <span style={{ fontSize: 13, color: '#2E6B47', fontWeight: 600 }}>
-                                🟢 {clienteCount} marcada{clienteCount === 1 ? '' : 's'} para cliente
-                              </span>
-                            )}
-                          </div>
-
-                        </div>
 
                         {galleryFiltersOpen && (
                           <div className="filter-sheet-overlay" onClick={() => setGalleryFiltersOpen(false)}>
@@ -5727,33 +5724,40 @@ function Admin() {
                               <div
                                 key={p.id}
                                 className="gallery-item"
+                                onClick={() => toggleLabelSelect(p.id)}
                                 style={{
                                   position: 'relative',
-                                  ...(galleryMode === 'cliente' && p.marcado_cliente ? { boxShadow: '0 0 0 3px #2E8B57', borderRadius: 8 } : null),
+                                  cursor: 'pointer',
+                                  ...(selectedLabels.has(p.id) ? { boxShadow: '0 0 0 3px #4a5d3a', borderRadius: 8 } : null),
                                 }}
                               >
-                                {(
-                                <label className="gallery-checkbox" title={galleryMode === 'cliente' ? (p.marcado_cliente ? 'Visible para el cliente (toca para quitar)' : 'Marcar para cliente') : 'Seleccionar'}>
-                                  <input
-                                    type="checkbox"
-                                    style={galleryMode === 'cliente' ? { accentColor: '#2E8B57' } : undefined}
-                                    checked={galleryMode === 'cliente' ? !!p.marcado_cliente : selectedLabels.has(p.id)}
-                                    onChange={() => galleryMode === 'cliente' ? (p.isSeed ? toggleSeedMarcadoCliente(p.seedBatchId, p.marcado_cliente) : toggleMarcadoCliente(p.id, p.marcado_cliente)) : toggleLabelSelect(p.id)}
-                                  />
+                                <label className="gallery-checkbox" title="Seleccionado" style={{ pointerEvents: 'none' }}>
+                                  <input type="checkbox" readOnly checked={selectedLabels.has(p.id)} />
                                 </label>
-                                )}
                                 {p.isSeed && <span title="Semilla" style={{ position: 'absolute', top: 6, right: 6, zIndex: 2, background: '#fff', borderRadius: 10, padding: '1px 6px', fontSize: '0.85rem', boxShadow: '0 1px 3px rgba(0,0,0,0.25)' }}>🌰</span>}
                                 {p.coming_soon && <span title="Próximamente" style={{ position: 'absolute', top: 4, left: 4, zIndex: 2 }}>🔜</span>}
                                 {p.flagged && <span title={p.flag_comment || 'Marcada para revisar'} style={{ position: 'absolute', top: 4, right: 4, zIndex: 2, fontSize: '1.1rem' }}>🚩</span>}
-                                <div onClick={() => { if (p.isSeed) { openSeedSheet(p.seedBatchId); return } setPhotoModalPlantId(p.id); setPhotoModalIndex(0); setPhotoModalMenuOpen(false); setPhotoModalSection('fotos'); setSeedVentasFilter('all') }} style={{ cursor: 'pointer' }}>
+                                <div style={{ position: 'relative' }}>
                                   {p.image_url ? <img src={p.image_url} alt={p.name} /> : <div className="no-img-sm">{p.isSeed ? '🌰 Semillas' : 'Sin foto'}</div>}
+                                  {p.marcado_cliente && <span title="En la tienda" style={{ position: 'absolute', left: 6, bottom: 6, fontSize: 14, lineHeight: 1, background: 'rgba(255,255,255,0.85)', borderRadius: 10, padding: '2px 4px' }}>🟢</span>}
+                                  <button
+                                    type="button"
+                                    aria-label="Abrir la ficha de la planta"
+                                    title="Abrir la ficha"
+                                    onClick={e => {
+                                      e.stopPropagation()
+                                      if (p.isSeed) { openSeedSheet(p.seedBatchId); return }
+                                      setPhotoModalPlantId(p.id); setPhotoModalIndex(0); setPhotoModalMenuOpen(false); setPhotoModalSection('fotos'); setSeedVentasFilter('all')
+                                    }}
+                                    style={{ position: 'absolute', right: 6, bottom: 6, width: 30, height: 30, minHeight: 0, padding: 0, borderRadius: '50%', border: '1px solid #C8B58A', background: 'rgba(255,255,255,0.92)', boxShadow: '0 1px 4px rgba(0,0,0,0.25)', fontSize: 16, lineHeight: 1, color: '#4a3a2a', cursor: 'pointer' }}
+                                  >ⓘ</button>
                                 </div>
                                 <span>{p.name}</span>
                                 {p.isSeed && <span style={{ fontSize: '0.78rem', fontWeight: 600, color: '#6b5a45' }}>🌰 Semilla · Stock {p.stock} · ${p.price.toFixed(2)}</span>}
                                 {!p.isSeed && (
                                   <button
                                     type="button"
-                                    onClick={() => setColorPickerFor({ ids: [p.id], title: p.name })}
+                                    onClick={e => { e.stopPropagation(); setColorPickerFor({ ids: [p.id], title: p.name }) }}
                                     style={{
                                       display: 'inline-flex', alignItems: 'center', gap: 5, margin: '3px auto 0', padding: '2px 9px',
                                       width: 'auto', minHeight: 0, lineHeight: 1.3, fontSize: '0.75rem', fontWeight: 600,
@@ -5807,34 +5811,128 @@ function Admin() {
                           document.body
                         )}
 
-                        {shareModalOpen && createPortal(
-                          <div
-                            className="admin-sheet-overlay"
-                            onClick={() => setShareModalOpen(false)}
-                            style={{ position: 'fixed', inset: 0, zIndex: 3000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-                          >
-                            <div className="free-note-modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 460, width: '100%' }}>
-                              <div className="free-note-modal-header">
-                                <h4>📤 Compartir ({selectedLabels.size})</h4>
-                                <button type="button" className="modal-close-btn" onClick={() => setShareModalOpen(false)}>✕</button>
+                        {shareModalOpen && (() => {
+                          const items = labelItemsList().filter(x => selectedLabels.has(x.id))
+                          const conFoto = items.filter(x => !x.isSeed && x.image_url).length
+                          const chico = { padding: '6px 10px', fontSize: 13, minHeight: 0, lineHeight: 1.2, borderRadius: 8, boxShadow: 'none', whiteSpace: 'nowrap' }
+                          return createPortal(
+                            <div
+                              className="admin-sheet-overlay"
+                              onClick={() => setShareModalOpen(false)}
+                              style={{ position: 'fixed', inset: 0, zIndex: 3000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                            >
+                              <div className="free-note-modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 460, width: '100%', maxHeight: '88vh', display: 'flex', flexDirection: 'column' }}>
+                                <div className="free-note-modal-header">
+                                  <h4>📲 Fotos ({items.length})</h4>
+                                  <button type="button" className="modal-close-btn" onClick={() => setShareModalOpen(false)}>✕</button>
+                                </div>
+                                <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', padding: '2px 2px 8px', borderBottom: '2px solid #E8DFC8' }}>
+                                  <button type="button" onClick={() => selectAllLabels(galleryPlants)} style={chico}>☑ Todas</button>
+                                  <button type="button" onClick={() => clearLabels()} style={chico}>🧹 Limpiar</button>
+                                  <span style={{ flex: 1, textAlign: 'right', fontSize: 12, color: '#7a7060' }}>Con foto: {conFoto}</span>
+                                </div>
+                                <div style={{ overflowY: 'auto', maxHeight: '42vh', padding: '2px' }}>
+                                  {items.length === 0 && <p className="status-msg">No hay plantas en la lista.</p>}
+                                  {items.map(x => (
+                                    <div key={x.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 2px', borderBottom: '1px solid #eee' }}>
+                                      {x.image_url ? (
+                                        <img src={x.image_url} alt="" loading="lazy" style={{ width: 36, height: 36, objectFit: 'cover', borderRadius: 8, flexShrink: 0, border: '1px solid #ddd' }} />
+                                      ) : (
+                                        <div style={{ width: 36, height: 36, borderRadius: 8, flexShrink: 0, border: '1px dashed #ccc', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#bbb' }}>🌱</div>
+                                      )}
+                                      <span style={{ flex: 1, minWidth: 0, fontSize: 14, lineHeight: 1.2, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{x.name}</span>
+                                      <button type="button" aria-label="Quitar de la lista" title="Quitar de la lista" onClick={() => toggleLabelSelect(x.id)}
+                                        style={{ width: 24, border: 'none', background: 'none', boxShadow: 'none', padding: 0, minHeight: 0, fontSize: 16, color: '#b03434', cursor: 'pointer' }}>✕</button>
+                                    </div>
+                                  ))}
+                                </div>
+                                <p style={{ margin: '8px 2px 0', fontSize: 12, color: '#7a7060' }}>Se envían las fotos con el nombre de cada planta, sin precio.</p>
+                                <button type="button" className="save-note-btn-inline" disabled={conFoto === 0 || sharingNotes} onClick={() => shareSelectedPhotosDirect(galleryRealPlants)} style={{ marginTop: 8 }}>
+                                  {sharingNotes ? 'Preparando...' : `📲 Enviar fotos (${conFoto})`}
+                                </button>
                               </div>
-                              <div className="free-note-sheet" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                                <button type="button" className="save-note-btn-inline" onClick={sendStoreLink} style={{ textAlign: 'left', padding: '12px 14px' }}>
-                                  <strong>🔗 Enviar el link de la tienda</strong>
-                                  <div style={{ fontSize: 12, fontWeight: 400, opacity: 0.85 }}>El cliente ve las plantas que están en la tienda: fotos y precio.</div>
-                                </button>
-                                <button type="button" onClick={copySharedLink} style={{ textAlign: 'left', padding: '10px 14px' }}>
-                                  📋 Copiar el link
-                                </button>
-                                <button type="button" onClick={() => shareSelectedPhotosDirect(galleryRealPlants)} disabled={sharingNotes} style={{ textAlign: 'left', padding: '12px 14px' }}>
-                                  <strong>{sharingNotes ? 'Preparando...' : `📲 Enviar fotos (${galleryRealPlants.filter(p => selectedLabels.has(p.id)).length})`}</strong>
-                                  <div style={{ fontSize: 12, fontWeight: 400, opacity: 0.8 }}>Las fotos de las plantas seleccionadas, con el nombre y sin precio.</div>
-                                </button>
+                            </div>,
+                            document.body
+                          )
+                        })()}
+
+                        {carouselModalOpen && (() => {
+                          const items = labelItemsList().filter(x => selectedLabels.has(x.id))
+                          const idsReales = items.filter(x => !x.isSeed).map(x => x.id)
+                          const fotoDe = x => x.carousel_image_url || x.image_url
+                          const enCarrusel = plants.filter(x => x.coming_soon).slice().sort((a, b) => String(a.name).localeCompare(String(b.name), 'es'))
+                          const visibles = enCarrusel.filter(x => x.marcado_cliente && fotoDe(x)).slice(0, 8)
+                          const visiblesIds = new Set(visibles.map(x => x.id))
+                          const motivo = x => (!x.marcado_cliente ? 'No se ve: no está en la tienda' : !fotoDe(x) ? 'No se ve: no tiene foto' : !visiblesIds.has(x.id) ? 'No se ve: ya hay 8' : '✓ Se ve en la tienda')
+                          const chico = { padding: '6px 10px', fontSize: 13, minHeight: 0, lineHeight: 1.2, borderRadius: 8, boxShadow: 'none', whiteSpace: 'nowrap' }
+                          const titulo = txt => <p style={{ margin: '12px 2px 6px', fontSize: 12, fontWeight: 700, color: '#7a7060', letterSpacing: '0.04em', textTransform: 'uppercase' }}>{txt}</p>
+                          const agregar = async () => {
+                            await setComingSoonBulk(idsReales, true)
+                            const fuera = items.filter(x => !x.isSeed && !x.marcado_cliente)
+                            if (fuera.length && confirm(`${fuera.length} planta(s) no están en la tienda y no se verían en el carrusel. ¿Ponerlas también en la tienda?`)) {
+                              markSelectedClienteAll(new Set(fuera.map(x => x.id)), true)
+                            }
+                          }
+                          return createPortal(
+                            <div
+                              className="admin-sheet-overlay"
+                              onClick={() => { setCarouselModalOpen(false); setCarouselPickFor(null) }}
+                              style={{ position: 'fixed', inset: 0, zIndex: 3000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                            >
+                              <div className="free-note-modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 460, width: '100%', maxHeight: '88vh', display: 'flex', flexDirection: 'column' }}>
+                                <div className="free-note-modal-header">
+                                  <h4>🎠 Carrusel ({visibles.length} de 8)</h4>
+                                  <button type="button" className="modal-close-btn" onClick={() => { setCarouselModalOpen(false); setCarouselPickFor(null) }}>✕</button>
+                                </div>
+                                <p style={{ margin: '0 2px 6px', fontSize: 12, color: '#7a7060' }}>Es el carrusel de arriba de la tienda (🔜 Próximamente). Sale una foto por planta, hasta 8, en orden alfabético, y deben estar en la tienda.</p>
+
+                                <div style={{ overflowY: 'auto', maxHeight: '46vh', padding: '2px' }}>
+                                  {enCarrusel.length === 0 && <p className="status-msg">Todavía no hay plantas en el carrusel.</p>}
+                                  {enCarrusel.map(x => {
+                                    const fotos = [['Foto 1', x.image_url], ['Foto 2', x.extra_image_1], ['Foto 3', x.extra_image_2], ['Foto 4', x.extra_image_3]].filter(f => f[1])
+                                    return (
+                                      <div key={x.id} style={{ borderBottom: '1px solid #eee', padding: '6px 2px' }}>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                          {fotoDe(x) ? (
+                                            <img src={fotoDe(x)} alt="" loading="lazy" style={{ width: 44, height: 44, objectFit: 'cover', borderRadius: 8, flexShrink: 0, border: '1px solid #ddd' }} />
+                                          ) : (
+                                            <div style={{ width: 44, height: 44, borderRadius: 8, flexShrink: 0, border: '1px dashed #ccc', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#bbb' }}>🌱</div>
+                                          )}
+                                          <div style={{ flex: 1, minWidth: 0 }}>
+                                            <div style={{ fontSize: 14, lineHeight: 1.2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{x.name}</div>
+                                            <small style={{ color: visiblesIds.has(x.id) ? '#2E6B47' : '#b06a00' }}>{motivo(x)}</small>
+                                          </div>
+                                          <button type="button" aria-label="Elegir la foto del carrusel" title="Elegir la foto" onClick={() => setCarouselPickFor(carouselPickFor === x.id ? null : x.id)} style={chico}>📷</button>
+                                          <button type="button" aria-label="Quitar del carrusel" title="Quitar del carrusel" onClick={() => setComingSoonBulk([x.id], false)}
+                                            style={{ width: 24, border: 'none', background: 'none', boxShadow: 'none', padding: 0, minHeight: 0, fontSize: 16, color: '#b03434', cursor: 'pointer' }}>✕</button>
+                                        </div>
+                                        {carouselPickFor === x.id && (
+                                          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', padding: '8px 0 2px' }}>
+                                            {fotos.length === 0 && <small style={{ color: '#7a7060' }}>Esta planta no tiene fotos.</small>}
+                                            {fotos.map(([nombre, url]) => (
+                                              <button key={nombre} type="button" onClick={() => setCarouselPhoto(x.id, url)}
+                                                style={{ padding: 3, width: 'auto', minHeight: 0, borderRadius: 10, boxShadow: 'none', background: '#fff', border: `3px solid ${fotoDe(x) === url ? '#4a5d3a' : '#E8DFC8'}`, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
+                                                <img src={url} alt={nombre} style={{ width: 62, height: 62, objectFit: 'cover', borderRadius: 7 }} />
+                                                <small style={{ fontSize: 11 }}>{nombre}{fotoDe(x) === url ? ' ✓' : ''}</small>
+                                              </button>
+                                            ))}
+                                          </div>
+                                        )}
+                                      </div>
+                                    )
+                                  })}
+                                </div>
+
+                                {titulo(`Seleccionadas (${items.length})`)}
+                                <div style={{ display: 'flex', gap: 8 }}>
+                                  <button type="button" className="save-note-btn-inline" disabled={idsReales.length === 0} onClick={agregar} style={{ flex: 1 }}>🎠 Agregar al carrusel</button>
+                                  <button type="button" disabled={idsReales.length === 0} onClick={() => setComingSoonBulk(idsReales, false)} style={{ flex: 1 }}>Quitar</button>
+                                </div>
                               </div>
-                            </div>
-                          </div>,
-                          document.body
-                        )}
+                            </div>,
+                            document.body
+                          )
+                        })()}
 
                         {storeModalOpen && (() => {
                           const items = labelItemsList().filter(x => selectedLabels.has(x.id))
@@ -5900,12 +5998,12 @@ function Admin() {
                                   <button type="button" disabled={idsReales.length === 0} onClick={() => applyDiscountPercent(idsReales, storeDiscount)}>Aplicar</button>
                                 </div>
 
-                                {titulo('Carrusel de la tienda (🔜 Próximamente)')}
+                                {titulo('Link de la tienda')}
                                 <div style={{ display: 'flex', gap: 8 }}>
-                                  <button type="button" disabled={idsReales.length === 0} onClick={() => setComingSoonBulk(idsReales, true)} style={{ flex: 1 }}>🔜 Poner</button>
-                                  <button type="button" disabled={idsReales.length === 0} onClick={() => setComingSoonBulk(idsReales, false)} style={{ flex: 1 }}>Quitar</button>
+                                  <button type="button" className="save-note-btn-inline" onClick={sendStoreLink} style={{ flex: 1 }}>🔗 Enviar link</button>
+                                  <button type="button" onClick={copySharedLink} style={{ flex: 1 }}>📋 Copiar link</button>
                                 </div>
-                                <p style={{ margin: '6px 2px 0', fontSize: 12, color: '#7a7060' }}>El carrusel de arriba de la tienda muestra hasta 8 plantas con foto que estén en la tienda.</p>
+                                <p style={{ margin: '6px 2px 0', fontSize: 12, color: '#7a7060' }}>El cliente ve las plantas que están en la tienda (🟢): fotos y precio.</p>
                               </div>
                             </div>,
                             document.body
