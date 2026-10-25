@@ -32,6 +32,11 @@ const TESTIMONIALS = [
   { name: 'Sofía R.', text: 'Mi jardín cambió por completo desde que compro en Diamantev.', stars: 5 },
 ]
 
+// De cara al cliente no se muestra el número exacto de stock, solo si hay o no.
+function stockLabel(n) {
+  return n > 3 ? 'Disponible' : n > 0 ? 'Últimas unidades' : 'Agotado'
+}
+
 export default function App() {
   // view: 'home' | 'all' | 'categories' | 'plants'
   const [view, setView] = useState('home')
@@ -117,19 +122,16 @@ export default function App() {
   async function loadData() {
     setLoading(true)
     const { data: cats } = await supabase.from('categories').select('*').order('name')
-    // Catálogo normal: solo las plantas que el administrador marcó en Galería (Modo Tienda Cliente).
-    // Link compartido (?shared=1): solo las marcadas con "Compartir/Enviar", independiente de lo anterior.
-    let plantsQuery = supabase.from('plants').select('*').order('name')
-    plantsQuery = sharedMode
-      ? plantsQuery.eq('shared_visible', true)
-      : plantsQuery.eq('marcado_cliente', true)
+    // La tienda y el link compartido (?shared=1) son lo mismo: solo las plantas que el administrador
+    // puso en la tienda (Galería > Tienda Cliente).
+    const plantsQuery = supabase.from('plants').select('*').order('name').eq('marcado_cliente', true)
     const { data: pls0 } = await plantsQuery
     // De cara al cliente, "stock" siempre es lo Disponible (stock_disponible); el total real del jardín
     // se guarda en stock_total, solo para poder descontarlo correctamente al vender.
     const pls = (pls0 || []).map(p => ({ ...p, stock_total: p.stock, stock: Number(p.stock_disponible ?? p.stock) || 0 }))
     // Semillas marcadas para cliente (vista pública seed_batches_public). Si la vista aún no existe, simplemente no se muestran.
     let seedItems = []
-    if (!sharedMode) {
+    {
       const { data: sds } = await supabase.from('seed_batches_public').select('*')
       seedItems = (sds || []).map(sd => ({
         id: `seed:${sd.id}`,
@@ -410,7 +412,7 @@ export default function App() {
           <h3>{plant.name}</h3>
           <p className="price">${Number(plant.price).toFixed(2)}</p>
           <p className={plant.stock > 0 ? 'stock' : 'stock out'}>
-            {plant.stock > 0 ? `${plant.stock} disponibles` : 'Agotado'}
+            {stockLabel(plant.stock)}
           </p>
           <div className="card-actions">
            <button className="cart-icon-btn" disabled={plant.stock <= 0} onClick={() => addToCart(plant)} aria-label="Agregar al carrito">
@@ -844,7 +846,7 @@ export default function App() {
 
             <p className="price">${Number(detailPlant.price).toFixed(2)}</p>
             <p className={detailPlant.stock > 0 ? 'stock' : 'stock out'}>
-              {detailPlant.stock > 0 ? `${detailPlant.stock} disponibles` : 'Agotado'}
+              {stockLabel(detailPlant.stock)}
             </p>
 
             <button
