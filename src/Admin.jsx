@@ -175,6 +175,15 @@ function normalizarBusqueda(t) {
   return String(t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
 }
 
+// Última selección de las pestañas Tienda, Fotos y Carrusel (la de Etiquetas se guarda aparte, junto a sus cantidades)
+const SELECCIONES_KEY = 'diamantev_selecciones'
+function readSelecciones() {
+  try {
+    const v = JSON.parse(localStorage.getItem(SELECCIONES_KEY) || 'null') || {}
+    return { tienda: v.tienda || [], fotos: v.fotos || [], carrusel: v.carrusel || [] }
+  } catch (e) { return { tienda: [], fotos: [], carrusel: [] } }
+}
+
 // Color de cada botón de acción (Etiquetas, Tienda, Fotos, Carrusel)
 const modeColors = { etiquetas: '#d9363e', tienda: '#f08a24', fotos: '#2f7fd0', carrusel: '#8b4fc2' }
 
@@ -540,7 +549,7 @@ function Admin() {
   const [categoriesSearch, setCategoriesSearch] = useState('')
   // Cada botón (Etiquetas, Tienda, Fotos, Carrusel) tiene su propia selección. Solo la de Etiquetas se conserva al cerrar la app.
   const [actionMode, setActionMode] = useState(null) // null | 'etiquetas' | 'tienda' | 'fotos' | 'carrusel'
-  const [modeSets, setModeSets] = useState(() => ({ etiquetas: new Set((readLabelsDraft() || {}).ids || []), tienda: new Set(), fotos: new Set(), carrusel: new Set() }))
+  const [modeSets, setModeSets] = useState(() => { const o = readSelecciones(); return { etiquetas: new Set((readLabelsDraft() || {}).ids || []), tienda: new Set(o.tienda), fotos: new Set(o.fotos), carrusel: new Set(o.carrusel) } })
   const modeKey = actionMode || 'etiquetas'
   const selectedLabels = modeSets[modeKey]
   const setSelectedLabels = updater => setModeSets(prev => {
@@ -1044,6 +1053,21 @@ function Admin() {
       else localStorage.setItem(LABELS_DRAFT_KEY, JSON.stringify({ ids: Array.from(modeSets.etiquetas), idQty: labelQuantities, nameQty: labelNameQuantities, savedAt: new Date().toISOString() }))
     } catch (e) { /* nada */ }
   }, [modeSets.etiquetas, labelQuantities, labelNameQuantities])
+  // Tienda, Fotos y Carrusel también recuerdan su última selección (para ir sumando o quitando)
+  useEffect(() => {
+    try {
+      localStorage.setItem(SELECCIONES_KEY, JSON.stringify({ tienda: Array.from(modeSets.tienda), fotos: Array.from(modeSets.fotos), carrusel: Array.from(modeSets.carrusel) }))
+    } catch (e) { /* nada */ }
+  }, [modeSets.tienda, modeSets.fotos, modeSets.carrusel])
+  // Una sola vez: la selección del Carrusel arranca con las plantas que ya están en el carrusel de la tienda
+  useEffect(() => {
+    if (!plants.length) return
+    try {
+      if (localStorage.getItem('diamantev_carrusel_precargado')) return
+      localStorage.setItem('diamantev_carrusel_precargado', '1')
+    } catch (e) { return }
+    setModeSets(prev => (prev.carrusel.size ? prev : { ...prev, carrusel: new Set(plants.filter(x => x.coming_soon).map(x => x.id)) }))
+  }, [plants])
   // Si una planta guardada ya no existe, sale de la selección
   useEffect(() => {
     if (!plants.length) return
@@ -5783,11 +5807,8 @@ function Admin() {
                                   </label>
                                 )}
                                 {p.isSeed && <span title="Semilla" style={{ pointerEvents: 'none', position: 'absolute', top: 6, right: 6, zIndex: 2, background: '#fff', borderRadius: 10, padding: '1px 6px', fontSize: '0.85rem', boxShadow: '0 1px 3px rgba(0,0,0,0.25)' }}>🌰</span>}
-                                {p.coming_soon && <span title="Próximamente" style={{ pointerEvents: 'none', position: 'absolute', top: 4, left: actionMode ? 38 : 4, zIndex: 2 }}>🔜</span>}
-                                {p.flagged && <span title={p.flag_comment || 'Marcada para revisar'} style={{ pointerEvents: 'none', position: 'absolute', top: 4, right: 4, zIndex: 2, fontSize: '1.1rem' }}>🚩</span>}
                                 <div style={{ position: 'relative' }}>
                                   {p.image_url ? <img src={p.image_url} alt={p.name} /> : <div className="no-img-sm">{p.isSeed ? '🌰 Semillas' : 'Sin foto'}</div>}
-                                  {p.marcado_cliente && <span title="En la tienda" style={{ pointerEvents: 'none', position: 'absolute', left: 6, bottom: 6, fontSize: 14, lineHeight: 1, background: 'rgba(255,255,255,0.85)', borderRadius: 10, padding: '2px 4px' }}>🟢</span>}
                                 </div>
                                 <span>{p.name}</span>
                                 {p.isSeed && <span style={{ fontSize: '0.78rem', fontWeight: 600, color: '#6b5a45' }}>🌰 Semilla · Stock {p.stock} · ${p.price.toFixed(2)}</span>}
@@ -5903,8 +5924,14 @@ function Admin() {
                           const motivo = x => (!x.marcado_cliente ? 'No se ve: no está en la tienda' : !fotoDe(x) ? 'No se ve: no tiene foto' : !visiblesIds.has(x.id) ? 'No se ve: ya hay 8' : '✓ Se ve en la tienda')
                           const chico = { padding: '6px 10px', fontSize: 13, minHeight: 0, lineHeight: 1.2, borderRadius: 8, boxShadow: 'none', whiteSpace: 'nowrap' }
                           const titulo = txt => <p style={{ margin: '12px 2px 6px', fontSize: 12, fontWeight: 700, color: '#7a7060', letterSpacing: '0.04em', textTransform: 'uppercase' }}>{txt}</p>
-                          const agregar = async () => {
-                            await setComingSoonBulk(idsReales, true)
+                          const guardar = async () => {
+                            const marcadas = new Set(idsReales)
+                            const aQuitar = enCarrusel.filter(x => !marcadas.has(x.id)).map(x => x.id)
+                            const aPoner = idsReales.filter(id => !enCarrusel.some(x => x.id === id))
+                            if (aQuitar.length === 0 && aPoner.length === 0) { alert('El carrusel ya está igual a lo que marcaste.'); return }
+                            if (idsReales.length === 0 && !confirm('No marcaste ninguna planta: se quitarán todas del carrusel. ¿Seguro?')) return
+                            if (aPoner.length) await setComingSoonBulk(aPoner, true)
+                            if (aQuitar.length) await setComingSoonBulk(aQuitar, false)
                             const fuera = items.filter(x => !x.isSeed && !x.marcado_cliente)
                             if (fuera.length && confirm(`${fuera.length} planta(s) no están en la tienda y no se verían en el carrusel. ¿Ponerlas también en la tienda?`)) {
                               markSelectedClienteAll(new Set(fuera.map(x => x.id)), true)
@@ -5940,7 +5967,7 @@ function Admin() {
                                             <small style={{ color: visiblesIds.has(x.id) ? '#2E6B47' : '#b06a00' }}>{motivo(x)}</small>
                                           </div>
                                           <button type="button" aria-label="Elegir la foto del carrusel" title="Elegir la foto" onClick={() => setCarouselPickFor(carouselPickFor === x.id ? null : x.id)} style={chico}>📷</button>
-                                          <button type="button" aria-label="Quitar del carrusel" title="Quitar del carrusel" onClick={() => setComingSoonBulk([x.id], false)}
+                                          <button type="button" aria-label="Quitar del carrusel" title="Quitar del carrusel" onClick={() => { setComingSoonBulk([x.id], false); setModeSets(prev => ({ ...prev, carrusel: new Set(Array.from(prev.carrusel).filter(id => id !== x.id)) })) }}
                                             style={{ width: 24, border: 'none', background: 'none', boxShadow: 'none', padding: 0, minHeight: 0, fontSize: 16, color: '#b03434', cursor: 'pointer' }}>✕</button>
                                         </div>
                                         {carouselPickFor === x.id && (
@@ -5960,11 +5987,9 @@ function Admin() {
                                   })}
                                 </div>
 
-                                {titulo(`Seleccionadas (${items.length})`)}
-                                <div style={{ display: 'flex', gap: 8 }}>
-                                  <button type="button" className="save-note-btn-inline" disabled={idsReales.length === 0} onClick={agregar} style={{ flex: 1 }}>🎠 Agregar al carrusel</button>
-                                  <button type="button" disabled={idsReales.length === 0} onClick={() => setComingSoonBulk(idsReales, false)} style={{ flex: 1 }}>Quitar</button>
-                                </div>
+                                {titulo(`Marcadas (${items.length})`)}
+                                <button type="button" className="save-note-btn-inline" onClick={guardar}>💾 Guardar carrusel ({idsReales.length})</button>
+                                <p style={{ margin: '6px 2px 0', fontSize: 12, color: '#7a7060' }}>El carrusel queda con las plantas que marcaste: las nuevas se agregan y las que desmarcaste se quitan.</p>
                               </div>
                             </div>,
                             document.body
