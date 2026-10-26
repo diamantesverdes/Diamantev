@@ -175,6 +175,9 @@ function normalizarBusqueda(t) {
   return String(t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
 }
 
+// Color de cada botón de acción (Etiquetas, Tienda, Fotos, Carrusel)
+const modeColors = { etiquetas: '#d9363e', tienda: '#f08a24', fotos: '#2f7fd0', carrusel: '#8b4fc2' }
+
 // ---------- Borrador de etiquetas: plantas y cantidades guardadas para revisarlas antes de construir el PDF ----------
 const LABELS_DRAFT_KEY = 'diamantev_labels_draft'
 function readLabelsDraft() {
@@ -535,7 +538,16 @@ function Admin() {
   const [ventaLoteFilterSearch, setVentaLoteFilterSearch] = useState('')
   const [activeSelector, setActiveSelector] = useState(null)
   const [categoriesSearch, setCategoriesSearch] = useState('')
-  const [selectedLabels, setSelectedLabels] = useState(() => new Set((readLabelsDraft() || {}).ids || [])) // se conserva al cerrar la app
+  // Cada botón (Etiquetas, Tienda, Fotos, Carrusel) tiene su propia selección. Solo la de Etiquetas se conserva al cerrar la app.
+  const [actionMode, setActionMode] = useState(null) // null | 'etiquetas' | 'tienda' | 'fotos' | 'carrusel'
+  const [modeSets, setModeSets] = useState(() => ({ etiquetas: new Set((readLabelsDraft() || {}).ids || []), tienda: new Set(), fotos: new Set(), carrusel: new Set() }))
+  const modeKey = actionMode || 'etiquetas'
+  const selectedLabels = modeSets[modeKey]
+  const setSelectedLabels = updater => setModeSets(prev => {
+    const cur = prev[modeKey]
+    const next = typeof updater === 'function' ? updater(cur) : updater
+    return next === cur ? prev : { ...prev, [modeKey]: next }
+  })
   const [photoModalPlantId, setPhotoModalPlantId] = useState(null)
   const [seedSheetId, setSeedSheetId] = useState(null) // lote de semillas abierto desde Galería/Tabla
   const [seedSheetSection, setSeedSheetSection] = useState('resumen')
@@ -1028,17 +1040,22 @@ function Admin() {
   // Las plantas cargadas en Etiquetas (y sus cantidades) se guardan solas en este navegador
   useEffect(() => {
     try {
-      if (selectedLabels.size === 0) localStorage.removeItem(LABELS_DRAFT_KEY)
-      else localStorage.setItem(LABELS_DRAFT_KEY, JSON.stringify({ ids: Array.from(selectedLabels), idQty: labelQuantities, nameQty: labelNameQuantities, savedAt: new Date().toISOString() }))
+      if (modeSets.etiquetas.size === 0) localStorage.removeItem(LABELS_DRAFT_KEY)
+      else localStorage.setItem(LABELS_DRAFT_KEY, JSON.stringify({ ids: Array.from(modeSets.etiquetas), idQty: labelQuantities, nameQty: labelNameQuantities, savedAt: new Date().toISOString() }))
     } catch (e) { /* nada */ }
-  }, [selectedLabels, labelQuantities, labelNameQuantities])
+  }, [modeSets.etiquetas, labelQuantities, labelNameQuantities])
   // Si una planta guardada ya no existe, sale de la selección
   useEffect(() => {
     if (!plants.length) return
     const validos = new Set(plants.map(x => x.id))
-    setSelectedLabels(prev => {
-      const next = new Set(Array.from(prev).filter(id => isSeedId(id) || validos.has(id)))
-      return next.size === prev.size ? prev : next
+    setModeSets(prev => {
+      let changed = false
+      const out = {}
+      Object.keys(prev).forEach(k => {
+        const next = new Set(Array.from(prev[k]).filter(id => isSeedId(id) || validos.has(id)))
+        if (next.size !== prev[k].size) { changed = true; out[k] = next } else out[k] = prev[k]
+      })
+      return changed ? out : prev
     })
   }, [plants])
   useBackableModal(!!photoModalPlantId, () => { setPhotoModalPlantId(null); setPhotoModalMenuOpen(false); setPhotoModalSection('fotos') })
@@ -5338,9 +5355,7 @@ function Admin() {
                           </button>
                           {(() => {
                             const selCat = categories.find(x => x.id === galleryFilter)
-                            const todasSel = galleryPlants.length > 0 && (galleryMode === 'cliente'
-                              ? galleryPlants.every(p => p.marcado_cliente)
-                              : galleryPlants.every(p => selectedLabels.has(p.id)))
+                            const todasSel = !!actionMode && galleryPlants.length > 0 && galleryPlants.every(p => selectedLabels.has(p.id))
                             return (
                               <>
                                 <button
@@ -5356,12 +5371,12 @@ function Admin() {
                                   type="button"
                                   className={todasSel ? 'filter-trigger-btn has-filters' : 'filter-trigger-btn'}
                                   onClick={() => {
-                                    if (galleryMode === 'cliente') setClienteParaVisibles(!todasSel)
-                                    else if (todasSel) clearLabels()
+                                    if (!actionMode) { alert('Primero toca Etiquetas, Tienda, Fotos o Carrusel y luego elige las plantas.'); return }
+                                    if (todasSel) clearLabels()
                                     else selectAllLabels(galleryPlants)
                                   }}
                                   title={todasSel ? 'Quitar la selección' : 'Seleccionar todas las plantas visibles'}
-                                  style={{ flex: '0 0 auto', padding: '8px 10px', fontSize: 15 }}
+                                  style={{ flex: '0 0 auto', padding: '8px 10px', fontSize: 15, opacity: actionMode ? 1 : 0.55 }}
                                 >
                                   {todasSel ? '☐ Ninguna' : '☑ Todas'}
                                 </button>
@@ -5473,26 +5488,49 @@ function Admin() {
                         <style>{`
                           .gallery-actions-row > button { flex: 0 0 auto !important; width: auto !important; margin: 0 !important; white-space: nowrap !important; }
                         `}</style>
-                          {galleryMode === 'acciones' && (() => {
-                            const n = selectedLabels.size
-                            const boton = (icon, nombre, accion) => (
-                              <button type="button" className="print-btn"
-                                onClick={() => { if (n === 0) { alert('Primero elige plantas: toca ☑ Todas o la casilla de cada foto.'); return } accion() }}
-                                style={{ flex: '1 1 0', minWidth: 0, padding: '8px 4px', whiteSpace: 'normal', lineHeight: 1.15, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2, opacity: n === 0 ? 0.55 : 1 }}>
-                                <span style={{ fontSize: 13, fontWeight: 700 }}>{icon} {nombre}</span>
-                                <span style={{ fontSize: 13 }}>({n})</span>
-                              </button>
-                            )
+                          {(() => {
+                            const MODOS = [
+                              { key: 'etiquetas', nombre: 'Etiquetas', color: '#d9363e' },
+                              { key: 'tienda', nombre: 'Tienda', color: '#f08a24' },
+                              { key: 'fotos', nombre: 'Fotos', color: '#2f7fd0' },
+                              { key: 'carrusel', nombre: 'Carrusel', color: '#8b4fc2' },
+                            ]
+                            const activo = MODOS.find(m => m.key === actionMode)
+                            const terminar = () => {
+                              const n = selectedLabels.size
+                              if (n === 0) { alert('Marca las casillas de las plantas que quieras y luego toca "Terminar".'); return }
+                              if (actionMode === 'etiquetas') {
+                                setLabelQuantities(prev => { const next = { ...prev }; selectedLabels.forEach(id => { if (!next[id]) next[id] = 1 }); return next })
+                                setPendingLabelAction('pdf')
+                                setLabelQtyModalOpen(true)
+                              } else if (actionMode === 'tienda') setStoreModalOpen(true)
+                              else if (actionMode === 'fotos') setShareModalOpen(true)
+                              else if (actionMode === 'carrusel') setCarouselModalOpen(true)
+                            }
                             return (
-                              <div style={{ display: 'flex', gap: 4, paddingTop: 8 }}>
-                                {boton('🔖', 'Etiquetas', () => {
-                                  setLabelQuantities(prev => { const next = { ...prev }; selectedLabels.forEach(id => { if (!next[id]) next[id] = 1 }); return next })
-                                  setPendingLabelAction('pdf')
-                                  setLabelQtyModalOpen(true)
-                                })}
-                                {boton('🛍️', 'Tienda', () => setStoreModalOpen(true))}
-                                {boton('📲', 'Fotos', () => setShareModalOpen(true))}
-                                {boton('🎠', 'Carrusel', () => setCarouselModalOpen(true))}
+                              <div style={{ paddingTop: 8 }}>
+                                <div style={{ display: 'flex', gap: 4 }}>
+                                  {MODOS.map(m => {
+                                    const on = actionMode === m.key
+                                    return (
+                                      <button key={m.key} type="button" aria-pressed={on}
+                                        onClick={() => setActionMode(on ? null : m.key)}
+                                        style={{ flex: '1 1 0', minWidth: 0, padding: '6px 2px', minHeight: 0, borderRadius: 10, boxShadow: 'none', lineHeight: 1.15, fontSize: 13, fontWeight: 700, whiteSpace: 'normal', background: on ? m.color : '#F3ECDD', color: on ? '#fff' : '#5B4636', border: `2px solid ${on ? m.color : '#d8cfb8'}`, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                                        <span>{m.nombre}</span>
+                                        <span style={{ fontSize: 12, fontWeight: 600 }}>({modeSets[m.key].size})</span>
+                                      </button>
+                                    )
+                                  })}
+                                </div>
+                                {activo && (
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6 }}>
+                                    <span style={{ flex: 1, fontSize: 12, color: '#7a7060' }}>Marca las casillas de las plantas que quieras.</span>
+                                    <button type="button" onClick={terminar}
+                                      style={{ padding: '6px 16px', fontSize: 14, fontWeight: 700, minHeight: 0, lineHeight: 1.2, borderRadius: 10, boxShadow: 'none', background: activo.color, color: '#fff', border: 'none', whiteSpace: 'nowrap' }}>
+                                      ✔ Terminar ({selectedLabels.size})
+                                    </button>
+                                  </div>
+                                )}
                               </div>
                             )
                           })()}
@@ -5724,33 +5762,32 @@ function Admin() {
                               <div
                                 key={p.id}
                                 className="gallery-item"
-                                onClick={() => toggleLabelSelect(p.id)}
+                                onClick={() => {
+                                  if (p.isSeed) { openSeedSheet(p.seedBatchId); return }
+                                  setPhotoModalPlantId(p.id); setPhotoModalIndex(0); setPhotoModalMenuOpen(false); setPhotoModalSection('fotos'); setSeedVentasFilter('all')
+                                }}
                                 style={{
                                   position: 'relative',
                                   cursor: 'pointer',
-                                  ...(selectedLabels.has(p.id) ? { boxShadow: '0 0 0 3px #4a5d3a', borderRadius: 8 } : null),
+                                  ...(actionMode && selectedLabels.has(p.id) ? { boxShadow: `0 0 0 3px ${modeColors[actionMode]}`, borderRadius: 8 } : null),
                                 }}
                               >
-                                <label className="gallery-checkbox" title="Seleccionado" style={{ pointerEvents: 'none' }}>
-                                  <input type="checkbox" readOnly checked={selectedLabels.has(p.id)} />
-                                </label>
-                                {p.isSeed && <span title="Semilla" style={{ position: 'absolute', top: 6, right: 6, zIndex: 2, background: '#fff', borderRadius: 10, padding: '1px 6px', fontSize: '0.85rem', boxShadow: '0 1px 3px rgba(0,0,0,0.25)' }}>🌰</span>}
-                                {p.coming_soon && <span title="Próximamente" style={{ position: 'absolute', top: 4, left: 4, zIndex: 2 }}>🔜</span>}
-                                {p.flagged && <span title={p.flag_comment || 'Marcada para revisar'} style={{ position: 'absolute', top: 4, right: 4, zIndex: 2, fontSize: '1.1rem' }}>🚩</span>}
+                                {actionMode && (
+                                  <label className="gallery-checkbox" title="Elegir esta planta" onClick={e => e.stopPropagation()}>
+                                    <input
+                                      type="checkbox"
+                                      checked={selectedLabels.has(p.id)}
+                                      onChange={() => toggleLabelSelect(p.id)}
+                                      style={{ accentColor: modeColors[actionMode], outline: `2px solid ${modeColors[actionMode]}`, outlineOffset: 1 }}
+                                    />
+                                  </label>
+                                )}
+                                {p.isSeed && <span title="Semilla" style={{ pointerEvents: 'none', position: 'absolute', top: 6, right: 6, zIndex: 2, background: '#fff', borderRadius: 10, padding: '1px 6px', fontSize: '0.85rem', boxShadow: '0 1px 3px rgba(0,0,0,0.25)' }}>🌰</span>}
+                                {p.coming_soon && <span title="Próximamente" style={{ pointerEvents: 'none', position: 'absolute', top: 4, left: actionMode ? 38 : 4, zIndex: 2 }}>🔜</span>}
+                                {p.flagged && <span title={p.flag_comment || 'Marcada para revisar'} style={{ pointerEvents: 'none', position: 'absolute', top: 4, right: 4, zIndex: 2, fontSize: '1.1rem' }}>🚩</span>}
                                 <div style={{ position: 'relative' }}>
                                   {p.image_url ? <img src={p.image_url} alt={p.name} /> : <div className="no-img-sm">{p.isSeed ? '🌰 Semillas' : 'Sin foto'}</div>}
-                                  {p.marcado_cliente && <span title="En la tienda" style={{ position: 'absolute', left: 6, bottom: 6, fontSize: 14, lineHeight: 1, background: 'rgba(255,255,255,0.85)', borderRadius: 10, padding: '2px 4px' }}>🟢</span>}
-                                  <button
-                                    type="button"
-                                    aria-label="Abrir la ficha de la planta"
-                                    title="Abrir la ficha"
-                                    onClick={e => {
-                                      e.stopPropagation()
-                                      if (p.isSeed) { openSeedSheet(p.seedBatchId); return }
-                                      setPhotoModalPlantId(p.id); setPhotoModalIndex(0); setPhotoModalMenuOpen(false); setPhotoModalSection('fotos'); setSeedVentasFilter('all')
-                                    }}
-                                    style={{ position: 'absolute', right: 6, bottom: 6, width: 30, height: 30, minHeight: 0, padding: 0, borderRadius: '50%', border: '1px solid #C8B58A', background: 'rgba(255,255,255,0.92)', boxShadow: '0 1px 4px rgba(0,0,0,0.25)', fontSize: 16, lineHeight: 1, color: '#4a3a2a', cursor: 'pointer' }}
-                                  >ⓘ</button>
+                                  {p.marcado_cliente && <span title="En la tienda" style={{ pointerEvents: 'none', position: 'absolute', left: 6, bottom: 6, fontSize: 14, lineHeight: 1, background: 'rgba(255,255,255,0.85)', borderRadius: 10, padding: '2px 4px' }}>🟢</span>}
                                 </div>
                                 <span>{p.name}</span>
                                 {p.isSeed && <span style={{ fontSize: '0.78rem', fontWeight: 600, color: '#6b5a45' }}>🌰 Semilla · Stock {p.stock} · ${p.price.toFixed(2)}</span>}
