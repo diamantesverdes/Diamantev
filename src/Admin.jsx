@@ -184,6 +184,47 @@ function readSelecciones() {
   } catch (e) { return { tienda: [], fotos: [], carrusel: [] } }
 }
 
+// Qué le falta a una planta para estar completa. La 🚩 se calcula sola: al completar el dato, desaparece.
+function faltaInfo(p) {
+  if (!p || p.isSeed) return []
+  const falta = []
+  if (!p.category_id) falta.push('categoría')
+  if (!p.image_url) falta.push('foto')
+  if (!(Number(p.price) > 0)) falta.push('precio')
+  if (!p.color) falta.push('color')
+  return falta
+}
+
+// ---------- Intercambios (trueque) ----------
+const INT_ESTADOS = {
+  cuarentena: { label: 'En cuarentena / adaptación', corto: 'En cuarentena', icon: '🌱', color: '#b06a00', bg: '#FFF1DC' },
+  establecida: { label: 'Establecida / incorporada', corto: 'Establecida', icon: '✅', color: '#2E6B47', bg: '#E3F4E1' },
+  baja: { label: 'Baja / no viable', corto: 'Baja', icon: '🥀', color: '#8a3b3b', bg: '#F2E0E0' },
+}
+const folioInt = i => `INT-${String(i.id).padStart(3, '0')}`
+const INT_SQL = `create table if not exists intercambios (
+  id bigint generated always as identity primary key,
+  fecha date not null default current_date,
+  contacto text,
+  nota text,
+  created_at timestamptz not null default now()
+);
+create table if not exists intercambio_items (
+  id bigint generated always as identity primary key,
+  intercambio_id bigint not null references intercambios(id) on delete cascade,
+  direccion text not null check (direccion in ('entregado','recibido')),
+  plant_id text,
+  plant_name text not null,
+  quantity integer not null default 1 check (quantity > 0),
+  estado text check (estado in ('cuarentena','establecida','baja')),
+  estado_fecha timestamptz,
+  created_at timestamptz not null default now()
+);
+alter table intercambios enable row level security;
+alter table intercambio_items enable row level security;
+create policy "admin todo" on intercambios for all to authenticated using (true) with check (true);
+create policy "admin todo" on intercambio_items for all to authenticated using (true) with check (true);`
+
 // Color de cada botón de acción (Etiquetas, Tienda, Fotos, Carrusel)
 const modeColors = { etiquetas: '#d9363e', tienda: '#f08a24', fotos: '#2f7fd0', carrusel: '#8b4fc2' }
 
@@ -508,6 +549,14 @@ function Admin() {
   const [labelQtyModalOpen, setLabelQtyModalOpen] = useState(false)
   const [pendingLabelAction, setPendingLabelAction] = useState(null) // 'print' | 'pdf' | 'pptx'
   const [labelQuantities, setLabelQuantities] = useState(() => (readLabelsDraft() || {}).idQty || {}) // { plantId: cantidad }
+  const [intercambios, setIntercambios] = useState([]) // cabeceras: INT-001, fecha, contacto
+  const [intercambioItems, setIntercambioItems] = useState([]) // líneas: lo que se entregó y lo que se recibió
+  const [intercambiosOk, setIntercambiosOk] = useState(true) // false mientras las tablas no existan en Supabase
+  const [intSearch, setIntSearch] = useState('')
+  const [intEstadoFilter, setIntEstadoFilter] = useState('all') // 'all' | 'cuarentena' | 'establecida' | 'baja'
+  const [intFormOpen, setIntFormOpen] = useState(false)
+  const [intSaving, setIntSaving] = useState(false)
+  const [intForm, setIntForm] = useState({ contacto: '', fecha: '', nota: '', entregados: [], recibidos: [] })
   const [carouselModalOpen, setCarouselModalOpen] = useState(false) // pantalla Carrusel
   const [carouselPickFor, setCarouselPickFor] = useState(null) // planta a la que se le elige la foto del carrusel
   const [storeModalOpen, setStoreModalOpen] = useState(false) // pantalla "Tienda" (poner/quitar, descuento, carrusel)
@@ -1031,6 +1080,7 @@ function Admin() {
   useBackableModal(categoryNoteModalOpen, () => setCategoryNoteModalOpen(false))
   useBackableModal(globalSearchOpen, () => setGlobalSearchOpen(false))
   useBackableModal(storeModalOpen, () => setStoreModalOpen(false))
+  useBackableModal(intFormOpen, () => setIntFormOpen(false))
   useBackableModal(carouselModalOpen, () => { setCarouselModalOpen(false); setCarouselPickFor(null) })
   useEffect(() => { loadLastLabelsPDF().then(v => { if (v) setLastLabelsPdf(v) }).catch(() => {}) }, [])
   // La tienda y el link compartido ahora son lo mismo: una sola vez se ofrece poner en la tienda lo que solo estaba en el link
@@ -1313,6 +1363,12 @@ function Admin() {
     setSeedBatches(sbs || [])
     setSeedBatchEvents(sbevs || [])
     setCategoryNotes(catNotes || [])
+    try {
+      const { data: ints, error: eInt } = await supabase.from('intercambios').select('*').order('id', { ascending: false })
+      const { data: iits, error: eIit } = await supabase.from('intercambio_items').select('*').order('id')
+      if (eInt || eIit) { setIntercambiosOk(false); setIntercambios([]); setIntercambioItems([]) }
+      else { setIntercambiosOk(true); setIntercambios(ints || []); setIntercambioItems(iits || []) }
+    } catch (e) { setIntercambiosOk(false) }
     hasLoadedOnce.current = true
     setLoading(false)
   }
@@ -2878,6 +2934,100 @@ function Admin() {
     const value = percent === '' ? 0 : Math.max(0, Math.min(100, Number(percent) || 0))
     await supabase.from('plants').update({ discount_percent: value }).eq('id', id)
     loadData()
+  }
+
+  // ---------- Intercambios (trueque) ----------
+  const hoyISO = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` }
+  const plantPorNombre = name => plants.find(p => normalizarBusqueda(p.name) === normalizarBusqueda(String(name || '').trim()))
+
+  function abrirNuevoIntercambio() {
+    setIntForm({ contacto: '', fecha: hoyISO(), nota: '', entregados: [{ name: '', qty: 1 }], recibidos: [{ name: '', qty: 1 }] })
+    setIntFormOpen(true)
+  }
+
+  async function guardarIntercambio() {
+    if (intSaving) return
+    const contacto = intForm.contacto.trim()
+    if (!contacto) { alert('Escribe el nombre de la persona o contacto.'); return }
+    const armar = r => ({ name: r.name.trim(), qty: Math.floor(Number(r.qty) || 0), planta: plantPorNombre(r.name) })
+    const entregados = intForm.entregados.filter(r => r.name.trim()).map(armar)
+    const recibidos = intForm.recibidos.filter(r => r.name.trim()).map(armar)
+    if (entregados.length === 0 && recibidos.length === 0) { alert('Agrega al menos una planta.'); return }
+    const sinPlanta = entregados.find(r => !r.planta)
+    if (sinPlanta) { alert(`"${sinPlanta.name}" no existe en tu galería. En "Lo que entregué" elige plantas que ya tengas.`); return }
+    if (entregados.concat(recibidos).some(r => r.qty <= 0)) { alert('Cada planta necesita una cantidad mayor a 0.'); return }
+    const salida = new Map() // lo que sale del inventario (junta las repetidas)
+    entregados.forEach(r => salida.set(r.planta.id, (salida.get(r.planta.id) || 0) + r.qty))
+    for (const [id, qty] of salida) {
+      const pl = plants.find(x => x.id === id)
+      if ((Number(pl.stock) || 0) < qty) { alert(`No alcanza el stock de "${pl.name}": tienes ${pl.stock || 0} y entregas ${qty}.`); return }
+    }
+    setIntSaving(true)
+    let cabecera = null
+    try {
+      const { data: cab, error: e1 } = await supabase.from('intercambios').insert({ fecha: intForm.fecha || hoyISO(), contacto, nota: intForm.nota.trim() || null }).select().single()
+      if (e1 || !cab) throw new Error(e1 ? e1.message : 'No se pudo crear el intercambio')
+      cabecera = cab
+      const filas = entregados.map(r => ({ intercambio_id: cab.id, direccion: 'entregado', plant_id: String(r.planta.id), plant_name: r.planta.name, quantity: r.qty }))
+      for (const r of recibidos) {
+        let pl = r.planta
+        if (!pl) { // planta nueva: se crea oculta y con stock 0
+          const { data: nueva, error: e3 } = await supabase.from('plants').insert({ name: r.name, category_id: null, price: 0, stock: 0, image_url: null, active: false, flagged: false }).select().single()
+          if (e3 || !nueva) throw new Error(`No se pudo crear "${r.name}": ${e3 ? e3.message : ''}`)
+          pl = nueva
+        }
+        filas.push({ intercambio_id: cab.id, direccion: 'recibido', plant_id: String(pl.id), plant_name: pl.name, quantity: r.qty, estado: 'cuarentena', estado_fecha: new Date().toISOString() })
+      }
+      const { error: e2 } = await supabase.from('intercambio_items').insert(filas)
+      if (e2) throw new Error(e2.message)
+      for (const [id, qty] of salida) { // lo entregado sale del inventario
+        const pl = plants.find(x => x.id === id)
+        const nuevoStock = Math.max(0, (Number(pl.stock) || 0) - qty)
+        const patch = { stock: nuevoStock }
+        if (pl.stock_disponible != null) patch.stock_disponible = Math.min(Number(pl.stock_disponible) || 0, nuevoStock)
+        const { error: e4 } = await supabase.from('plants').update(patch).eq('id', id)
+        if (e4) throw new Error(`No se pudo descontar "${pl.name}": ${e4.message}`)
+      }
+      setIntFormOpen(false)
+      alert(`Intercambio ${folioInt(cab)} guardado.` + (recibidos.length ? ' Lo recibido quedó en cuarentena y no suma al stock hasta que pase a "Establecida".' : ''))
+    } catch (err) {
+      if (cabecera) await supabase.from('intercambios').delete().eq('id', cabecera.id) // se borra con sus líneas
+      const msg = err instanceof Error ? err.message : String(err)
+      if (/intercambio/i.test(msg) && /(does not exist|schema cache|relation)/i.test(msg)) setIntercambiosOk(false)
+      alert('No se pudo guardar el intercambio: ' + msg)
+    } finally {
+      setIntSaving(false)
+      await loadData()
+    }
+  }
+
+  // Cambia el estado de una planta recibida. Solo "Establecida" cuenta en el stock.
+  async function cambiarEstadoIntercambio(item, nuevo) {
+    if (item.estado === nuevo) return
+    const delta = (nuevo === 'establecida' ? item.quantity : 0) - (item.estado === 'establecida' ? item.quantity : 0)
+    if (item.estado === 'establecida' && !confirm(`Esta planta ya estaba en tu inventario. Se descontarán ${item.quantity} del stock de "${item.plant_name}". ¿Continuar?`)) return
+    const { error } = await supabase.from('intercambio_items').update({ estado: nuevo, estado_fecha: new Date().toISOString() }).eq('id', item.id)
+    if (error) { alert('No se pudo cambiar el estado: ' + error.message); return }
+    const pl = plants.find(x => String(x.id) === String(item.plant_id))
+    if (pl && delta !== 0) await supabase.from('plants').update({ stock: Math.max(0, (Number(pl.stock) || 0) + delta) }).eq('id', pl.id)
+    await loadData()
+  }
+
+  async function eliminarIntercambio(i) {
+    const its = intercambioItems.filter(x => x.intercambio_id === i.id)
+    if (!confirm(`¿Borrar ${folioInt(i)}?\n\nLo que entregaste vuelve al inventario y lo recibido que ya estaba "Establecida" se descuenta.`)) return
+    const { error } = await supabase.from('intercambios').delete().eq('id', i.id)
+    if (error) { alert('No se pudo borrar: ' + error.message); return }
+    const delta = new Map()
+    its.forEach(x => {
+      const d = x.direccion === 'entregado' ? x.quantity : (x.estado === 'establecida' ? -x.quantity : 0)
+      if (d) delta.set(String(x.plant_id), (delta.get(String(x.plant_id)) || 0) + d)
+    })
+    for (const [pid, d] of delta) {
+      const pl = plants.find(x => String(x.id) === pid)
+      if (pl) await supabase.from('plants').update({ stock: Math.max(0, (Number(pl.stock) || 0) + d) }).eq('id', pl.id)
+    }
+    await loadData()
   }
 
   // Foto que muestra el carrusel de la tienda para una planta (null = la portada, Foto 1)
@@ -4821,6 +4971,7 @@ function Admin() {
     { key: 'pedidos', label: 'Ventas y Decrementos', icon: '🧾', count: pedidosPendientes },
     { key: 'ingresos', label: 'Ingresos', icon: '📦', count: ingresosEnCurso },
     { key: 'tabla', label: 'Tabla completa', icon: '📊', count: 0 },
+    { key: 'intercambios', label: 'Intercambios', icon: '🔄', count: intercambioItems.filter(x => x.direccion === 'recibido' && x.estado === 'cuarentena').length },
     { key: 'notas', label: 'Notas', icon: '📝', count: categoryNotes.length },
   ]
 
@@ -4837,6 +4988,7 @@ function Admin() {
     pedidos: '🧾 Ventas y Decrementos',
     ingresos: '📦 Ingresos',
     tabla: '📊 Tabla completa',
+    intercambios: '🔄 Intercambios',
     notas: '📝 Notas',
   }
 
@@ -5050,7 +5202,7 @@ function Admin() {
                         if (galleryMissingFilters.has('noNotes') && plantNotes.some(n => n.plant_id === p.id)) return false
                         if (galleryMissingFilters.has('hasVideo') && !p.video_url) return false
                         if (galleryMissingFilters.has('noVideo') && p.video_url) return false
-                        if (galleryMissingFilters.has('flagged') && !p.flagged) return false
+                        if (galleryMissingFilters.has('flagged') && faltaInfo(p).length === 0) return false
                         if (galleryMissingFilters.has('marcadoCliente') && !p.marcado_cliente) return false
                         if (galleryLabelStatus !== 'all' && labelStatusOf(p) !== galleryLabelStatus) return false
                         return true
@@ -5123,7 +5275,7 @@ function Admin() {
                       flowered: '🌸 Floreció', noFlowered: '🌸 No ha florecido', sold: '🛒 Se vendió',
                       hasNotes: '📓 Con notas', noNotes: '📓 Sin notas',
                       hasVideo: '🎥 Con video', noVideo: '🎥 Sin video',
-                      flagged: '🚩 Para revisar',
+                      flagged: '🚩 Falta información',
                       marcadoCliente: '🟢 Marcadas para cliente',
                     }
                     galleryMissingFilters.forEach(key => {
@@ -5254,7 +5406,7 @@ function Admin() {
                                     {triPill('📂', 'Categoría', 'hasCategory', 'noCategory', 'Con categoría', 'Sin categoría')}
                                     {smallPill('🛒', 'Se vendió alguna vez', 'sold')}
                                     {smallPill('🔤', 'Nombre con código', 'nombreCodigo', null, true)}
-                                    {smallPill('🚩', 'Para revisar', 'flagged')}
+                                    {smallPill('🚩', 'Falta información', 'flagged')}
                                     {smallPill('🟢', 'Marcadas para cliente', 'marcadoCliente')}
                                     {groupPill('compra', '🧺', 'Compra',
                                       galleryCompraStatus !== 'all' || galleryLoteNumero !== 'all',
@@ -5429,6 +5581,7 @@ function Admin() {
                             const coincide = t => term && normalizarBusqueda(t).includes(term)
                             const itemsBusq = [...plants, ...seedBatchesAsItems()].filter(x => coincide(textoBuscableItem(x)))
                             const proveedoresRes = [...new Set([...compras.map(c => c.proveedor), ...lotes.map(l => l.proveedor)].filter(Boolean))].filter(coincide).sort()
+                            const intRes = intercambios.filter(i => coincide([folioInt(i), i.contacto, i.nota, ...intercambioItems.filter(x => x.intercambio_id === i.id).map(x => x.plant_name)].join(' '))).slice(0, 6)
                             const clientesRes = [...new Set([...ventaLotes.map(v => v.cliente), ...orders.map(o => o.customer_name)].filter(Boolean))].filter(coincide).sort()
                             return (
                               <div onClick={cierra} style={{ position: 'fixed', inset: 0, zIndex: 3000, background: 'rgba(0,0,0,0.35)', display: 'flex', justifyContent: 'center', alignItems: 'flex-start', paddingTop: 'max(12px, env(safe-area-inset-top))' }}>
@@ -5471,6 +5624,13 @@ function Admin() {
                                     <>
                                       {titulo('🧾 Clientes')}
                                       {clientesRes.slice(0, 6).map(n => fila(`cli-${n}`, '🧾', n, 'Ver sus ventas', () => { setMovSearch(n); setMovMenuOpen(true); setView('pedidos'); cierra() }))}
+                                    </>
+                                  )}
+
+                                  {term && intRes.length > 0 && (
+                                    <>
+                                      {titulo('🔄 Intercambios')}
+                                      {intRes.map(i => fila(`int-${i.id}`, '🔄', `${folioInt(i)} — ${i.contacto || 'Sin nombre'}`, 'Ver el intercambio', () => { setIntSearch(raw); setIntEstadoFilter('all'); setView('intercambios'); cierra() }))}
                                     </>
                                   )}
 
@@ -5807,6 +5967,7 @@ function Admin() {
                                   </label>
                                 )}
                                 {p.isSeed && <span title="Semilla" style={{ pointerEvents: 'none', position: 'absolute', top: 6, right: 6, zIndex: 2, background: '#fff', borderRadius: 10, padding: '1px 6px', fontSize: '0.85rem', boxShadow: '0 1px 3px rgba(0,0,0,0.25)' }}>🌰</span>}
+                                {faltaInfo(p).length > 0 && <span title={`Falta: ${faltaInfo(p).join(', ')}`} style={{ pointerEvents: 'none', position: 'absolute', top: 4, right: 4, zIndex: 2, fontSize: '1.1rem' }}>🚩</span>}
                                 <div style={{ position: 'relative' }}>
                                   {p.image_url ? <img src={p.image_url} alt={p.name} /> : <div className="no-img-sm">{p.isSeed ? '🌰 Semillas' : 'Sin foto'}</div>}
                                 </div>
@@ -6651,21 +6812,10 @@ function Admin() {
                             </div>
 
                             <div className="plant-quick-edit" style={{ marginTop: 12 }}>
-                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                <h4 style={{ margin: 0, fontSize: '0.9rem', color: p.flagged ? '#b03434' : 'var(--sage-dark)' }}>🚩 Marcar para revisar</h4>
-                                <button type="button" className={p.flagged ? 'hide-btn' : ''} onClick={() => toggleFlag(p.id, p.flagged)}>
-                                  {p.flagged ? 'Quitar marca' : 'Marcar'}
-                                </button>
-                              </div>
-                              {p.flagged && (
-                                <textarea
-                                  className="plant-description-input"
-                                  placeholder="¿Qué hay que revisar o corregir aquí?"
-                                  defaultValue={p.flag_comment || ''}
-                                  rows={2}
-                                  style={{ marginTop: 8 }}
-                                  onBlur={e => updateFlagComment(p.id, e.target.value)}
-                                />
+                              {faltaInfo(p).length > 0 ? (
+                                <h4 style={{ margin: 0, fontSize: '0.9rem', color: '#b03434' }}>🚩 Falta: {faltaInfo(p).join(', ')}</h4>
+                              ) : (
+                                <h4 style={{ margin: 0, fontSize: '0.9rem', color: 'var(--sage-dark)' }}>✅ Información completa</h4>
                               )}
                             </div>
 
@@ -7613,6 +7763,146 @@ function Admin() {
                 </>
               )}
 
+              {!loading && view === 'intercambios' && (() => {
+                const term = normalizarBusqueda(intSearch.trim())
+                const itemsDe = i => intercambioItems.filter(x => x.intercambio_id === i.id)
+                const cuenta = e => intercambioItems.filter(x => x.direccion === 'recibido' && x.estado === e).length
+                const fechaDe = i => (i.fecha ? new Date(`${i.fecha}T12:00:00`).toLocaleDateString() : '')
+                const filtrados = intercambios.filter(i => {
+                  const its = itemsDe(i)
+                  if (intEstadoFilter !== 'all' && !its.some(x => x.direccion === 'recibido' && x.estado === intEstadoFilter)) return false
+                  if (!term) return true
+                  return [folioInt(i), i.contacto, i.nota, ...its.map(x => x.plant_name)].some(t => normalizarBusqueda(t).includes(term))
+                })
+                const chip = (key, texto) => (
+                  <button key={key} type="button" onClick={() => setIntEstadoFilter(key)}
+                    style={{ padding: '6px 12px', fontSize: 13, minHeight: 0, lineHeight: 1.2, borderRadius: 16, boxShadow: 'none', whiteSpace: 'nowrap', fontWeight: intEstadoFilter === key ? 700 : 500, background: intEstadoFilter === key ? '#E8F1E0' : '#fff', border: `2px solid ${intEstadoFilter === key ? '#4a5d3a' : '#d8cfb8'}`, color: '#5B4636' }}>
+                    {texto}
+                  </button>
+                )
+                const lineaForm = (lado, r, idx) => {
+                  const pl = plantPorNombre(r.name)
+                  const setRow = patch => setIntForm(f => ({ ...f, [lado]: f[lado].map((x, j) => (j === idx ? { ...x, ...patch } : x)) }))
+                  let pista = ''
+                  let colorPista = '#7a7060'
+                  if (r.name.trim()) {
+                    if (lado === 'entregados') {
+                      if (!pl) { pista = '⚠️ No existe en tu galería'; colorPista = '#b03434' }
+                      else if ((Number(pl.stock) || 0) < (Number(r.qty) || 0)) { pista = `⚠️ Solo tienes ${pl.stock || 0} en stock`; colorPista = '#b03434' }
+                      else pista = `Stock: ${pl.stock || 0}`
+                    } else pista = pl ? `Ya existe (stock ${pl.stock || 0}). Lo recibido no se suma hasta que quede Establecida.` : '🌱 Planta nueva: se crea oculta y sin stock.'
+                  }
+                  return (
+                    <div key={idx} style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 8, flexWrap: 'wrap' }}>
+                      <input list="int-plantas" placeholder={lado === 'entregados' ? 'Planta que entregas' : 'Planta que recibes'} value={r.name}
+                        onChange={e => setRow({ name: e.target.value })} style={{ flex: '1 1 150px', minWidth: 0, boxSizing: 'border-box' }} />
+                      <input type="number" inputMode="numeric" min="1" value={r.qty} onChange={e => setRow({ qty: e.target.value })} style={{ width: 62, boxSizing: 'border-box' }} aria-label="Cantidad" />
+                      <button type="button" aria-label="Quitar fila" onClick={() => setIntForm(f => ({ ...f, [lado]: f[lado].filter((_, j) => j !== idx) }))}
+                        style={{ width: 28, border: 'none', background: 'none', boxShadow: 'none', padding: 0, minHeight: 0, fontSize: 16, color: '#b03434', cursor: 'pointer' }}>✕</button>
+                      {pista && <small style={{ flex: '1 0 100%', color: colorPista }}>{pista}</small>}
+                    </div>
+                  )
+                }
+                return (
+                  <div>
+                    {!intercambiosOk && (
+                      <div style={{ background: '#fff8e1', border: '1px solid #e0c97a', borderRadius: 10, padding: 12 }}>
+                        <strong>Falta crear las tablas de Intercambios</strong>
+                        <p style={{ fontSize: 13, margin: '6px 0' }}>Se hace una sola vez: abre Supabase → SQL Editor, pega esto y toca Run. Después recarga la app.</p>
+                        <pre style={{ fontSize: 11, whiteSpace: 'pre-wrap', background: '#fff', padding: 8, borderRadius: 8, border: '1px solid #eee', maxHeight: 220, overflow: 'auto' }}>{INT_SQL}</pre>
+                        <button type="button" onClick={() => { if (navigator.clipboard) navigator.clipboard.writeText(INT_SQL).then(() => alert('SQL copiado.')) }}>📋 Copiar SQL</button>
+                      </div>
+                    )}
+                    {intercambiosOk && (
+                      <>
+                        <button type="button" className="save-note-btn-inline" onClick={abrirNuevoIntercambio} style={{ marginBottom: 8 }}>➕ Nuevo intercambio</button>
+                        <input className="order-search" placeholder="🔍 Folio, persona o planta…" value={intSearch} onChange={e => setIntSearch(e.target.value)} style={{ width: '100%', boxSizing: 'border-box', marginBottom: 8 }} />
+                        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10 }}>
+                          {chip('all', 'Todos')}
+                          {chip('cuarentena', `🌱 En cuarentena (${cuenta('cuarentena')})`)}
+                          {chip('establecida', `✅ Establecidas (${cuenta('establecida')})`)}
+                          {chip('baja', `🥀 Bajas (${cuenta('baja')})`)}
+                        </div>
+                        {filtrados.length === 0 && <p className="status-msg">{intercambios.length === 0 ? 'Todavía no hay intercambios. Toca "Nuevo intercambio".' : 'No se encontraron intercambios.'}</p>}
+                        {filtrados.map(i => {
+                          const its = itemsDe(i)
+                          const ent = its.filter(x => x.direccion === 'entregado')
+                          const rec = its.filter(x => x.direccion === 'recibido')
+                          const key = `int-${i.id}`
+                          const abierto = openCards.has(key)
+                          const resumen = Object.keys(INT_ESTADOS).map(e => ({ e, n: rec.filter(x => (x.estado || 'cuarentena') === e).length })).filter(x => x.n > 0).map(x => `${INT_ESTADOS[x.e].icon} ${x.n}`).join(' ')
+                          return (
+                            <div key={i.id} className="admin-item lote-group collapsible-card" data-open={abierto ? 'true' : 'false'}
+                              style={{ width: '100%', maxWidth: '100%', minWidth: 0, overflow: 'hidden', boxSizing: 'border-box', background: '#FBF7EC', marginBottom: 8 }}>
+                              <div className="admin-item-info" style={{ width: '100%' }}>
+                                <div className="card-title-row" onClick={() => toggleCard(key)} style={{ cursor: 'pointer' }}>
+                                  <strong>{abierto ? '▾' : '▸'} 🔄 {folioInt(i)} — {i.contacto || 'Sin nombre'}</strong>
+                                  <div style={{ fontSize: 12, color: '#7a7060' }}>{fechaDe(i)} · {ent.length} entregada{ent.length === 1 ? '' : 's'} · {rec.length} recibida{rec.length === 1 ? '' : 's'}{resumen ? ` · ${resumen}` : ''}</div>
+                                </div>
+                                {i.nota && <p style={{ margin: '8px 0 0', fontSize: 13, color: '#5a5040' }}>📝 {i.nota}</p>}
+                                <p className="attr-label" style={{ margin: '12px 0 4px' }}>📤 Lo que entregué</p>
+                                {ent.length === 0 ? <small style={{ color: '#7a7060' }}>— nada —</small> : ent.map(x => (
+                                  <div key={x.id} style={{ display: 'flex', justifyContent: 'space-between', gap: 8, padding: '5px 0', borderBottom: '1px solid #eee' }}>
+                                    <span>{x.plant_name}</span><span>× {x.quantity}</span>
+                                  </div>
+                                ))}
+                                <p className="attr-label" style={{ margin: '12px 0 4px' }}>📥 Lo que recibí</p>
+                                {rec.length === 0 ? <small style={{ color: '#7a7060' }}>— nada —</small> : rec.map(x => {
+                                  const est = INT_ESTADOS[x.estado] || INT_ESTADOS.cuarentena
+                                  return (
+                                    <div key={x.id} style={{ padding: '6px 0', borderBottom: '1px solid #eee' }}>
+                                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}><span>{x.plant_name}</span><span>× {x.quantity}</span></div>
+                                      <select value={x.estado || 'cuarentena'} onChange={e => cambiarEstadoIntercambio(x, e.target.value)}
+                                        style={{ marginTop: 4, width: '100%', boxSizing: 'border-box', background: est.bg, color: est.color, fontWeight: 700, border: `1px solid ${est.color}`, borderRadius: 8, padding: 6 }}>
+                                        {Object.entries(INT_ESTADOS).map(([k, v]) => <option key={k} value={k}>{v.icon} {v.label}</option>)}
+                                      </select>
+                                      {x.estado_fecha && <small style={{ color: '#7a7060' }}>{est.corto} desde {new Date(x.estado_fecha).toLocaleDateString()}</small>}
+                                    </div>
+                                  )
+                                })}
+                                <button type="button" onClick={() => eliminarIntercambio(i)} style={{ marginTop: 10, background: '#fff', color: '#b03434', border: '1px solid #b03434' }}>🗑️ Eliminar intercambio</button>
+                              </div>
+                            </div>
+                          )
+                        })}
+                      </>
+                    )}
+
+                    {intFormOpen && createPortal(
+                      <div className="admin-sheet-overlay" onClick={() => setIntFormOpen(false)}
+                        style={{ position: 'fixed', inset: 0, zIndex: 3000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <div className="free-note-modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 480, width: '100%', maxHeight: '90vh', overflowY: 'auto' }}>
+                          <div className="free-note-modal-header">
+                            <h4>🔄 Nuevo intercambio</h4>
+                            <button type="button" className="modal-close-btn" onClick={() => setIntFormOpen(false)}>✕</button>
+                          </div>
+                          <datalist id="int-plantas">{plants.map(pl => <option key={pl.id} value={pl.name} />)}</datalist>
+                          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 6 }}>
+                            <input placeholder="Persona o contacto" value={intForm.contacto} onChange={e => setIntForm(f => ({ ...f, contacto: e.target.value }))} style={{ flex: '1 1 180px', minWidth: 0, boxSizing: 'border-box' }} />
+                            <input type="date" value={intForm.fecha} onChange={e => setIntForm(f => ({ ...f, fecha: e.target.value }))} style={{ flex: '0 1 150px', boxSizing: 'border-box' }} />
+                          </div>
+                          <input placeholder="Nota (opcional)" value={intForm.nota} onChange={e => setIntForm(f => ({ ...f, nota: e.target.value }))} style={{ width: '100%', boxSizing: 'border-box', marginBottom: 6 }} />
+
+                          <p style={{ margin: '12px 2px 6px', fontSize: 13, fontWeight: 700, color: '#5B4636' }}>📤 Lo que entregué <span style={{ fontWeight: 400, color: '#7a7060' }}>(sale del stock)</span></p>
+                          {intForm.entregados.map((r, idx) => lineaForm('entregados', r, idx))}
+                          <button type="button" onClick={() => setIntForm(f => ({ ...f, entregados: [...f.entregados, { name: '', qty: 1 }] }))} style={{ padding: '6px 12px', fontSize: 13, minHeight: 0 }}>➕ Agregar planta</button>
+
+                          <p style={{ margin: '16px 2px 6px', fontSize: 13, fontWeight: 700, color: '#5B4636' }}>📥 Lo que recibí <span style={{ fontWeight: 400, color: '#7a7060' }}>(entra en cuarentena)</span></p>
+                          {intForm.recibidos.map((r, idx) => lineaForm('recibidos', r, idx))}
+                          <button type="button" onClick={() => setIntForm(f => ({ ...f, recibidos: [...f.recibidos, { name: '', qty: 1 }] }))} style={{ padding: '6px 12px', fontSize: 13, minHeight: 0 }}>➕ Agregar planta</button>
+
+                          <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
+                            <button type="button" onClick={() => setIntFormOpen(false)}>Cancelar</button>
+                            <button type="button" className="save-note-btn-inline" disabled={intSaving} onClick={guardarIntercambio} style={{ flex: 1 }}>{intSaving ? 'Guardando…' : '💾 Guardar intercambio'}</button>
+                          </div>
+                        </div>
+                      </div>,
+                      document.body
+                    )}
+                  </div>
+                )
+              })()}
+
               {!loading && view === 'notas' && (() => {
                 const term = globalNoteSearch.trim().toLowerCase()
                 const globalResults = []
@@ -7787,7 +8077,7 @@ function Admin() {
                     is_new: !!p.is_new,
                     on_sale: !!p.on_sale,
                     coming_soon: !!p.coming_soon,
-                    flagged: !!p.flagged,
+                    flagged: faltaInfo(p).length > 0,
                     florecio,
                     vendido,
                     loteNumero: loteDePlanta ? loteDePlanta.numero : null,
@@ -7978,7 +8268,7 @@ function Admin() {
                               </select>
                             </th>
                             <th style={{ ...thStyle, width: 80 }} onClick={() => toggleTableSort('flagged')}>
-                              <span style={thTitleStyle}>Revisar{arrow('flagged')}</span>
+                              <span style={thTitleStyle}>Falta info{arrow('flagged')}</span>
                               <select onClick={e => e.stopPropagation()} value={f.revisar} onChange={e => setTableFilter('revisar', e.target.value)} style={filterInputStyle}>
                                 <option value="all">Todas</option><option value="si">Sí</option><option value="no">No</option>
                               </select>
