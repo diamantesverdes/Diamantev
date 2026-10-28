@@ -1081,6 +1081,10 @@ function Admin() {
   useBackableModal(globalSearchOpen, () => setGlobalSearchOpen(false))
   useBackableModal(storeModalOpen, () => setStoreModalOpen(false))
   useBackableModal(intFormOpen, () => setIntFormOpen(false))
+  // Al salir de Ventas, el formulario de "Nueva venta" se cierra (y se limpia): al volver, solo se abre si tocas el botón
+  useEffect(() => {
+    if (view !== 'pedidos') { setVentaLoteBuilderOpen(false); setVentaLoteLines([]); setVentaLoteCliente('') }
+  }, [view])
   useBackableModal(carouselModalOpen, () => { setCarouselModalOpen(false); setCarouselPickFor(null) })
   useEffect(() => { loadLastLabelsPDF().then(v => { if (v) setLastLabelsPdf(v) }).catch(() => {}) }, [])
   // La tienda y el link compartido ahora son lo mismo: una sola vez se ofrece poner en la tienda lo que solo estaba en el link
@@ -5025,8 +5029,8 @@ function Admin() {
           }}>
             <h3 style={{ margin: '0 0 4px 6px', color: '#4a3a2a', fontSize: '1.15rem', fontFamily: "'Playfair Display', Georgia, serif", textTransform: 'uppercase', letterSpacing: '0.02em', fontWeight: 800 }}>Menú</h3>
             <hr style={{ border: 'none', borderTop: `1px solid ${PILL_BORDER}`, margin: '0 0 6px' }} />
-            {/* Orden del menú: Galería, Notas, Ingresos, Ventas, Tabla, Ver tienda y lo demás */}
-            {['galeria', 'notas', 'ingresos', 'pedidos', 'tabla'].map(k => cards.find(c => c.key === k)).filter(Boolean).map(c => (
+            {/* Orden del menú: Galería, Notas, Ingresos, Ventas, Intercambios, Tabla, Ver tienda y lo demás */}
+            {['galeria', 'notas', 'ingresos', 'pedidos', 'intercambios', 'tabla'].map(k => cards.find(c => c.key === k)).filter(Boolean).map(c => (
               <button key={c.key} type="button" onClick={() => { setHomeMenuOpen(false); setView(c.key) }} style={sideMenuItemStyle}>
                 <span style={{ fontSize: 18 }}>{c.icon}</span> {c.label}{c.count ? ` (${c.count})` : ''}
               </button>
@@ -5042,7 +5046,7 @@ function Admin() {
             >
               <span style={{ fontSize: 18 }}>🌿</span> Ver tienda
             </button>
-            {cards.filter(c => !['galeria', 'notas', 'ingresos', 'pedidos', 'tabla'].includes(c.key)).map(c => (
+            {cards.filter(c => !['galeria', 'notas', 'ingresos', 'pedidos', 'intercambios', 'tabla'].includes(c.key)).map(c => (
               <button key={c.key} type="button" onClick={() => { setHomeMenuOpen(false); setView(c.key) }} style={sideMenuItemStyle}>
                 <span style={{ fontSize: 18 }}>{c.icon}</span> {c.label}{c.count ? ` (${c.count})` : ''}
               </button>
@@ -7297,11 +7301,11 @@ function Admin() {
                           selectedId={ventaLineForm.plant_id}
                           onSelect={id => setVentaLineForm({ ...ventaLineForm, plant_id: id })}
                         />
-                      ) : (
+                      ) : ventaLineForm.plant_id ? (
                         <p className="status-msg" style={{ margin: '4px 0' }}>
-                          {ventaLineForm.plant_id ? `✓ ${resolveVentaTarget(ventaLineForm.plant_id).isSeed ? seedBatchDisplayName(resolveVentaTarget(ventaLineForm.plant_id).seedBatch) : (resolveVentaTarget(ventaLineForm.plant_id).plant?.name || '')}` : 'Elige una categoría o escribe para buscar'}
+                          {`✓ ${resolveVentaTarget(ventaLineForm.plant_id).isSeed ? seedBatchDisplayName(resolveVentaTarget(ventaLineForm.plant_id).seedBatch) : (resolveVentaTarget(ventaLineForm.plant_id).plant?.name || '')}`}
                         </p>
-                      )}
+                      ) : null}
                       <input placeholder="Cantidad" type="number" value={ventaLineForm.quantity} onChange={e => setVentaLineForm({ ...ventaLineForm, quantity: e.target.value })} />
                       <select
                         value={ventaLineForm.motivo}
@@ -7521,11 +7525,11 @@ function Admin() {
                                     selectedId={ventaLineForm.plant_id}
                                     onSelect={id => setVentaLineForm({ ...ventaLineForm, plant_id: id })}
                                   />
-                                ) : (
+                                ) : ventaLineForm.plant_id ? (
                                   <p className="status-msg" style={{ margin: '4px 0' }}>
-                                    {ventaLineForm.plant_id ? `✓ ${resolveVentaTarget(ventaLineForm.plant_id).isSeed ? seedBatchDisplayName(resolveVentaTarget(ventaLineForm.plant_id).seedBatch) : (resolveVentaTarget(ventaLineForm.plant_id).plant?.name || '')}` : 'Elige una categoría o escribe para buscar'}
+                                    {`✓ ${resolveVentaTarget(ventaLineForm.plant_id).isSeed ? seedBatchDisplayName(resolveVentaTarget(ventaLineForm.plant_id).seedBatch) : (resolveVentaTarget(ventaLineForm.plant_id).plant?.name || '')}`}
                                   </p>
-                                )}
+                                ) : null}
                                 <input placeholder="Cantidad" type="number" value={ventaLineForm.quantity} onChange={e => setVentaLineForm({ ...ventaLineForm, quantity: e.target.value })} style={{ width: '100%', boxSizing: 'border-box' }} />
                                 <select
                                   value={ventaLineForm.motivo}
