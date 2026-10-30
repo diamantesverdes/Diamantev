@@ -209,6 +209,12 @@ function textoBuscableItem(item) {
 function normalizarBusqueda(t) {
   return String(t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
 }
+// Coincide si TODAS las palabras buscadas aparecen en el texto, en cualquier orden:
+// "clown oncidium" encuentra "Oncidium Clown". Sin palabras (búsqueda vacía) coincide con todo.
+function coincideBusqueda(texto, consulta) {
+  const t = normalizarBusqueda(texto)
+  return normalizarBusqueda(consulta).split(/\s+/).filter(Boolean).every(w => t.includes(w))
+}
 
 // Última selección de las pestañas Tienda, Fotos y Carrusel (la de Etiquetas se guarda aparte, junto a sus cantidades)
 const SELECCIONES_KEY = 'diamantev_selecciones'
@@ -584,6 +590,9 @@ function Admin() {
   const [labelQtyModalOpen, setLabelQtyModalOpen] = useState(false)
   const [pendingLabelAction, setPendingLabelAction] = useState(null) // 'print' | 'pdf' | 'pptx'
   const [labelQuantities, setLabelQuantities] = useState(() => (readLabelsDraft() || {}).idQty || {}) // { plantId: cantidad }
+  // Número temporal de cada planta de la lista de Etiquetas (el de la estaca provisional en el jardín).
+  // nums = { plantId: n }; next = próximo número. No cambia al quitar otras plantas, y vuelve a 1 cuando la lista queda vacía.
+  const [labelTemp, setLabelTemp] = useState(() => { const d = readLabelsDraft() || {}; return { nums: d.tempNums || {}, next: d.tempNext || 1 } })
   const [intercambios, setIntercambios] = useState([]) // cabeceras: INT-001, fecha, contacto
   const [intercambioItems, setIntercambioItems] = useState([]) // líneas: lo que se entregó y lo que se recibió
   const [intercambiosOk, setIntercambiosOk] = useState(true) // false mientras las tablas no existan en Supabase
@@ -608,6 +617,7 @@ function Admin() {
   const [galleryVentaStatus, setGalleryVentaStatus] = useState('all')
   const [galleryActionFilter, setGalleryActionFilter] = useState('all')
   const [gallerySearch, setGallerySearch] = useState('')
+  const [highlightPlantId, setHighlightPlantId] = useState(null) // planta que se acaba de buscar: se resalta y se hace scroll hasta ella
   const [galleryMissingFilters, setGalleryMissingFilters] = useState(new Set())
   const [galleryFiltersOpen, setGalleryFiltersOpen] = useState(false)
   const [globalSearchOpen, setGlobalSearchOpen] = useState(false) // buscador único (🔍)
@@ -1144,6 +1154,15 @@ function Admin() {
   useBackableModal(labelQtyModalOpen, () => closeLabelModal())
   useBackableModal(categoryNoteModalOpen, () => setCategoryNoteModalOpen(false))
   useBackableModal(globalSearchOpen, () => setGlobalSearchOpen(false))
+  useEffect(() => {
+    if (!highlightPlantId || view !== 'galeria' || loading) return
+    const t1 = setTimeout(() => {
+      const el = document.querySelector(`[data-plant-id="${highlightPlantId}"]`)
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }, 250)
+    const t2 = setTimeout(() => setHighlightPlantId(null), 5000)
+    return () => { clearTimeout(t1); clearTimeout(t2) }
+  }, [highlightPlantId, view, loading])
   useBackableModal(storeModalOpen, () => setStoreModalOpen(false))
   useBackableModal(intFormOpen, () => setIntFormOpen(false))
   // Al salir de Ventas, el formulario de "Nueva venta" se cierra (y se limpia): al volver, solo se abre si tocas el botón
@@ -1169,9 +1188,22 @@ function Admin() {
   useEffect(() => {
     try {
       if (modeSets.etiquetas.size === 0) localStorage.removeItem(LABELS_DRAFT_KEY)
-      else localStorage.setItem(LABELS_DRAFT_KEY, JSON.stringify({ ids: Array.from(modeSets.etiquetas), idQty: labelQuantities, nameQty: labelNameQuantities, savedAt: new Date().toISOString() }))
+      else localStorage.setItem(LABELS_DRAFT_KEY, JSON.stringify({ ids: Array.from(modeSets.etiquetas), idQty: labelQuantities, nameQty: labelNameQuantities, tempNums: labelTemp.nums, tempNext: labelTemp.next, savedAt: new Date().toISOString() }))
     } catch (e) { /* nada */ }
-  }, [modeSets.etiquetas, labelQuantities, labelNameQuantities])
+  }, [modeSets.etiquetas, labelQuantities, labelNameQuantities, labelTemp])
+  // Cada planta nueva en la lista de Etiquetas recibe el siguiente número; con la lista vacía se reinicia en 1
+  useEffect(() => {
+    const ids = Array.from(modeSets.etiquetas)
+    setLabelTemp(prev => {
+      if (ids.length === 0) return (Object.keys(prev.nums).length === 0 && prev.next === 1) ? prev : { nums: {}, next: 1 }
+      const faltan = ids.filter(id => !prev.nums[id])
+      if (faltan.length === 0) return prev
+      const nums = { ...prev.nums }
+      let next = prev.next
+      faltan.forEach(id => { nums[id] = next++ })
+      return { nums, next }
+    })
+  }, [modeSets.etiquetas])
   // Tienda, Fotos y Carrusel también recuerdan su última selección (para ir sumando o quitando)
   useEffect(() => {
     try {
@@ -4525,7 +4557,9 @@ function Admin() {
 
   async function markLastLabelsPrinted() {
     if (!lastLabelsPdf) return
-    if (!confirm('¿Ya se imprimieron estas etiquetas? Se marcarán como impresas y se borrará el PDF guardado.')) return
+    if (!confirm('¿Ya se imprimieron estas etiquetas? Se marcarán como impresas, se borrará el PDF guardado y se quitarán de la lista de Etiquetas (la numeración vuelve a empezar en 1 cuando la lista quede vacía).')) return
+    const impresas = new Set(lastLabelsPdf.ids || [])
+    setModeSets(prev => ({ ...prev, etiquetas: new Set([...prev.etiquetas].filter(id => !impresas.has(id))) }))
     await markPlantsAction(lastLabelsPdf.ids || [], 'printed_at')
     try { await clearLastLabelsPDF() } catch (e) { /* nada */ }
     setLastLabelsPdf(null)
@@ -5265,7 +5299,7 @@ function Admin() {
               {!loading && view === 'galeria' && (() => {
                     const galleryPlants = [...plants, ...seedBatchesAsItems()]
                       .filter(p => galleryFilter === 'all' || p.category_id === galleryFilter || categories.find(c => c.id === p.category_id)?.parent_id === galleryFilter)
-                      .filter(p => normalizarBusqueda(textoBuscableItem(p)).includes(normalizarBusqueda(gallerySearch)))
+                      .filter(p => coincideBusqueda(textoBuscableItem(p), gallerySearch))
                       .filter(p => {
                         if (galleryProveedor === 'all') return true
                         const comprasDePlanta = compras.filter(c => c.plant_id === p.id)
@@ -5700,7 +5734,7 @@ function Admin() {
                               </button>
                             )
                             const titulo = txt => <p style={{ margin: '10px 2px 6px', fontSize: 12, fontWeight: 700, color: '#7a7060', letterSpacing: '0.04em', textTransform: 'uppercase' }}>{txt}</p>
-                            const coincide = t => term && normalizarBusqueda(t).includes(term)
+                            const coincide = t => term && coincideBusqueda(t, raw)
                             const itemsBusq = [...plants, ...seedBatchesAsItems()].filter(x => coincide(textoBuscableItem(x)))
                             const proveedoresRes = [...new Set([...compras.map(c => c.proveedor), ...lotes.map(l => l.proveedor)].filter(Boolean))].filter(coincide).sort()
                             const intRes = intercambios.filter(i => coincide([folioInt(i), i.contacto, i.nota, ...intercambioItems.filter(x => x.intercambio_id === i.id).map(x => x.plant_name)].join(' '))).slice(0, 6)
@@ -5728,9 +5762,9 @@ function Admin() {
                                   {term && itemsBusq.length > 0 && (
                                     <>
                                       {titulo(`🪴 Plantas (${itemsBusq.length})`)}
-                                      {fila('ver-galeria', '🖼️', `Ver las ${itemsBusq.length} en la galería`, `Filtra la galería por «${raw}»`, () => { setGallerySearch(raw); setView('galeria'); cierra() })}
+                                      {fila('ver-galeria', '🖼️', `Ver las ${itemsBusq.length} en la galería`, `Filtra la galería por «${raw}»`, () => { clearAllGalleryFilters(); setGallerySearch(raw); setView('galeria'); cierra() })}
                                       {itemsBusq.slice(0, 6).map(x => fila(`p-${x.id}`, x.isSeed ? '🌰' : '🪴', x.name, x.isSeed ? 'Semillas' : `Stock ${x.stock ?? 0}`, () => {
-                                        if (x.isSeed) { setGallerySearch(raw); setView('galeria'); cierra() } else { setView('galeria'); setPhotoModalPlantId(x.id); cierra() }
+                                        clearAllGalleryFilters(); setGallerySearch(x.isSeed ? raw : x.name); setHighlightPlantId(x.isSeed ? null : x.id); setView('galeria'); cierra()
                                       }))}
                                     </>
                                   )}
@@ -6068,6 +6102,7 @@ function Admin() {
                               <div
                                 key={p.id}
                                 className="gallery-item"
+                                data-plant-id={p.id}
                                 onClick={() => {
                                   if (p.isSeed) { openSeedSheet(p.seedBatchId); return }
                                   setPhotoModalPlantId(p.id); setPhotoModalIndex(0); setPhotoModalMenuOpen(false); setPhotoModalSection('fotos'); setSeedVentasFilter('all')
@@ -6076,6 +6111,7 @@ function Admin() {
                                   position: 'relative',
                                   cursor: 'pointer',
                                   ...(actionMode && selectedLabels.has(p.id) ? { boxShadow: `0 0 0 3px ${modeColors[actionMode]}`, borderRadius: 8 } : null),
+                                  ...(highlightPlantId === p.id ? { boxShadow: '0 0 0 4px #E6007E', borderRadius: 8 } : null),
                                 }}
                               >
                                 {actionMode && (
@@ -8211,7 +8247,7 @@ function Admin() {
 
                 const f = tableFilters
                 const filteredRows = tableRows.filter(r => {
-                  if (gallerySearch && !normalizarBusqueda(textoBuscableItem(r)).includes(normalizarBusqueda(gallerySearch))) return false
+                  if (gallerySearch && !coincideBusqueda(textoBuscableItem(r), gallerySearch)) return false
                   if (f.categoria === '__seed__') { if (!r.isSeed) return false }
                   else if (f.categoria === '__plants__') { if (r.isSeed) return false }
                   else if (f.categoria !== 'all' && r.categoriaId !== f.categoria && r.categoriaParentId !== f.categoria) return false
@@ -9775,10 +9811,16 @@ function Admin() {
                   <span style={{ width: 28, flex: '0 0 auto' }} />
                 </div>
 
+                <p style={{ margin: '0 2px 6px', fontSize: 12, color: '#7a7060' }}>
+                  🏷️ <b>Nº</b> = número de la etiqueta provisional en el jardín. No cambia al quitar otras plantas y vuelve a empezar en 1 cuando la lista queda vacía.
+                </p>
                 <div style={{ overflowY: 'auto', padding: '2px 2px' }}>
                   {items.length === 0 && <p className="status-msg">No hay plantas en la lista.</p>}
-                  {items.map(p => (
+                  {[...items].sort((a, b) => (labelTemp.nums[a.id] || 1e9) - (labelTemp.nums[b.id] || 1e9)).map(p => (
                     <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 2px', borderBottom: '1px solid #eee' }}>
+                      <span title="Número de la etiqueta provisional" style={{ flex: '0 0 auto', minWidth: 38, textAlign: 'center', padding: '4px 6px', borderRadius: 10, background: '#FFF1CC', border: '1px solid #E6C76A', color: '#6b4f00', fontWeight: 800, fontSize: 17, lineHeight: 1.1 }}>
+                        {labelTemp.nums[p.id] ?? '·'}
+                      </span>
                       {p.image_url ? (
                         <img src={p.image_url} alt="" loading="lazy" style={{ width: 40, height: 40, objectFit: 'cover', borderRadius: 8, flexShrink: 0, border: '1px solid #ddd' }} />
                       ) : (
