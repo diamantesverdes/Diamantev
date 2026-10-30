@@ -144,6 +144,41 @@ function classifyColorPixels(data, S) {
   return topName
 }
 
+// ---------- Vincular compras con plantas que ya existen (evita duplicarlas) ----------
+// Compara nombres sin tildes, mayúsculas, comillas ni signos: "Iris 'Black Gamecock'" = "iris black gamecock".
+function normalizarNombrePlanta(s) {
+  return String(s || '')
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/['"`´‘’“”]/g, '')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+}
+// Devuelve { exacta, parecidas }: exacta = la misma planta (mismo nombre normalizado);
+// parecidas = hasta 3 candidatas para que tú decidas si es la misma planta o una nueva.
+function buscarPlantaParecida(nombre, plantas) {
+  const lista = plantas || []
+  const n = normalizarNombrePlanta(nombre)
+  if (!n) return { exacta: null, parecidas: [] }
+  const exacta = lista.find(p => normalizarNombrePlanta(p.name) === n) || null
+  if (exacta) return { exacta, parecidas: [] }
+  const tokens = new Set(n.split(' ').filter(t => t.length > 1 || /\d/.test(t)))
+  const parecidas = lista
+    .map(p => {
+      const pn = normalizarNombrePlanta(p.name)
+      const pt = new Set(pn.split(' ').filter(t => t.length > 1 || /\d/.test(t)))
+      const comunes = [...tokens].filter(t => pt.has(t)).length
+      let score = comunes / Math.max(tokens.size, pt.size, 1)
+      if (pn.length >= 5 && n.length >= 5 && (pn.includes(n) || n.includes(pn))) score = Math.max(score, 0.8)
+      return { p, score }
+    })
+    .filter(x => x.score >= 0.6)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 3)
+    .map(x => x.p)
+  return { exacta: null, parecidas }
+}
+
 // Estados con color (ventas y compras) y formato de dinero
 const ESTADOS_VENTA = {
   pedido: { label: 'Pedido', icon: '🕒', bg: '#FFF1CC', border: '#E6C76A' },
@@ -840,11 +875,17 @@ function Admin() {
       setFacturaData({
         proveedor: result.proveedor || '',
         fecha: result.fecha || '',
-        items: (result.items || []).map(it => ({
-          nombre: it.nombre || '',
-          cantidad: it.cantidad != null ? String(it.cantidad) : '1',
-          precio_unitario: it.precio_unitario != null ? String(it.precio_unitario) : '0',
-        })),
+        items: (result.items || []).map(it => {
+          const nombre = it.nombre || ''
+          const m = buscarPlantaParecida(nombre, plants)
+          return {
+            nombre,
+            cantidad: it.cantidad != null ? String(it.cantidad) : '1',
+            precio_unitario: it.precio_unitario != null ? String(it.precio_unitario) : '0',
+            plant_id: m.exacta ? m.exacta.id : '', // '' = planta nueva; con id = se vincula a la que ya tienes
+            manual: false,                          // true cuando tú eliges a mano (ya no se recalcula)
+          }
+        }),
         envio: result.envio != null ? String(result.envio) : '',
         subtotal: result.subtotal != null ? String(result.subtotal) : '',
         total: result.total != null ? String(result.total) : '',
@@ -866,13 +907,19 @@ function Admin() {
   function updateFacturaItem(index, field, value) {
     setFacturaData(prev => {
       const items = [...prev.items]
-      items[index] = { ...items[index], [field]: value }
+      const next = { ...items[index], [field]: value }
+      if (field === 'plant_id') next.manual = true
+      if (field === 'nombre' && !next.manual) {
+        const m = buscarPlantaParecida(value, plants)
+        next.plant_id = m.exacta ? m.exacta.id : ''
+      }
+      items[index] = next
       return { ...prev, items }
     })
   }
 
   function addFacturaItem() {
-    setFacturaData(prev => ({ ...prev, items: [...prev.items, { nombre: '', cantidad: '1', precio_unitario: '0' }] }))
+    setFacturaData(prev => ({ ...prev, items: [...prev.items, { nombre: '', cantidad: '1', precio_unitario: '0', plant_id: '', manual: false }] }))
   }
 
   function removeFacturaItem(index) {
@@ -891,27 +938,44 @@ function Admin() {
     const { data: lote, error: loteError } = await supabase.from('compra_lotes').insert(loteInsert).select().single()
     if (loteError) { alert('Error al crear la compra: ' + loteError.message); setSavingFactura(false); return }
 
+    // Cada producto se vincula a la planta que ya existe (la que elegiste o la de mismo nombre) y solo
+    // se crea una planta nueva si de verdad no existe. La compra queda enlazada por compras.plant_id.
+    const creadasEnFactura = new Map() // nombre normalizado -> planta creada en esta misma factura
+    const vinculadas = []
     for (const item of itemsValidos) {
-      const nameNormalized = item.nombre.trim().toLowerCase()
-      const existing = plants.find(p => p.name.trim().toLowerCase() === nameNormalized)
+      const nombre = item.nombre.trim()
       const quantity = Number(item.cantidad) || 1
       const unit_cost = Number(item.precio_unitario) || 0
-      const row = existing
-        ? { plant_id: existing.id, plant_name: existing.name, quantity, unit_cost, sale_price: null, image_url: null, total: quantity * unit_cost, proveedor: facturaData.proveedor || null, status: 'pedido', lote_id: lote.id }
-        : { plant_id: null, plant_name: item.nombre.trim(), new_plant_category: null, quantity, unit_cost, sale_price: null, image_url: null, total: quantity * unit_cost, proveedor: facturaData.proveedor || null, status: 'pedido', lote_id: lote.id }
-      const { data: insertedCompra, error } = await supabase.from('compras').insert(row).select().single()
-      if (error) { alert('Error al guardar "' + item.nombre + '": ' + error.message); continue }
-      if (!existing) {
-        const { data: newPlant } = await supabase.from('plants').insert({
-          name: item.nombre.trim(),
-          category_id: null,
-          price: 0,
-          stock: 0,
-          image_url: null,
-          active: false,
-          flagged: true,
+      const key = normalizarNombrePlanta(nombre)
+
+      let planta = item.plant_id ? plants.find(p => p.id === item.plant_id) : null
+      if (!planta && !item.manual) planta = buscarPlantaParecida(nombre, plants).exacta
+      let reutilizada = false
+      if (!planta) { planta = creadasEnFactura.get(key) || null; reutilizada = !!planta }
+      let creada = false
+      if (!planta) {
+        const { data: nueva, error: plantError } = await supabase.from('plants').insert({
+          name: nombre, category_id: null, price: 0, stock: 0, image_url: null, active: false, flagged: true,
         }).select().single()
-        if (newPlant) await supabase.from('compras').update({ plant_id: newPlant.id }).eq('id', insertedCompra.id)
+        if (plantError || !nueva) { alert('No se pudo crear la planta "' + nombre + '": ' + (plantError ? plantError.message : '')); continue }
+        planta = nueva
+        creada = true
+        creadasEnFactura.set(key, nueva)
+      } else if (!reutilizada) {
+        vinculadas.push(planta.name)
+      }
+
+      const row = {
+        plant_id: planta.id, plant_name: planta.name, ...(creada ? { new_plant_category: null } : {}),
+        quantity, unit_cost, sale_price: null, image_url: null, total: quantity * unit_cost,
+        proveedor: facturaData.proveedor || null, status: 'pedido', lote_id: lote.id,
+        crea_planta: creada, // true = esta compra creó la planta (solo esas se pueden borrar junto con la compra)
+      }
+      const { error } = await supabase.from('compras').insert(row)
+      if (error) {
+        alert('Error al guardar "' + item.nombre + '": ' + error.message)
+        if (creada) { await supabase.from('plants').delete().eq('id', planta.id); creadasEnFactura.delete(key) }
+        continue
       }
     }
 
@@ -919,6 +983,7 @@ function Admin() {
     setFacturaData({ proveedor: '', fecha: '', items: [], envio: '', subtotal: '', total: '' })
     setSavingFactura(false)
     loadData()
+    if (vinculadas.length > 0) alert('🔗 ' + vinculadas.length + ' producto(s) ya existían y se vincularon a esta compra sin duplicarlos:\n• ' + vinculadas.join('\n• '))
   }
   
   const [decrementos, setDecrementos] = useState([])
@@ -1246,7 +1311,10 @@ function Admin() {
         const { data: lote, error: loteError } = await supabase
           .from('compra_lotes').insert({ nota: payload.nota, proveedor: payload.proveedor }).select().single()
         if (loteError) throw loteError
-        for (const line of payload.lines) {
+        for (const line0 of payload.lines) {
+          // Si la línea "nueva" ya existe en el catálogo, se vincula a esa planta en vez de duplicarla
+          const yaExiste = (!line0.plant_id && line0.new_plant_name) ? buscarPlantaParecida(line0.new_plant_name, plants).exacta : null
+          const line = yaExiste ? { ...line0, plant_id: yaExiste.id, plant_name: yaExiste.name } : line0
           const usingNew = !line.plant_id && line.new_plant_name
           const quantity = Number(line.quantity)
           const unit_cost = Number(line.unit_cost)
@@ -1268,7 +1336,7 @@ function Admin() {
               active: false,
               flagged: !line.new_plant_category,
             }).select().single()
-            if (newPlant) await supabase.from('compras').update({ plant_id: newPlant.id }).eq('id', insertedCompra.id)
+            if (newPlant) await supabase.from('compras').update({ plant_id: newPlant.id, crea_planta: true }).eq('id', insertedCompra.id)
           }
         }
       },
@@ -1299,7 +1367,7 @@ function Admin() {
             image_url: image_url || null,
             active: false,
           }).select().single()
-          if (newPlant) await supabase.from('compras').update({ plant_id: newPlant.id }).eq('id', insertedCompra.id)
+          if (newPlant) await supabase.from('compras').update({ plant_id: newPlant.id, crea_planta: true }).eq('id', insertedCompra.id)
         }
       },
       lote_note: async (payload) => {
@@ -1469,10 +1537,12 @@ function Admin() {
       return false
     }
     if (usingNew) {
-      const nameNormalized = lineForm.new_plant_name.trim().toLowerCase()
-      const existing = plants.find(p => p.name.trim().toLowerCase() === nameNormalized)
-      if (existing) {
-        alert(`Ya existe una planta llamada "${existing.name}". Selecciónala de la lista "Selecciona planta existente" en vez de escribirla como nueva, para no duplicarla.`)
+      const { exacta, parecidas } = buscarPlantaParecida(lineForm.new_plant_name, plants)
+      if (exacta) {
+        alert(`Ya existe una planta llamada "${exacta.name}". Selecciónala de la lista "Selecciona planta existente" en vez de escribirla como nueva, para no duplicarla.`)
+        return false
+      }
+      if (parecidas.length > 0 && !confirm(`Hay plantas parecidas en tu catálogo:\n• ${parecidas.map(p => p.name).join('\n• ')}\n\n¿Aun así es una planta NUEVA?\n(Cancelar = volver y elegir la que ya existe)`)) {
         return false
       }
     }
@@ -1506,34 +1576,56 @@ function Admin() {
       .from('compra_lotes').insert({ nota: loteNota, proveedor: loteProveedor }).select().single()
     if (loteError) { alert('Error al crear la compra: ' + loteError.message); setSavingLote(false); return }
 
+    // Si una línea "nueva" (por ejemplo, una foto cargada en masa) coincide con una planta que ya existe,
+    // se vincula a esa planta en vez de duplicarla. Solo se crea una planta cuando de verdad es nueva.
+    const creadasEnCompra = new Map()
+    const vinculadas = []
     for (const line of loteLines) {
-      const usingNew = !line.plant_id && line.new_plant_name
       const quantity = Number(line.quantity)
       const unit_cost = Number(line.unit_cost)
       const sale_price = line.sale_price ? Number(line.sale_price) : null
       let image_url = null
       if (line.file) image_url = await uploadImage(line.file)
 
-      const row = usingNew
-        ? { plant_id: null, plant_name: line.plant_name, new_plant_category: line.new_plant_category, quantity, unit_cost, sale_price, image_url, total: quantity * unit_cost, proveedor: loteProveedor, status: 'pedido', lote_id: lote.id }
-        : { plant_id: line.plant_id, plant_name: line.plant_name, quantity, unit_cost, sale_price, image_url, total: quantity * unit_cost, proveedor: loteProveedor, status: 'pedido', lote_id: lote.id }
+      let plantId = line.plant_id || null
+      let plantName = line.plant_name
+      let creada = false
+      const key = normalizarNombrePlanta(line.new_plant_name)
+      if (!plantId && line.new_plant_name) {
+        const ya = buscarPlantaParecida(line.new_plant_name, plants).exacta
+        const reuse = ya || creadasEnCompra.get(key)
+        if (reuse) {
+          plantId = reuse.id
+          plantName = reuse.name
+          if (ya) vinculadas.push(ya.name)
+        } else {
+          const { data: newPlant, error: plantError } = await supabase.from('plants').insert({
+            name: line.plant_name,
+            category_id: line.new_plant_category || null,
+            price: sale_price || 0,
+            stock: 0,
+            image_url: image_url || null,
+            active: false,
+            flagged: !line.new_plant_category,
+          }).select().single()
+          if (plantError || !newPlant) { alert('No se pudo crear la planta "' + line.plant_name + '": ' + (plantError ? plantError.message : '')); continue }
+          plantId = newPlant.id
+          creada = true
+          creadasEnCompra.set(key, newPlant)
+        }
+      }
 
-      const { data: insertedCompra, error } = await supabase.from('compras').insert(row).select().single()
-      if (error) { alert('Error al guardar una de las plantas: ' + error.message); continue }
-
-      if (usingNew) {
-        // Se crea la planta de inmediato (oculta, stock 0) para que ya aparezca en Galería
-        // y sus filtros de compra, sin esperar a que se marque "Recibido".
-        const { data: newPlant } = await supabase.from('plants').insert({
-          name: line.plant_name,
-          category_id: line.new_plant_category || null,
-          price: sale_price || 0,
-          stock: 0,
-          image_url: image_url || null,
-          active: false,
-          flagged: !line.new_plant_category,
-        }).select().single()
-        if (newPlant) await supabase.from('compras').update({ plant_id: newPlant.id }).eq('id', insertedCompra.id)
+      const row = {
+        plant_id: plantId, plant_name: plantName, ...(creada ? { new_plant_category: line.new_plant_category } : {}),
+        quantity, unit_cost, sale_price, image_url, total: quantity * unit_cost,
+        proveedor: loteProveedor, status: 'pedido', lote_id: lote.id,
+        crea_planta: creada, // true = esta compra creó la planta
+      }
+      const { error } = await supabase.from('compras').insert(row)
+      if (error) {
+        alert('Error al guardar una de las plantas: ' + error.message)
+        if (creada) { await supabase.from('plants').delete().eq('id', plantId); creadasEnCompra.delete(key) }
+        continue
       }
     }
     setLoteNota('')
@@ -1542,6 +1634,7 @@ function Admin() {
     setLoteBuilderOpen(false)
     setSavingLote(false)
     loadData()
+    if (vinculadas.length > 0) alert('🔗 ' + vinculadas.length + ' planta(s) ya existían y se vincularon a esta compra sin duplicarlas:\n• ' + vinculadas.join('\n• '))
   }
 
   async function saveAddToLote(lote) {
@@ -1553,6 +1646,16 @@ function Admin() {
     if (usingNew && !addToLoteForm.new_plant_category) {
       alert('Selecciona una categoría para la planta nueva')
       return
+    }
+    if (usingNew) {
+      const { exacta, parecidas } = buscarPlantaParecida(addToLoteForm.new_plant_name, plants)
+      if (exacta) {
+        alert(`Ya existe una planta llamada "${exacta.name}". Selecciónala de la lista de plantas existentes en vez de escribirla como nueva, para no duplicarla.`)
+        return
+      }
+      if (parecidas.length > 0 && !confirm(`Hay plantas parecidas en tu catálogo:\n• ${parecidas.map(p => p.name).join('\n• ')}\n\n¿Aun así es una planta NUEVA?\n(Cancelar = volver y elegir la que ya existe)`)) {
+        return
+      }
     }
     setSavingAddToLote(true)
     const plant = addToLoteForm.plant_id ? plants.find(p => p.id === addToLoteForm.plant_id) : null
@@ -1619,7 +1722,7 @@ function Admin() {
         image_url: image_url || null,
         active: false,
       }).select().single()
-      if (newPlant) await supabase.from('compras').update({ plant_id: newPlant.id }).eq('id', insertedCompra.id)
+      if (newPlant) await supabase.from('compras').update({ plant_id: newPlant.id, crea_planta: true }).eq('id', insertedCompra.id)
     }
 
     setAddToLoteForm({ plant_id: '', new_plant_name: '', new_plant_category: '', quantity: '', unit_cost: '', sale_price: '', file: null })
@@ -1668,6 +1771,19 @@ function Admin() {
     }
   }
 
+  // ¿La planta tiene algo propio que se perdería si la borramos? (otras compras, ventas, notas, crías,
+  // floraciones, intercambios, fotos extra, video o descripción). Ante cualquier duda: se conserva.
+  async function plantaTieneHistorial(plantId) {
+    const tablas = ['compras', 'decrementos', 'plant_notes', 'plant_pups', 'floraciones', 'intercambio_items']
+    for (const t of tablas) {
+      const { count, error } = await supabase.from(t).select('*', { count: 'exact', head: true }).eq('plant_id', plantId)
+      if (error || (count ?? 0) > 0) return true
+    }
+    const { data: p } = await supabase.from('plants').select('*').eq('id', plantId).single()
+    if (!p) return true
+    return !!(p.extra_image_1 || p.extra_image_2 || p.extra_image_3 || p.video_url || String(p.description || '').trim())
+  }
+
   async function deleteLote(loteId) {
     if (!confirm('¿Eliminar esta compra completa? Se borrarán todas las plantas registradas en ella. Esta acción no se puede deshacer.')) return
     const deletedNumero = lotes.find(l => l.id === loteId)?.numero
@@ -1680,7 +1796,9 @@ function Admin() {
         }
       }
     }
-    const plantIds = [...new Set(lineas.map(c => c.plant_id).filter(Boolean))]
+    // Solo se consideran para borrar las plantas que ESTA compra creó (crea_planta). Las que ya existían
+    // antes y solo se vincularon a la compra nunca se borran: conservan sus fotos y notas.
+    const plantIds = [...new Set(lineas.filter(c => c.crea_planta && c.plant_id).map(c => c.plant_id))]
     const { error: comprasError } = await supabase.from('compras').delete().eq('lote_id', loteId)
     if (comprasError) {
       alert('Error al borrar las plantas de la compra: ' + comprasError.message)
@@ -1691,10 +1809,10 @@ function Admin() {
       alert('Error al borrar la compra: ' + loteError.message)
       return
     }
-    // Intentamos borrar también las plantas que quedaron sin ninguna otra referencia
-    // (compras, ventas, notas, etc.). Si una planta todavía tiene historial en otro
-    // lado, esta operación simplemente falla en silencio y la planta queda en el inventario.
+    // Se borran solo las plantas creadas por esta compra que no tengan nada más (ya se borraron las
+    // líneas de esta compra, así que "otras compras" cuenta las de otras facturas).
     for (const plantId of plantIds) {
+      if (await plantaTieneHistorial(plantId)) continue
       await supabase.from('plants').delete().eq('id', plantId)
     }
     await renumberLotesAfterDelete('compra_lotes', lotes, deletedNumero)
@@ -9103,7 +9221,7 @@ function Admin() {
                           </div>
                           <div className="admin-sheet-body" style={{ overflow: 'visible', maxHeight: 'none', height: 'auto' }}>
                             <p style={{ fontSize: '0.8rem', color: '#8a8a7a', marginTop: 0 }}>
-                              Revisa y corrige los datos antes de guardar. Si un producto ya existe en tu catálogo con el mismo nombre, se vinculará automáticamente.
+                              Revisa y corrige los datos antes de guardar. Si un producto ya existe en tu catálogo (aunque cambien tildes, mayúsculas o comillas) se vincula a esa planta, sin duplicarla ni tocar sus fotos y notas. Revisa la línea de estado bajo cada producto.
                             </p>
 
                             <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, marginBottom: 2 }}>Proveedor</label>
@@ -9122,31 +9240,62 @@ function Admin() {
                             />
 
                             <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, marginBottom: 6 }}>Productos detectados</label>
-                            {facturaData.items.map((item, idx) => (
-                              <div key={idx} style={{ display: 'flex', gap: 6, marginBottom: 6, alignItems: 'center', flexWrap: 'wrap' }}>
-                                <input
-                                  placeholder="Nombre del producto"
-                                  value={item.nombre}
-                                  onChange={e => updateFacturaItem(idx, 'nombre', e.target.value)}
-                                  style={{ flex: '2 1 140px', padding: 8, borderRadius: 6, border: '1px solid #ccc', boxSizing: 'border-box' }}
-                                />
-                                <input
-                                  type="number"
-                                  placeholder="Cant."
-                                  value={item.cantidad}
-                                  onChange={e => updateFacturaItem(idx, 'cantidad', e.target.value)}
-                                  style={{ flex: '1 1 60px', padding: 8, borderRadius: 6, border: '1px solid #ccc', boxSizing: 'border-box' }}
-                                />
-                                <input
-                                  type="number"
-                                  placeholder="P. Unit"
-                                  value={item.precio_unitario}
-                                  onChange={e => updateFacturaItem(idx, 'precio_unitario', e.target.value)}
-                                  style={{ flex: '1 1 70px', padding: 8, borderRadius: 6, border: '1px solid #ccc', boxSizing: 'border-box' }}
-                                />
-                                <button type="button" className="danger" onClick={() => removeFacturaItem(idx)}>🗑️</button>
-                              </div>
-                            ))}
+                            {(() => {
+                              const plantasOrdenadas = [...plants].sort((a, b) => String(a.name).localeCompare(String(b.name), 'es', { numeric: true, sensitivity: 'base' }))
+                              return facturaData.items.map((item, idx) => {
+                                const enlazada = item.plant_id ? plants.find(p => p.id === item.plant_id) : null
+                                const sugeridas = enlazada ? [] : buscarPlantaParecida(item.nombre, plants).parecidas
+                                return (
+                                  <div key={idx} style={{ marginBottom: 12, paddingBottom: 8, borderBottom: '1px solid rgba(0,0,0,0.08)' }}>
+                                    <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+                                      <input
+                                        placeholder="Nombre del producto"
+                                        value={item.nombre}
+                                        onChange={e => updateFacturaItem(idx, 'nombre', e.target.value)}
+                                        style={{ flex: '2 1 140px', padding: 8, borderRadius: 6, border: '1px solid #ccc', boxSizing: 'border-box' }}
+                                      />
+                                      <input
+                                        type="number"
+                                        placeholder="Cant."
+                                        value={item.cantidad}
+                                        onChange={e => updateFacturaItem(idx, 'cantidad', e.target.value)}
+                                        style={{ flex: '1 1 60px', padding: 8, borderRadius: 6, border: '1px solid #ccc', boxSizing: 'border-box' }}
+                                      />
+                                      <input
+                                        type="number"
+                                        placeholder="P. Unit"
+                                        value={item.precio_unitario}
+                                        onChange={e => updateFacturaItem(idx, 'precio_unitario', e.target.value)}
+                                        style={{ flex: '1 1 70px', padding: 8, borderRadius: 6, border: '1px solid #ccc', boxSizing: 'border-box' }}
+                                      />
+                                      <button type="button" className="danger" onClick={() => removeFacturaItem(idx)}>🗑️</button>
+                                    </div>
+                                    <div style={{ marginTop: 4, fontSize: '0.78rem', fontWeight: 600, color: enlazada ? '#2F5C3A' : '#7a6a2a' }}>
+                                      {enlazada ? `🔗 Se vincula a tu planta existente: ${enlazada.name}` : '🆕 Se creará como planta nueva'}
+                                    </div>
+                                    {sugeridas.length > 0 && (
+                                      <div style={{ marginTop: 4, display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', fontSize: '0.78rem' }}>
+                                        <span>¿Es alguna de estas?</span>
+                                        {sugeridas.map(sg => (
+                                          <button key={sg.id} type="button" onClick={() => updateFacturaItem(idx, 'plant_id', sg.id)}
+                                            style={{ padding: '4px 10px', borderRadius: 14, border: '1px solid #6E8161', background: '#fff', color: '#4B5A46', cursor: 'pointer', fontSize: '0.78rem' }}>
+                                            🔗 {sg.name}
+                                          </button>
+                                        ))}
+                                      </div>
+                                    )}
+                                    <select
+                                      value={item.plant_id || ''}
+                                      onChange={e => updateFacturaItem(idx, 'plant_id', e.target.value)}
+                                      style={{ width: '100%', marginTop: 4, padding: 6, borderRadius: 6, border: '1px solid #ccc', fontSize: '0.8rem', boxSizing: 'border-box' }}
+                                    >
+                                      <option value="">🆕 Crear como planta nueva</option>
+                                      {plantasOrdenadas.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                                    </select>
+                                  </div>
+                                )
+                              })
+                            })()}
                             <button type="button" onClick={addFacturaItem} style={{ marginBottom: 14 }}>➕ Agregar producto</button>
 
                             <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, marginBottom: 2 }}>Envío / delivery (opcional)</label>
