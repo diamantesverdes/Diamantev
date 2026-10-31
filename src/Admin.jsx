@@ -3621,6 +3621,30 @@ function Admin() {
     if (error) { undo(); alert('No se pudo guardar el stock: ' + error.message) }
   }
 
+  // Precio de venta directo desde la Tabla.
+  async function updatePrecioRapido(row, texto) {
+    if (String(texto).trim() === '') return
+    const nuevo = Math.max(0, Math.round(Number(texto) * 100) / 100)
+    if (!Number.isFinite(nuevo) || nuevo === Number(row.price)) return
+    const pl = plants.find(x => x.id === row.id)
+    if (!pl) return
+    const undo = patchLocal(setPlants, plants, [pl.id], { price: nuevo })
+    const { error } = await supabase.from('plants').update({ price: nuevo }).eq('id', pl.id)
+    if (error) { undo(); alert('No se pudo guardar el precio: ' + error.message) }
+  }
+
+  // Descuento (%) directo desde la Tabla. Vacío o 0 = sin descuento.
+  async function updateDescuentoRapido(row, texto) {
+    const nuevo = String(texto).trim() === '' ? 0 : Math.max(0, Math.min(100, Math.round(Number(texto) || 0)))
+    if (nuevo === (Number(row.discountPercent) || 0)) return
+    const pl = plants.find(x => x.id === row.id)
+    if (!pl) return
+    const patch = { discount_percent: nuevo, on_sale: nuevo > 0 }
+    const undo = patchLocal(setPlants, plants, [pl.id], patch)
+    const { error } = await supabase.from('plants').update(patch).eq('id', pl.id)
+    if (error) { undo(); alert('No se pudo guardar el descuento: ' + error.message) }
+  }
+
   // Disponible = lo que se puede vender ahora (nunca más que el stock).
   async function updateDisponibleRapido(row, texto) {
     if (String(texto).trim() === '') return
@@ -9079,8 +9103,37 @@ function Admin() {
                               <td style={tdStyle}>{r.proveedor || '—'}</td>
                               <td style={tdStyle}>{r.costoSinEnvio != null ? `$${r.costoSinEnvio.toFixed(2)}` : '—'}</td>
                               <td style={tdStyle}>{r.precioSugerido != null ? `$${r.precioSugerido.toFixed(2)}` : '—'}</td>
-                              <td style={tdStyle}>${r.price.toFixed(2)}</td>
-                              <td style={tdStyle}>{r.discountPercent > 0 ? `$${r.priceWithDiscount.toFixed(2)} (-${r.discountPercent}%)` : '—'}</td>
+                              <td style={tdStyle}>
+                                {r.isSeed ? `$${r.price.toFixed(2)}` : (
+                                  <input
+                                    key={`${r.id}-p-${r.price}`}
+                                    type="number" inputMode="decimal" min="0" step="0.01"
+                                    defaultValue={r.price}
+                                    onClick={e => e.stopPropagation()}
+                                    onFocus={e => e.target.select()}
+                                    onBlur={e => updatePrecioRapido(r, e.target.value)}
+                                    onKeyDown={e => { if (e.key === 'Enter') e.target.blur() }}
+                                    style={{ width: 72, padding: '4px 6px', fontSize: 14, boxSizing: 'border-box', borderRadius: 6, border: '1px solid #d8cfb8', background: '#fff' }}
+                                  />
+                                )}
+                              </td>
+                              <td style={tdStyle}>
+                                {r.isSeed ? '—' : (
+                                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                                    <input
+                                      key={`${r.id}-dc-${r.discountPercent}`}
+                                      type="number" inputMode="numeric" min="0" max="100" step="1" placeholder="0"
+                                      defaultValue={r.discountPercent || ''}
+                                      onClick={e => e.stopPropagation()}
+                                      onFocus={e => e.target.select()}
+                                      onBlur={e => updateDescuentoRapido(r, e.target.value)}
+                                      onKeyDown={e => { if (e.key === 'Enter') e.target.blur() }}
+                                      style={{ width: 52, padding: '4px 6px', fontSize: 14, boxSizing: 'border-box', borderRadius: 6, border: '1px solid #d8cfb8', background: '#fff' }}
+                                    />%
+                                    {r.discountPercent > 0 && <strong>${r.priceWithDiscount.toFixed(2)}</strong>}
+                                  </span>
+                                )}
+                              </td>
                               <td style={tdStyle}>
                                 <input
                                   key={`${r.id}-${r.stock}`}
