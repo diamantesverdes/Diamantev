@@ -733,7 +733,7 @@ function Admin() {
 
   function exportTableToExcel(rows) {
     const headers = [
-      'Nombre', 'Categoría', 'Proveedor', 'Costo', 'Costo + envío', 'Precio', 'Precio con descuento', 'Stock', 'Altura',
+      'Nombre', 'Categoría', 'Proveedor', 'Costo', 'Costo + envío', 'Precio', 'Precio con descuento', 'Stock', 'Disponible', 'Altura',
       'Nueva', 'Descuento', 'Próximamente', 'Para revisar', 'Floreció', 'Vendió',
       'N° de compra', 'Fecha de compra', 'N° de venta', 'Fecha de venta',
     ]
@@ -746,6 +746,7 @@ function Admin() {
       Number(r.price.toFixed(2)),
       r.discountPercent > 0 ? Number(r.priceWithDiscount.toFixed(2)) : '',
       r.stock,
+      r.isSeed ? '' : r.stockDisponible,
       r.height,
       r.is_new ? 'Sí' : 'No',
       r.on_sale ? 'Sí' : 'No',
@@ -3595,6 +3596,41 @@ function Admin() {
   async function updateStock(id, newStock) {
     await supabase.from('plants').update({ stock: newStock }).eq('id', id)
     loadData()
+  }
+
+  // Corregir el stock directo desde la Tabla (sin abrir la planta). Mantiene lo que ya estaba apartado: disponible = nuevo stock - apartado.
+  async function updateStockRapido(row, texto) {
+    const nuevo = Math.max(0, Math.floor(Number(texto)))
+    if (!Number.isFinite(nuevo) || String(texto).trim() === '') return
+    if (nuevo === Number(row.stock)) return
+    if (row.isSeed) {
+      const undo = patchLocal(setSeedBatches, seedBatches, [row.seedBatchId], { stock: nuevo })
+      const { error } = await supabase.from('seed_batches').update({ stock: nuevo }).eq('id', row.seedBatchId)
+      if (error) { undo(); alert('No se pudo guardar el stock: ' + error.message) }
+      return
+    }
+    const pl = plants.find(x => x.id === row.id)
+    if (!pl) return
+    const patch = { stock: nuevo }
+    if (pl.stock_disponible != null) {
+      const apartado = Math.max(0, (Number(pl.stock) || 0) - (Number(pl.stock_disponible) || 0))
+      patch.stock_disponible = Math.max(0, nuevo - apartado)
+    }
+    const undo = patchLocal(setPlants, plants, [pl.id], patch)
+    const { error } = await supabase.from('plants').update(patch).eq('id', pl.id)
+    if (error) { undo(); alert('No se pudo guardar el stock: ' + error.message) }
+  }
+
+  // Disponible = lo que se puede vender ahora (nunca más que el stock).
+  async function updateDisponibleRapido(row, texto) {
+    if (String(texto).trim() === '') return
+    const nuevo = Math.min(Math.max(0, Math.floor(Number(texto))), Number(row.stock) || 0)
+    if (!Number.isFinite(nuevo) || nuevo === Number(row.stockDisponible)) return
+    const pl = plants.find(x => x.id === row.id)
+    if (!pl) return
+    const undo = patchLocal(setPlants, plants, [pl.id], { stock_disponible: nuevo })
+    const { error } = await supabase.from('plants').update({ stock_disponible: nuevo }).eq('id', pl.id)
+    if (error) { undo(); alert('No se pudo guardar el disponible: ' + error.message) }
   }
 
   async function updatePrice(id, newPrice) {
@@ -8805,6 +8841,7 @@ function Admin() {
                     discountPercent,
                     priceWithDiscount: discountPercent > 0 ? price * (1 - discountPercent / 100) : price,
                     stock: Number(p.stock) || 0,
+                    stockDisponible: p.stock_disponible != null ? Number(p.stock_disponible) || 0 : (Number(p.stock) || 0),
                     height: p.height || '',
                     is_new: !!p.is_new,
                     on_sale: !!p.on_sale,
@@ -8869,7 +8906,7 @@ function Admin() {
                   : <span style={{ opacity: 0.35 }}> ⇅</span>
                 const sortOptions = [
                   ['name', 'Nombre'], ['categoria', 'Categoría'], ['proveedor', 'Proveedor'], ['price', 'Precio'],
-                  ['priceWithDiscount', 'Precio con desc.'], ['costoSinEnvio', 'Costo'], ['precioSugerido', 'Costo + envío'], ['stock', 'Stock'], ['height', 'Altura'],
+                  ['priceWithDiscount', 'Precio con desc.'], ['costoSinEnvio', 'Costo'], ['precioSugerido', 'Costo + envío'], ['stock', 'Stock'], ['stockDisponible', 'Disponible'], ['height', 'Altura'],
                   ['loteNumero', 'N° compra'], ['fechaCompra', 'Fecha compra'], ['ventaNumero', 'N° venta'], ['fechaVenta', 'Fecha venta'],
                 ]
                 const thStyle = { padding: '6px 8px', border: '1px solid #ddd', background: '#F3ECDD', cursor: 'pointer', textAlign: 'left', verticalAlign: 'top', position: 'sticky', top: 0, zIndex: 2, boxShadow: 'inset 0 -1px 0 #ddd', userSelect: 'none' }
@@ -8980,6 +9017,9 @@ function Admin() {
                                 <input onClick={e => e.stopPropagation()} type="number" value={f.stockMax} onChange={e => setTableFilter('stockMax', e.target.value)} placeholder="Max" style={{ ...filterInputStyle, width: 40 }} />
                               </div>
                             </th>
+                            <th style={{ ...thStyle, width: 90 }} onClick={() => toggleTableSort('stockDisponible')}>
+                              <span style={thTitleStyle}>Disponible{arrow('stockDisponible')}</span>
+                            </th>
                             <th style={{ ...thStyle, width: 90 }} onClick={() => toggleTableSort('height')}>
                               <span style={thTitleStyle}>Altura{arrow('height')}</span>
                               <input onClick={e => e.stopPropagation()} value={f.altura} onChange={e => setTableFilter('altura', e.target.value)} placeholder="Buscar..." style={filterInputStyle} />
@@ -9041,7 +9081,32 @@ function Admin() {
                               <td style={tdStyle}>{r.precioSugerido != null ? `$${r.precioSugerido.toFixed(2)}` : '—'}</td>
                               <td style={tdStyle}>${r.price.toFixed(2)}</td>
                               <td style={tdStyle}>{r.discountPercent > 0 ? `$${r.priceWithDiscount.toFixed(2)} (-${r.discountPercent}%)` : '—'}</td>
-                              <td style={tdStyle}>{r.stock}</td>
+                              <td style={tdStyle}>
+                                <input
+                                  key={`${r.id}-${r.stock}`}
+                                  type="number" inputMode="numeric" min="0" step="1"
+                                  defaultValue={r.stock}
+                                  onClick={e => e.stopPropagation()}
+                                  onFocus={e => e.target.select()}
+                                  onBlur={e => updateStockRapido(r, e.target.value)}
+                                  onKeyDown={e => { if (e.key === 'Enter') e.target.blur() }}
+                                  style={{ width: 56, padding: '4px 6px', fontSize: 14, boxSizing: 'border-box', borderRadius: 6, border: '1px solid #d8cfb8', background: '#fff' }}
+                                />
+                              </td>
+                              <td style={tdStyle}>
+                                {r.isSeed ? '—' : (
+                                  <input
+                                    key={`${r.id}-d-${r.stockDisponible}-${r.stock}`}
+                                    type="number" inputMode="numeric" min="0" step="1"
+                                    defaultValue={r.stockDisponible}
+                                    onClick={e => e.stopPropagation()}
+                                    onFocus={e => e.target.select()}
+                                    onBlur={e => updateDisponibleRapido(r, e.target.value)}
+                                    onKeyDown={e => { if (e.key === 'Enter') e.target.blur() }}
+                                    style={{ width: 56, padding: '4px 6px', fontSize: 14, boxSizing: 'border-box', borderRadius: 6, border: '1px solid #d8cfb8', background: '#fff' }}
+                                  />
+                                )}
+                              </td>
                               <td style={tdStyle}>{r.height || '—'}</td>
                               <td style={tdStyle}>
                                 {r.is_new ? (
@@ -9064,7 +9129,7 @@ function Admin() {
                             </tr>
                           ))}
                           {sortedRows.length === 0 && (
-                            <tr><td colSpan={20} style={{ ...tdStyle, textAlign: 'center' }}>No hay plantas con esos filtros.</td></tr>
+                            <tr><td colSpan={21} style={{ ...tdStyle, textAlign: 'center' }}>No hay plantas con esos filtros.</td></tr>
                           )}
                         </tbody>
                       </table>
