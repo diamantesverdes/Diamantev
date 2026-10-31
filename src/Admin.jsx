@@ -4326,6 +4326,24 @@ function Admin() {
     if (error) { alert('Error al crear la planta: ' + error.message); return }
     await supabase.from('seed_batches').update({ estado: 'catalogado', converted_plant_id: newPlant.id }).eq('id', batch.id)
     await traerSeguimientoSemillas(batch, newPlant.id, false)
+    // La planta pertenece a la compra de semillas: se registra su compra con el costo del lote repartido entre las plantas.
+    const totalSemillas = (Number(batch.costo) || 0) + (Number(batch.envio1) || 0) + (Number(batch.envio2) || 0) + (Number(batch.varios) || 0)
+    const cantCompra = Math.max(stock, 1)
+    const unitCost = totalSemillas > 0 ? totalSemillas / cantCompra : 0
+    const filaCompra = {
+      plant_id: newPlant.id,
+      plant_name: newPlant.name,
+      quantity: cantCompra,
+      unit_cost: unitCost,
+      sale_price: null,
+      image_url: null,
+      total: unitCost * cantCompra,
+      proveedor: batch.origen === 'compra' ? (batch.proveedor || null) : null,
+      status: 'recibido',
+      lote_id: null,
+    }
+    if (batch.fecha) filaCompra.created_at = batch.fecha
+    await supabase.from('compras').insert(filaCompra)
     setSbConvertId(null)
     loadData()
     alert(`Listo, "${sbConvertForm.nombre}" ya está catalogada en Galería.`)
