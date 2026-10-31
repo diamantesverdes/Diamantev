@@ -34,7 +34,13 @@ function PlantPicker({ list, selectedId, onSelect }) {
 }
 
 // Nombres que en realidad son un código (ej. "6d6430d1 4ac0 40...", de fotos cargadas en masa): se ordenan al final.
-const esNombreCodigo = n => /^[0-9a-f]{8}[\s_-]?[0-9a-f]{4}/i.test(String(n || '').trim())
+// Nombre "de código": el que quedó con el nombre del archivo de la foto (1000348625, IMG_1234, PXL_2026..., códigos tipo uuid).
+// Detecta el código aunque tenga delante la categoría ("Amarillis 1000348625").
+const esNombreCodigo = n => {
+  const t = String(n || '').trim()
+  if (/^[0-9a-f]{8}[\s_-]?[0-9a-f]{4}/i.test(t)) return true
+  return t.split(/[\s]+/).some(w => /^(?:(?:IMG|PXL|DSC|DSCN|WP|MVIMG|PHOTO|FOTO|IMAGE)[_-]?)?[0-9a-f_-]{8,}$/i.test(w) && (w.match(/\d/g) || []).length >= 4)
+}
 const naturalCollator = new Intl.Collator('es', { numeric: true, sensitivity: 'base' })
 
 // ---------- Color de las plantas (detección automática a partir de la foto) ----------
