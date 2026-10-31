@@ -1770,6 +1770,42 @@ function Admin() {
     loadData()
   }
 
+  // Carga masiva de fotos dentro de una compra que ya existe (ej. "Jardín propio · Amarillis").
+  // Cada foto = una planta (nombre = nombre del archivo). Si ya existe una con ese nombre, solo se vincula y no se duplica.
+  async function addBulkPhotosToExistingLote(lote, fileList) {
+    const files = Array.from(fileList || [])
+    if (files.length === 0) return
+    const catId = addToLoteForm.new_plant_category
+    if (!catId) { alert('Primero elige la categoría de las plantas nuevas (en "Selecciona categoría") y luego las fotos.'); return }
+    if (!isOnline()) { alert('Para cargar varias fotos necesitas conexión.'); return }
+    if (!confirm(`Se agregarán ${files.length} planta(s) a la compra #${lote.numero}. ¿Continuar?`)) return
+    setSavingAddToLote(true)
+    let creadas = 0, vinculadas = 0, fallidas = 0
+    const existentes = [...plants]
+    for (const file of files) {
+      const nombre = file.name.replace(/\.[^/.]+$/, '').replace(/[_-]+/g, ' ').trim() || 'Planta sin nombre'
+      const { exacta } = buscarPlantaParecida(nombre, existentes)
+      const image_url = await uploadImage(file)
+      const base = { plant_name: exacta ? exacta.name : nombre, quantity: 1, unit_cost: 0, sale_price: null, image_url, total: 0, proveedor: lote.proveedor || null, status: 'recibido', lote_id: lote.id, fecha_pago: new Date().toISOString(), fecha_recibido: new Date().toISOString() }
+      if (exacta) {
+        const { error } = await supabase.from('compras').insert({ ...base, plant_id: exacta.id })
+        if (error) { fallidas++; continue }
+        await supabase.from('plants').update({ stock: (Number(exacta.stock) || 0) + 1, ...(exacta.image_url ? {} : { image_url }) }).eq('id', exacta.id)
+        vinculadas++
+      } else {
+        const { data: nueva, error: ep } = await supabase.from('plants').insert({ name: nombre, category_id: catId, price: 0, stock: 1, image_url, active: false }).select().single()
+        if (ep || !nueva) { fallidas++; continue }
+        const { error } = await supabase.from('compras').insert({ ...base, plant_id: nueva.id, crea_planta: true })
+        if (error) { await supabase.from('plants').delete().eq('id', nueva.id); fallidas++; continue }
+        existentes.push(nueva)
+        creadas++
+      }
+    }
+    setSavingAddToLote(false)
+    await loadData()
+    alert(`Listo: ${creadas} planta(s) nueva(s), ${vinculadas} vinculada(s) a plantas que ya existían${fallidas ? `, ${fallidas} con error` : ''}.`)
+  }
+
   async function markLotePagado(loteId) {
     if (approvingIds.includes(loteId)) return
     const lineas = compras.filter(c => c.lote_id === loteId && c.status === 'pedido')
@@ -9572,6 +9608,10 @@ function Admin() {
                                   <input placeholder="Precio de compra (opcional)" type="number" step="0.01" value={addToLoteForm.unit_cost} onChange={e => setAddToLoteForm({ ...addToLoteForm, unit_cost: e.target.value })} />
                                   <input placeholder="Precio de venta (opcional)" type="number" step="0.01" value={addToLoteForm.sale_price} onChange={e => setAddToLoteForm({ ...addToLoteForm, sale_price: e.target.value })} />
                                   <input type="file" accept="image/*" onChange={e => setAddToLoteForm({ ...addToLoteForm, file: e.target.files[0] })} />
+                                  <label className="icon-btn-text" style={{ cursor: 'pointer', alignSelf: 'flex-start' }}>
+                                    📸 Cargar varias fotos (una planta por foto, con la categoría elegida arriba)
+                                    <input type="file" accept="image/*" multiple style={{ display: 'none' }} onChange={e => { addBulkPhotosToExistingLote(lote, e.target.files); e.target.value = '' }} />
+                                  </label>
                                   <div className="admin-item-actions">
                                     <button type="button" onClick={() => saveAddToLote(lote)} disabled={savingAddToLote}>
                                       {savingAddToLote ? 'Guardando...' : 'Guardar planta'}
