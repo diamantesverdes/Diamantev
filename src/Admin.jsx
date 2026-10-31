@@ -599,6 +599,8 @@ function Admin() {
   const [intSearch, setIntSearch] = useState('')
   const [intEstadoFilter, setIntEstadoFilter] = useState('all') // 'all' | 'cuarentena' | 'establecida' | 'baja'
   const [intFormOpen, setIntFormOpen] = useState(false)
+  const [intPicker, setIntPicker] = useState(null) // { lado, idx, term }: selector de planta con fotos
+  const [intFocus, setIntFocus] = useState(null) // fila del formulario con el cursor (muestra sugerencias con foto)
   const [intSaving, setIntSaving] = useState(false)
   const [intForm, setIntForm] = useState({ contacto: '', fecha: '', nota: '', entregados: [], recibidos: [] })
   const [carouselModalOpen, setCarouselModalOpen] = useState(false) // pantalla Carrusel
@@ -692,7 +694,7 @@ function Admin() {
 
   function exportTableToExcel(rows) {
     const headers = [
-      'Nombre', 'Categoría', 'Proveedor', 'Precio sugerido', 'Precio', 'Precio con descuento', 'Stock', 'Altura',
+      'Nombre', 'Categoría', 'Proveedor', 'Costo', 'Costo + envío', 'Precio', 'Precio con descuento', 'Stock', 'Altura',
       'Nueva', 'Descuento', 'Próximamente', 'Para revisar', 'Floreció', 'Vendió',
       'N° de compra', 'Fecha de compra', 'N° de venta', 'Fecha de venta',
     ]
@@ -700,6 +702,7 @@ function Admin() {
       r.name,
       r.categoria,
       r.proveedor,
+      r.costoSinEnvio != null ? Number(r.costoSinEnvio.toFixed(2)) : '',
       r.precioSugerido != null ? Number(r.precioSugerido.toFixed(2)) : '',
       Number(r.price.toFixed(2)),
       r.discountPercent > 0 ? Number(r.priceWithDiscount.toFixed(2)) : '',
@@ -1023,6 +1026,9 @@ function Admin() {
     origen: 'cosecha', plant_id: '', category_id: '', nombre: '', es_noid: false,
     proveedor: '', cantidad_semillas: '', fecha: '', price: '',
   })
+  const [sbFormFile, setSbFormFile] = useState(null)
+  const [replanteoForm, setReplanteoForm] = useState(null) // { batchId, fecha, texto, file }
+  const [savingReplanteo, setSavingReplanteo] = useState(false)
   const [sbConvertId, setSbConvertId] = useState(null)
   const [editingSeedBatchId, setEditingSeedBatchId] = useState(null)
   const [sbConvertForm, setSbConvertForm] = useState({ nombre: '', category_id: '', price: '', stock: '' })
@@ -1165,6 +1171,7 @@ function Admin() {
   }, [highlightPlantId, view, loading])
   useBackableModal(storeModalOpen, () => setStoreModalOpen(false))
   useBackableModal(intFormOpen, () => setIntFormOpen(false))
+  useBackableModal(!!intPicker, () => setIntPicker(null))
   // Al salir de Ventas, el formulario de "Nueva venta" se cierra (y se limpia): al volver, solo se abre si tocas el botón
   useEffect(() => {
     if (view !== 'pedidos') { setVentaLoteBuilderOpen(false); setVentaLoteLines([]); setVentaLoteCliente('') }
@@ -2457,6 +2464,11 @@ function Admin() {
         image_url: foto ? foto.photo_url : (fotoNota ? fotoNota.url : null),
         proveedor: sb.proveedor || '',
         marcado_cliente: !!sb.marcado_cliente,
+        costoSemilla: (() => {
+          const cant = Number(sb.cantidad_semillas) || 0
+          const total = (Number(sb.costo) || 0) + (Number(sb.envio1) || 0) + (Number(sb.envio2) || 0) + (Number(sb.varios) || 0)
+          return cant > 0 && total > 0 ? { solo: (Number(sb.costo) || 0) / cant, conEnvio: total / cant } : null
+        })(),
         active: true,
       }
     })
@@ -3093,14 +3105,127 @@ function Admin() {
   // ---------- Intercambios (trueque) ----------
   const hoyISO = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` }
   const plantPorNombre = name => plants.find(p => normalizarBusqueda(p.name) === normalizarBusqueda(String(name || '').trim()))
+  // Al editar, una fila que ya existía y conserva su nombre sigue apuntando a su planta original (aunque luego la hayas renombrado)
+  const resolverPlantaFila = r => {
+    if (r.itemId && r.origPlantId && normalizarBusqueda(String(r.name || '').trim()) === normalizarBusqueda(r.origName || '')) {
+      const orig = plants.find(x => String(x.id) === String(r.origPlantId))
+      if (orig) return orig
+    }
+    return plantPorNombre(r.name)
+  }
 
   function abrirNuevoIntercambio() {
-    setIntForm({ contacto: '', fecha: hoyISO(), nota: '', entregados: [{ name: '', qty: 1 }], recibidos: [{ name: '', qty: 1 }] })
+    setIntForm({ id: null, contacto: '', fecha: hoyISO(), nota: '', entregados: [{ name: '', qty: 1 }], recibidos: [{ name: '', qty: 1 }] })
     setIntFormOpen(true)
+  }
+
+  function abrirEditarIntercambio(i) {
+    const its = intercambioItems.filter(x => x.intercambio_id === i.id)
+    const fila = x => {
+      const pl = plants.find(q => String(q.id) === String(x.plant_id))
+      const nombre = pl ? pl.name : x.plant_name
+      return { itemId: x.id, name: nombre, origName: nombre, qty: x.quantity, origQty: x.quantity, origPlantId: String(x.plant_id) }
+    }
+    setIntForm({
+      id: i.id, contacto: i.contacto || '', fecha: i.fecha || hoyISO(), nota: i.nota || '',
+      entregados: its.filter(x => x.direccion === 'entregado').map(fila),
+      recibidos: its.filter(x => x.direccion === 'recibido').map(fila),
+    })
+    setIntFormOpen(true)
+  }
+
+  // Guarda los cambios de un intercambio ya registrado. Se recalcula el stock con la diferencia:
+  // lo entregado antes vuelve al inventario y lo entregado ahora sale; lo recibido solo cuenta (suma) si su línea está "Establecida".
+  async function editarIntercambio() {
+    if (intSaving) return
+    const inter = intercambios.find(x => x.id === intForm.id)
+    if (!inter) { alert('No se encontró el intercambio.'); return }
+    const contacto = intForm.contacto.trim()
+    if (!contacto) { alert('Escribe el nombre de la persona o contacto.'); return }
+    const armar = r => ({ itemId: r.itemId || null, name: r.name.trim(), qty: Math.floor(Number(r.qty) || 0), planta: resolverPlantaFila(r) })
+    const entregados = intForm.entregados.filter(r => r.name.trim()).map(armar)
+    const recibidos = intForm.recibidos.filter(r => r.name.trim()).map(armar)
+    if (entregados.length === 0 && recibidos.length === 0) { alert('Deja al menos una planta en el intercambio.'); return }
+    const sinPlanta = entregados.find(r => !r.planta)
+    if (sinPlanta) { alert(`"${sinPlanta.name}" no existe en tu galería. En "Lo que entregué" elige plantas que ya tengas.`); return }
+    if (entregados.concat(recibidos).some(r => r.qty <= 0)) { alert('Cada planta necesita una cantidad mayor a 0.'); return }
+
+    const old = intercambioItems.filter(x => x.intercambio_id === inter.id)
+    const oldPorId = new Map(old.map(x => [x.id, x]))
+    const efecto = (dir, estado, qty) => (dir === 'entregado' ? -qty : (estado === 'establecida' ? qty : 0))
+    const delta = new Map() // plantId -> cambio neto en el stock
+    const suma = (pid, d) => { if (d) delta.set(String(pid), (delta.get(String(pid)) || 0) + d) }
+    old.forEach(x => suma(x.plant_id, -efecto(x.direccion, x.estado, x.quantity))) // se deshace lo anterior
+    entregados.forEach(r => suma(r.planta.id, efecto('entregado', null, r.qty)))
+    recibidos.forEach(r => { const antes = r.itemId ? oldPorId.get(r.itemId) : null; if (r.planta && antes) suma(r.planta.id, efecto('recibido', antes.estado, r.qty)) })
+    for (const [pid, d] of delta) {
+      const pl = plants.find(x => String(x.id) === pid)
+      if (pl && (Number(pl.stock) || 0) + d < 0) { alert(`No alcanza el stock de "${pl.name}": tienes ${pl.stock || 0} y este cambio necesita ${-d} más.`); return }
+    }
+
+    setIntSaving(true)
+    try {
+      const { error: e0 } = await supabase.from('intercambios').update({ fecha: intForm.fecha || hoyISO(), contacto, nota: intForm.nota.trim() || null }).eq('id', inter.id)
+      if (e0) throw new Error(e0.message)
+      const creadas = new Map() // plantas nuevas creadas en esta edición (aún no están en la lista cargada)
+      const crearPlanta = async nombre => {
+        const { data: nueva, error: e3 } = await supabase.from('plants').insert({ name: nombre, category_id: null, price: 0, stock: 0, image_url: null, active: false, flagged: false }).select().single()
+        if (e3 || !nueva) throw new Error(`No se pudo crear "${nombre}": ${e3 ? e3.message : ''}`)
+        creadas.set(String(nueva.id), nueva)
+        return nueva
+      }
+      const mantenidos = new Set()
+      const inserts = []
+      for (const [dir, lista] of [['entregado', entregados], ['recibido', recibidos]]) {
+        for (const r of lista) {
+          let pl = r.planta
+          if (!pl) pl = await crearPlanta(r.name) // solo pasa en "recibí": planta nueva, oculta y con stock 0
+          if (r.itemId && oldPorId.has(r.itemId)) {
+            mantenidos.add(r.itemId)
+            const antes = oldPorId.get(r.itemId)
+            if (String(antes.plant_id) !== String(pl.id) || antes.quantity !== r.qty) {
+              const { error: e1 } = await supabase.from('intercambio_items').update({ plant_id: String(pl.id), plant_name: pl.name, quantity: r.qty }).eq('id', r.itemId)
+              if (e1) throw new Error(e1.message)
+            }
+            if (dir === 'recibido' && !r.planta && antes.estado === 'establecida') suma(pl.id, r.qty)
+          } else {
+            inserts.push(dir === 'entregado'
+              ? { intercambio_id: inter.id, direccion: 'entregado', plant_id: String(pl.id), plant_name: pl.name, quantity: r.qty }
+              : { intercambio_id: inter.id, direccion: 'recibido', plant_id: String(pl.id), plant_name: pl.name, quantity: r.qty, estado: 'cuarentena', estado_fecha: new Date().toISOString() })
+          }
+        }
+      }
+      if (inserts.length) {
+        const { error: e2 } = await supabase.from('intercambio_items').insert(inserts)
+        if (e2) throw new Error(e2.message)
+      }
+      const borrar = old.filter(x => !mantenidos.has(x.id)).map(x => x.id)
+      if (borrar.length) {
+        const { error: e5 } = await supabase.from('intercambio_items').delete().in('id', borrar)
+        if (e5) throw new Error(e5.message)
+      }
+      for (const [pid, d] of delta) {
+        const pl = plants.find(x => String(x.id) === pid) || creadas.get(pid)
+        if (!pl) continue
+        const nuevoStock = Math.max(0, (Number(pl.stock) || 0) + d)
+        const patch = { stock: nuevoStock }
+        if (d < 0 && pl.stock_disponible != null) patch.stock_disponible = Math.min(Number(pl.stock_disponible) || 0, nuevoStock)
+        const { error: e4 } = await supabase.from('plants').update(patch).eq('id', pl.id)
+        if (e4) throw new Error(`No se pudo ajustar el stock de "${pl.name}": ${e4.message}`)
+      }
+      setIntFormOpen(false)
+      alert(`Intercambio ${folioInt(inter)} actualizado.`)
+    } catch (err) {
+      alert('No se pudo guardar el cambio: ' + (err instanceof Error ? err.message : String(err)) + '\n\nRevisa el intercambio: puede haberse guardado solo en parte.')
+    } finally {
+      setIntSaving(false)
+      await loadData()
+    }
   }
 
   async function guardarIntercambio() {
     if (intSaving) return
+    if (intForm.id) return editarIntercambio()
     const contacto = intForm.contacto.trim()
     if (!contacto) { alert('Escribe el nombre de la persona o contacto.'); return }
     const armar = r => ({ name: r.name.trim(), qty: Math.floor(Number(r.qty) || 0), planta: plantPorNombre(r.name) })
@@ -4076,6 +4201,45 @@ function Admin() {
 
   function resetSbForm() {
     setSbForm({ origen: 'cosecha', plant_id: '', category_id: '', nombre: '', es_noid: false, proveedor: '', cantidad_semillas: '', fecha: '', price: '' })
+    setSbFormFile(null)
+  }
+
+  // Foto del lote de semillas: se guarda como bloque de foto en las notas del lote (sin columnas nuevas);
+  // la primera foto es la que se ve en Galería y Tabla.
+  async function addSeedBatchPhoto(batch, file, comoPrincipal = true) {
+    if (!file) return
+    const url = await uploadImage(file, 'category-notes')
+    if (!url) return
+    const actuales = Array.isArray(batch.content_blocks) ? batch.content_blocks : []
+    const nuevo = { type: 'photo', url, at: new Date().toISOString() }
+    const bloques = comoPrincipal ? [nuevo, ...actuales] : [...actuales, nuevo]
+    const { error } = await supabase.from('seed_batches').update({ content_blocks: bloques }).eq('id', batch.id)
+    if (error) { alert('No se pudo guardar la foto: ' + error.message); return }
+    loadData()
+  }
+
+  async function saveReplanteo() {
+    const f = replanteoForm
+    if (!f) return
+    const sb = seedBatches.find(b => b.id === f.batchId)
+    if (!sb) return
+    if (!f.texto.trim() && !f.file) { alert('Escribe qué está pasando con el replanteo (o agrega una foto)'); return }
+    setSavingReplanteo(true)
+    const at = new Date((f.fecha || localDateISO()) + 'T12:00:00').toISOString()
+    const nuevos = []
+    nuevos.push({ type: 'text', kind: 'replanteo', content: `🪴 Replanteo — ${f.texto.trim() || '(sin detalle)'}`, at })
+    if (f.file) {
+      const url = await uploadImage(f.file, 'category-notes')
+      if (url) nuevos.push({ type: 'photo', url, at })
+    }
+    const bloques = [...(Array.isArray(sb.content_blocks) ? sb.content_blocks : []), ...nuevos]
+    const patch = { content_blocks: bloques }
+    if (sb.estado === 'semillas' || sb.estado === 'sembrado') patch.estado = 'en_crecimiento'
+    const { error } = await supabase.from('seed_batches').update(patch).eq('id', sb.id)
+    setSavingReplanteo(false)
+    if (error) { alert('No se pudo guardar el replanteo: ' + error.message); return }
+    setReplanteoForm(null)
+    loadData()
   }
 
   function onSbFormPlantChange(plantId) {
@@ -4088,7 +4252,13 @@ function Admin() {
     if (!cant || cant <= 0) { alert('Ingresa la cantidad de semillas'); return }
     if (sbForm.origen === 'cosecha' && !sbForm.plant_id) { alert('Elige de qué planta cosechaste'); return }
     if (!sbForm.es_noid && !sbForm.category_id && sbForm.origen !== 'cosecha') { alert('Elige una categoría o marca como NOID'); return }
+    let content_blocks = []
+    if (sbFormFile) {
+      const url = await uploadImage(sbFormFile, 'category-notes')
+      if (url) content_blocks = [{ type: 'photo', url, at: new Date().toISOString() }]
+    }
     const { error } = await supabase.from('seed_batches').insert({
+      content_blocks,
       origen: sbForm.origen,
       plant_id: sbForm.origen === 'cosecha' ? sbForm.plant_id : null,
       category_id: sbForm.es_noid ? null : (sbForm.category_id || null),
@@ -6004,8 +6174,9 @@ function Admin() {
                                             const expanded = term !== '' || expandedCategoryGroups.has(parent.id)
                                             result.push({
                                               value: parent.id,
-                                              label: `${expanded ? '▾' : '▸'} ${parent.emoji} ${parent.name} (${children.length})`,
+                                              label: `${parent.emoji} ${parent.name} — todas (${children.length})`,
                                               isGroupHeader: true,
+                                              expanded,
                                             })
                                             if (expanded) {
                                               const childrenToShow = parentMatches ? children : matchingChildren
@@ -6077,10 +6248,18 @@ function Admin() {
                                         <div
                                           key={opt.value}
                                           className={config.currentValue === opt.value ? 'sub-sheet-option selected' : 'sub-sheet-option'}
-                                          onClick={() => opt.isGroupHeader ? toggleCategoryGroupExpanded(opt.value) : selectAndClose(activeSelector, opt.value)}
-                                          style={{ cursor: 'pointer', fontWeight: opt.isGroupHeader ? 700 : undefined }}
+                                          onClick={() => selectAndClose(activeSelector, opt.value)}
+                                          style={{ cursor: 'pointer', fontWeight: opt.isGroupHeader ? 700 : undefined, display: opt.isGroupHeader ? 'flex' : undefined, alignItems: 'center', justifyContent: 'space-between', gap: 8 }}
                                         >
-                                          {!opt.isGroupHeader && config.currentValue === opt.value ? '✓ ' : ''}<span>{opt.label}</span>
+                                          <span>{config.currentValue === opt.value ? '✓ ' : ''}{opt.label}</span>
+                                          {opt.isGroupHeader && (
+                                            <button
+                                              type="button"
+                                              aria-label={opt.expanded ? 'Ocultar subcategorías' : 'Ver subcategorías'}
+                                              onClick={e => { e.stopPropagation(); toggleCategoryGroupExpanded(opt.value) }}
+                                              style={{ border: 'none', background: 'transparent', fontSize: 16, padding: '2px 10px', cursor: 'pointer' }}
+                                            >{opt.expanded ? '▾' : '▸'}</button>
+                                          )}
                                         </div>
                                       ))}
                                       {config.options.length === 1 && (
@@ -6563,6 +6742,20 @@ function Admin() {
                               </p>
                             )}
                             {renderMoneyCard({ vendido: vendidoSb, cobrado: cobradoSb, comprado: costoTotal, extra: stockSb > 0 && sb.price ? <div style={{ fontSize: 12.5 }}>📦 Stock restante: {stockSb} × {money(sb.price)} = {money(stockSb * Number(sb.price))} (si se vende todo)</div> : null })}
+                            {(() => {
+                              const reps = blocks.filter(b => b && b.kind === 'replanteo').sort((a, b) => new Date(b.at) - new Date(a.at))
+                              if (reps.length === 0) return null
+                              return (
+                                <div style={{ margin: '8px 0', padding: 8, background: '#f3f8ee', borderRadius: 8 }}>
+                                  <strong>🪴 Replanteos</strong>
+                                  {reps.map((b, i) => (
+                                    <p key={i} className="historial-entry" style={{ margin: '4px 0 0' }}>
+                                      <span style={{ color: '#8a8a7a', fontSize: 11.5 }}>{new Date(b.at).toLocaleDateString()}</span> · {b.content.replace(/^🪴 Replanteo — /, '')}
+                                    </p>
+                                  ))}
+                                </div>
+                              )
+                            })()}
                             <p className="historial-empty">Al guardar una venta con este lote, el stock se descuenta del lote. Cuando ya sean plantitas, usa 🪴 Convertir en planta en Ingresos → Semillas.</p>
                             <div className="admin-item-actions" style={{ marginTop: 8, flexWrap: 'wrap' }}>
                               <button type="button" onClick={() => sellSeedBatch(sb)} disabled={stockSb <= 0}>
@@ -6570,6 +6763,11 @@ function Admin() {
                               </button>
                               <button type="button" onClick={() => sembrarSemillas(sb)} disabled={stockSb <= 0}>🌱 Sembrar semillas</button>
                               <button type="button" onClick={() => anotarGerminacion(sb)}>🌿 Anotar germinación</button>
+                              <button type="button" onClick={() => setReplanteoForm({ batchId: sb.id, fecha: localDateISO(), texto: '', file: null })}>🪴 Replanteo</button>
+                              <label className="icon-btn-text" style={{ cursor: 'pointer' }}>
+                                📷 Agregar foto
+                                <input type="file" accept="image/*" style={{ display: 'none' }} onChange={e => { addSeedBatchPhoto(sb, e.target.files[0]); e.target.value = '' }} />
+                              </label>
                               {sb.en_venta && (
                                 <button type="button" onClick={() => { toggleSeedBatchEnVenta(sb, false); closeSheet() }} className="danger">
                                   Quitar de la venta
@@ -6583,7 +6781,7 @@ function Admin() {
                           <div className="historial-block">
                             <h4>🖼️ Fotos</h4>
                             {fotosDelLote.length === 0 ? (
-                              <p className="historial-empty">Todavía no hay fotos. Se agregan desde las notas del lote (Ingresos → Semillas).</p>
+                              <p className="historial-empty">Todavía no hay fotos. Usa "📷 Agregar foto" en Resumen o en Ingresos → Semillas.</p>
                             ) : (
                               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: 8 }}>
                                 {fotosDelLote.map((url, i) => <img key={i} src={url} alt="" style={{ width: '100%', aspectRatio: '1 / 1', objectFit: 'cover', borderRadius: 8 }} />)}
@@ -6653,6 +6851,35 @@ function Admin() {
                   document.body
                 )
               })()}
+
+              {replanteoForm && createPortal(
+                <div className="admin-sheet-overlay" onClick={() => setReplanteoForm(null)} style={{ position: 'fixed', inset: 0, zIndex: 3200, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <div className="free-note-modal" onClick={e => e.stopPropagation()} style={{ padding: 16, maxWidth: 420, width: '92%', display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    <h4 style={{ margin: 0 }}>🪴 Replanteo — {(() => { const b = seedBatches.find(x => x.id === replanteoForm.batchId); return b ? seedBatchRawName(b) : '' })()}</h4>
+                    <label className="seed-form-field-label">
+                      Fecha
+                      <input type="date" value={replanteoForm.fecha} onChange={e => setReplanteoForm(f => ({ ...f, fecha: e.target.value }))} />
+                    </label>
+                    <textarea
+                      className="note-sheet-textarea"
+                      rows={4}
+                      autoFocus
+                      placeholder="¿Qué está pasando? (ej. pasé 20 plántulas a bandeja, 5 no sobrevivieron...)"
+                      value={replanteoForm.texto}
+                      onChange={e => setReplanteoForm(f => ({ ...f, texto: e.target.value }))}
+                    />
+                    <label className="seed-form-field-label">
+                      📷 Foto (opcional)
+                      <input type="file" accept="image/*" onChange={e => setReplanteoForm(f => ({ ...f, file: e.target.files[0] || null }))} />
+                    </label>
+                    <div className="admin-item-actions">
+                      <button type="button" onClick={saveReplanteo} disabled={savingReplanteo}>{savingReplanteo ? 'Guardando…' : 'Guardar replanteo'}</button>
+                      <button type="button" onClick={() => setReplanteoForm(null)}>Cancelar</button>
+                    </div>
+                  </div>
+                </div>,
+                document.body
+              )}
 
               {photoModalPlantId && (() => {
                 const p = plants.find(pl => pl.id === photoModalPlantId)
@@ -6788,8 +7015,32 @@ function Admin() {
                                 onBlur={e => updatePlantName(p.id, e.target.value)}
                                 style={{ width: '100%', fontWeight: 700, fontSize: '1.05rem', marginBottom: 8 }}
                               />
+                              {(() => {
+                                const unidades = comprasConTotal.reduce((sum, c) => sum + (Number(c.quantity) || 0), 0)
+                                const costoSolo = comprasConTotal.reduce((sum, c) => sum + (Number(c.unit_cost) || 0) * (Number(c.quantity) || 0), 0)
+                                const costoU = unidades > 0 ? costoSolo / unidades : null
+                                const costoEnvioU = unidades > 0 ? compradoP / unidades : null
+                                const desc = Number(p.discount_percent) || 0
+                                const venta = Number(p.price) || 0
+                                const conDesc = desc > 0 ? venta * (1 - desc / 100) : null
+                                const celda = (titulo, valor, nota) => (
+                                  <div style={{ flex: '1 1 45%', minWidth: 120, background: '#faf6ec', border: '1px solid #e6dcc3', borderRadius: 8, padding: '6px 8px' }}>
+                                    <div style={{ fontSize: 11, color: '#7a7060' }}>{titulo}</div>
+                                    <div style={{ fontWeight: 700 }}>{valor == null ? '—' : money(valor)}</div>
+                                    {nota && <div style={{ fontSize: 10.5, color: '#8a8a7a' }}>{nota}</div>}
+                                  </div>
+                                )
+                                return (
+                                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
+                                    {celda('💰 Costo (lo que pagué)', costoU, 'por unidad')}
+                                    {celda('🚚 Costo + envíos', costoEnvioU, 'por unidad')}
+                                    {celda('🏷️ Precio de venta', venta || null)}
+                                    {celda('🔻 Con descuento', conDesc, desc > 0 ? `−${desc}%` : 'sin descuento')}
+                                  </div>
+                                )
+                              })()}
                               <div className="plant-quick-edit-prices">
-                                <label>$<input type="number" step="0.01" defaultValue={p.price} onBlur={e => updatePrice(p.id, Number(e.target.value))} /></label>
+                                <label>Venta $<input type="number" step="0.01" defaultValue={p.price} onBlur={e => updatePrice(p.id, Number(e.target.value))} /></label>
                                 <label>Altura: <input key={p.id} type="text" placeholder="ej: 90 cm" defaultValue={p.height || ''} onBlur={e => updatePlantHeight(p.id, e.target.value)} style={{ width: 80 }} /></label>
                                 <label>Descuento: <input key={p.id} type="number" min="0" max="100" placeholder="0" defaultValue={p.discount_percent || ''} onBlur={e => updatePlantDiscount(p.id, e.target.value)} style={{ width: 60 }} />%</label>
                               </div>
@@ -6808,15 +7059,69 @@ function Admin() {
                             </div>
 
                             <div className="plant-quick-edit" style={{ marginTop: 12 }}>
+                              <h4 style={{ margin: '0 0 8px', fontSize: '0.9rem', color: 'var(--sage-dark)' }}>
+                                🌱 Hijos <span style={{ fontWeight: 400, color: '#7a7060' }}>· {hijosDisponibles} en desarrollo · stock {p.stock || 0}</span>
+                              </h4>
+                              <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                                <input type="number" min="1" inputMode="numeric" placeholder="Cantidad" value={newPupCantidad} onChange={e => setNewPupCantidad(e.target.value)} style={{ width: 90 }} />
+                                <button type="button" onClick={() => addPupRegistro(p.id, localDateISO(), newPupCantidad)}>🌱 Separé hijos hoy</button>
+                                <button type="button" disabled={hijosDisponibles <= 0}
+                                  onClick={() => { setPhotoModalSection('hijos'); setShowMoverPupsForm(true); if (photoModalSheetRef.current) photoModalSheetRef.current.scrollTop = 0 }}>
+                                  ➡️ Pasar a stock
+                                </button>
+                              </div>
+                              <p style={{ fontSize: 11, color: '#888', margin: '6px 0 0' }}>
+                                Los hijos no suman al stock hasta que los pases a stock.{' '}
+                                <button type="button" className="historial-link-btn" onClick={() => { setPhotoModalSection('hijos'); if (photoModalSheetRef.current) photoModalSheetRef.current.scrollTop = 0 }}>
+                                  Ver historial ({pupsDeEstaPlanta.length})
+                                </button>
+                              </p>
+                            </div>
+
+                            <div className="plant-quick-edit" style={{ marginTop: 12 }}>
                               <h4 style={{ margin: '0 0 8px', fontSize: '0.9rem', color: 'var(--sage-dark)' }}>📦 Compra e inventario</h4>
                               {!invDraft || !inv ? (
                                 <p className="status-msg">Cargando datos de la planta…</p>
                               ) : (
                                 <>
+                                  {(() => {
+                                    const intsPlanta = intercambioItems.filter(x => String(x.plant_id) === String(p.id))
+                                    if (intsPlanta.length === 0) return null
+                                    return (
+                                      <div style={{ margin: '2px 0 10px', padding: '8px 10px', borderRadius: 10, background: '#FFF8E6', border: '1px solid #E6C76A' }}>
+                                        <div style={{ fontSize: 12, fontWeight: 700, color: '#5B4636', marginBottom: 4 }}>🔄 Intercambios de esta planta</div>
+                                        {intsPlanta.map(x => {
+                                          const cab = intercambios.find(c => c.id === x.intercambio_id)
+                                          const est = x.direccion === 'recibido' ? (INT_ESTADOS[x.estado] || INT_ESTADOS.cuarentena) : null
+                                          return (
+                                            <div key={x.id} style={{ fontSize: 13, padding: '3px 0', display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'baseline' }}>
+                                              <span>
+                                                {x.direccion === 'recibido' ? '📥 Ingresó por intercambio' : '📤 Entregada en intercambio'} {cab ? <b>{folioInt(cab)}</b> : null}
+                                                {cab && cab.contacto ? ` con ${cab.contacto}` : ''} · ×{x.quantity}
+                                                {cab && cab.fecha ? ` · ${new Date(`${cab.fecha}T12:00:00`).toLocaleDateString()}` : ''}
+                                                {est ? ` · ${est.icon} ${est.corto}` : ''}
+                                              </span>
+                                              <button type="button" className="historial-link-btn"
+                                                onClick={() => { if (cab) setIntSearch(folioInt(cab)); setIntEstadoFilter('all'); setPhotoModalPlantId(null); setPhotoModalMenuOpen(false); setPhotoModalSection('fotos'); setView('intercambios') }}>
+                                                Ver
+                                              </button>
+                                            </div>
+                                          )
+                                        })}
+                                        {intsPlanta.some(x => x.direccion === 'recibido') && inv.compras.length === 0 && (
+                                          <p style={{ fontSize: 11, color: '#888', margin: '4px 0 0' }}>Esta planta ingresó por intercambio, no por compra.</p>
+                                        )}
+                                      </div>
+                                    )
+                                  })()}
                                   <div style={{ fontSize: 12, fontWeight: 700, color: '#5B4636', margin: '2px 0' }}>Datos de compra</div>
                                   {inv.compras.length === 0 ? (
                                     <>
-                                      <p className="historial-empty" style={{ margin: '4px 0' }}>Esta planta todavía no tiene una compra registrada.</p>
+                                      {intercambioItems.some(x => x.direccion === 'recibido' && String(x.plant_id) === String(p.id)) ? (
+                                        <p className="historial-empty" style={{ margin: '4px 0' }}>Sin compra: esta planta llegó por intercambio.</p>
+                                      ) : (
+                                        <p className="historial-empty" style={{ margin: '4px 0' }}>Esta planta todavía no tiene una compra registrada.</p>
+                                      )}
                                       <button
                                         type="button"
                                         className="historial-link-btn"
@@ -7939,24 +8244,59 @@ function Admin() {
                   </button>
                 )
                 const lineaForm = (lado, r, idx) => {
-                  const pl = plantPorNombre(r.name)
+                  const pl = resolverPlantaFila(r)
                   const setRow = patch => setIntForm(f => ({ ...f, [lado]: f[lado].map((x, j) => (j === idx ? { ...x, ...patch } : x)) }))
                   let pista = ''
                   let colorPista = '#7a7060'
                   if (r.name.trim()) {
                     if (lado === 'entregados') {
                       if (!pl) { pista = '⚠️ No existe en tu galería'; colorPista = '#b03434' }
-                      else if ((Number(pl.stock) || 0) < (Number(r.qty) || 0)) { pista = `⚠️ Solo tienes ${pl.stock || 0} en stock`; colorPista = '#b03434' }
-                      else pista = `Stock: ${pl.stock || 0}`
+                      else {
+                        // al editar, lo que esta misma línea ya entregó cuenta como disponible
+                        const disp = (Number(pl.stock) || 0) + (r.itemId && r.origPlantId === String(pl.id) ? (Number(r.origQty) || 0) : 0)
+                        if (disp < (Number(r.qty) || 0)) { pista = `⚠️ Solo tienes ${disp} disponible${disp === 1 ? '' : 's'}`; colorPista = '#b03434' }
+                        else pista = `Stock: ${pl.stock || 0}${r.itemId ? ` (+${Number(r.origQty) || 0} de este intercambio)` : ''}`
+                      }
                     } else pista = pl ? `Ya existe (stock ${pl.stock || 0}). Lo recibido no se suma hasta que quede Establecida.` : '🌱 Planta nueva: se crea oculta y sin stock.'
                   }
+                  const clave = `${lado}-${idx}`
+                  const escrito = r.name.trim()
+                  const sugerencias = (intFocus === clave && escrito && !(pl && normalizarBusqueda(pl.name) === normalizarBusqueda(escrito)))
+                    ? plants.filter(x => coincideBusqueda(x.name, escrito)).sort((a, b) => String(a.name).localeCompare(String(b.name), 'es', { numeric: true, sensitivity: 'base' })).slice(0, 6)
+                    : []
+                  const miniatura = (pl2, size) => (pl2 && pl2.image_url
+                    ? <img src={pl2.image_url} alt="" loading="lazy" style={{ width: size, height: size, objectFit: 'cover', borderRadius: 8, flexShrink: 0, border: '1px solid #ddd' }} />
+                    : <div style={{ width: size, height: size, borderRadius: 8, flexShrink: 0, border: '1px dashed #ccc', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: size * 0.45, color: '#bbb' }}>🌱</div>)
                   return (
-                    <div key={idx} style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 8, flexWrap: 'wrap' }}>
-                      <input list="int-plantas" placeholder={lado === 'entregados' ? 'Planta que entregas' : 'Planta que recibes'} value={r.name}
-                        onChange={e => setRow({ name: e.target.value })} style={{ flex: '1 1 150px', minWidth: 0, boxSizing: 'border-box' }} />
+                    <div key={idx} style={{ position: 'relative', display: 'flex', gap: 6, alignItems: 'center', marginBottom: 8, flexWrap: 'wrap' }}>
+                      {pl ? miniatura(pl, 40) : null}
+                      <input placeholder={lado === 'entregados' ? 'Planta que entregas' : 'Planta que recibes'} value={r.name}
+                        onChange={e => setRow({ name: e.target.value })}
+                        onFocus={() => setIntFocus(clave)}
+                        onBlur={() => setTimeout(() => setIntFocus(f => (f === clave ? null : f)), 200)}
+                        style={{ flex: '1 1 130px', minWidth: 0, boxSizing: 'border-box' }} />
+                      <button type="button" aria-label="Elegir planta con fotos" title="Elegir con fotos"
+                        onClick={() => setIntPicker({ lado, idx, term: '' })}
+                        style={{ width: 36, height: 36, minHeight: 0, padding: 0, fontSize: 18, borderRadius: 10, boxShadow: 'none', cursor: 'pointer' }}>🖼️</button>
                       <input type="number" inputMode="numeric" min="1" value={r.qty} onChange={e => setRow({ qty: e.target.value })} style={{ width: 62, boxSizing: 'border-box' }} aria-label="Cantidad" />
                       <button type="button" aria-label="Quitar fila" onClick={() => setIntForm(f => ({ ...f, [lado]: f[lado].filter((_, j) => j !== idx) }))}
                         style={{ width: 28, border: 'none', background: 'none', boxShadow: 'none', padding: 0, minHeight: 0, fontSize: 16, color: '#b03434', cursor: 'pointer' }}>✕</button>
+                      {sugerencias.length > 0 && (
+                        <div style={{ flex: '1 0 100%', background: '#fff', border: '1px solid #d8cfb8', borderRadius: 10, overflow: 'hidden', boxShadow: '0 4px 12px rgba(0,0,0,0.12)' }}>
+                          {sugerencias.map(x => (
+                            <button key={x.id} type="button"
+                              onMouseDown={e => e.preventDefault()}
+                              onClick={() => { setRow({ name: x.name }); setIntFocus(null) }}
+                              style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', textAlign: 'left', background: '#fff', border: 'none', borderBottom: '1px solid #f0eadb', borderRadius: 0, boxShadow: 'none', padding: '6px 8px', minHeight: 0, color: '#3b3b32', cursor: 'pointer' }}>
+                              {miniatura(x, 44)}
+                              <span style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+                                <span style={{ fontWeight: 600, fontSize: 14, lineHeight: 1.2 }}>{x.name}</span>
+                                <small style={{ color: '#7a7060' }}>Stock {x.stock || 0}</small>
+                              </span>
+                            </button>
+                          ))}
+                        </div>
+                      )}
                       {pista && <small style={{ flex: '1 0 100%', color: colorPista }}>{pista}</small>}
                     </div>
                   )
@@ -8018,7 +8358,10 @@ function Admin() {
                                     </div>
                                   )
                                 })}
-                                <button type="button" onClick={() => eliminarIntercambio(i)} style={{ marginTop: 10, background: '#fff', color: '#b03434', border: '1px solid #b03434' }}>🗑️ Eliminar intercambio</button>
+                                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 10 }}>
+                                  <button type="button" onClick={() => abrirEditarIntercambio(i)} style={{ background: '#fff', color: '#4a5d3a', border: '1px solid #4a5d3a' }}>✏️ Editar intercambio</button>
+                                  <button type="button" onClick={() => eliminarIntercambio(i)} style={{ background: '#fff', color: '#b03434', border: '1px solid #b03434' }}>🗑️ Eliminar intercambio</button>
+                                </div>
                               </div>
                             </div>
                           )
@@ -8026,12 +8369,54 @@ function Admin() {
                       </>
                     )}
 
+                    {intPicker && createPortal(
+                      (() => {
+                        const lista = plants
+                          .filter(x => coincideBusqueda(x.name, intPicker.term))
+                          .sort((a, b) => String(a.name).localeCompare(String(b.name), 'es', { numeric: true, sensitivity: 'base' }))
+                        const elegir = x => {
+                          const { lado, idx } = intPicker
+                          setIntForm(f => ({ ...f, [lado]: f[lado].map((q, j) => (j === idx ? { ...q, name: x.name } : q)) }))
+                          setIntPicker(null)
+                        }
+                        return (
+                          <div className="admin-sheet-overlay" onClick={() => setIntPicker(null)}
+                            style={{ position: 'fixed', inset: 0, zIndex: 3100, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                            <div className="free-note-modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 520, width: '100%', height: '88vh', display: 'flex', flexDirection: 'column' }}>
+                              <div className="free-note-modal-header">
+                                <h4>🖼️ Elegir planta ({lista.length})</h4>
+                                <button type="button" className="modal-close-btn" onClick={() => setIntPicker(null)}>✕</button>
+                              </div>
+                              <input autoFocus className="order-search" placeholder="🔍 Buscar por nombre…" value={intPicker.term}
+                                onChange={e => setIntPicker(v => ({ ...v, term: e.target.value }))}
+                                style={{ width: '100%', maxWidth: 'none', boxSizing: 'border-box', marginBottom: 8 }} />
+                              <div style={{ overflowY: 'auto', flex: 1, display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(104px, 1fr))', gap: 8, alignContent: 'start', paddingBottom: 8 }}>
+                                {lista.length === 0 && <p className="status-msg" style={{ gridColumn: '1 / -1' }}>No se encontraron plantas.</p>}
+                                {lista.slice(0, 150).map(x => (
+                                  <button key={x.id} type="button" onClick={() => elegir(x)}
+                                    style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, padding: 6, background: '#fff', border: '1px solid #E8DFC8', borderRadius: 10, boxShadow: 'none', minHeight: 0, color: '#3b3b32', cursor: 'pointer' }}>
+                                    {x.image_url
+                                      ? <img src={x.image_url} alt="" loading="lazy" style={{ width: '100%', aspectRatio: '1', objectFit: 'cover', borderRadius: 8 }} />
+                                      : <div style={{ width: '100%', aspectRatio: '1', borderRadius: 8, border: '1px dashed #ccc', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 26, color: '#bbb' }}>🌱</div>}
+                                    <span style={{ fontSize: 12, fontWeight: 600, lineHeight: 1.15, textAlign: 'center', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{x.name}</span>
+                                    <small style={{ color: '#7a7060' }}>Stock {x.stock || 0}</small>
+                                  </button>
+                                ))}
+                                {lista.length > 150 && <p className="status-msg" style={{ gridColumn: '1 / -1' }}>Mostrando 150. Escribe para acotar la búsqueda.</p>}
+                              </div>
+                            </div>
+                          </div>
+                        )
+                      })(),
+                      document.body
+                    )}
+
                     {intFormOpen && createPortal(
                       <div className="admin-sheet-overlay" onClick={() => setIntFormOpen(false)}
                         style={{ position: 'fixed', inset: 0, zIndex: 3000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                         <div className="free-note-modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 480, width: '100%', maxHeight: '90vh', overflowY: 'auto' }}>
                           <div className="free-note-modal-header">
-                            <h4>🔄 Nuevo intercambio</h4>
+                            <h4>{intForm.id ? '✏️ Editar intercambio' : '🔄 Nuevo intercambio'}</h4>
                             <button type="button" className="modal-close-btn" onClick={() => setIntFormOpen(false)}>✕</button>
                           </div>
                           <datalist id="int-plantas">{plants.map(pl => <option key={pl.id} value={pl.name} />)}</datalist>
@@ -8051,7 +8436,7 @@ function Admin() {
 
                           <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
                             <button type="button" onClick={() => setIntFormOpen(false)}>Cancelar</button>
-                            <button type="button" className="save-note-btn-inline" disabled={intSaving} onClick={guardarIntercambio} style={{ flex: 1 }}>{intSaving ? 'Guardando…' : '💾 Guardar intercambio'}</button>
+                            <button type="button" className="save-note-btn-inline" disabled={intSaving} onClick={guardarIntercambio} style={{ flex: 1 }}>{intSaving ? 'Guardando…' : (intForm.id ? '💾 Guardar cambios' : '💾 Guardar intercambio')}</button>
                           </div>
                         </div>
                       </div>,
@@ -8198,6 +8583,7 @@ function Admin() {
                   const compraDePlanta = compras.find(c => c.plant_id === p.id)
                   const loteDePlanta = compraDePlanta ? lotes.find(l => l.id === compraDePlanta.lote_id) : null
                   let precioSugerido = null
+                  let costoSinEnvio = compraDePlanta && Number(compraDePlanta.unit_cost) > 0 ? Number(compraDePlanta.unit_cost) : null
                   if (compraDePlanta && loteDePlanta) {
                     const lineasDelLote = compras.filter(c => c.lote_id === loteDePlanta.id)
                     const { lineas: lineasProrrateadas } = loteProration(loteDePlanta, lineasDelLote)
@@ -8206,6 +8592,7 @@ function Admin() {
                       precioSugerido = miLinea._lineTotal / Number(miLinea.quantity)
                     }
                   }
+                  if (p.isSeed && p.costoSemilla != null) { costoSinEnvio = p.costoSemilla.solo; precioSugerido = p.costoSemilla.conEnvio }
                   const decrementoDePlanta = decrementos.find(d => d.plant_id === p.id)
                   const ventaLoteDePlanta = decrementoDePlanta ? ventaLotes.find(l => l.id === decrementoDePlanta.lote_id) : null
                   const orderDePlanta = orders.find(o => (o.order_items || []).some(it => it.plant_id === p.id))
@@ -8228,6 +8615,7 @@ function Admin() {
                     proveedor: compraDePlanta?.proveedor || p.proveedor || '',
                     price,
                     precioSugerido,
+                    costoSinEnvio,
                     discountPercent,
                     priceWithDiscount: discountPercent > 0 ? price * (1 - discountPercent / 100) : price,
                     stock: Number(p.stock) || 0,
@@ -8295,7 +8683,7 @@ function Admin() {
                   : <span style={{ opacity: 0.35 }}> ⇅</span>
                 const sortOptions = [
                   ['name', 'Nombre'], ['categoria', 'Categoría'], ['proveedor', 'Proveedor'], ['price', 'Precio'],
-                  ['priceWithDiscount', 'Precio con desc.'], ['precioSugerido', 'Precio sugerido'], ['stock', 'Stock'], ['height', 'Altura'],
+                  ['priceWithDiscount', 'Precio con desc.'], ['costoSinEnvio', 'Costo'], ['precioSugerido', 'Costo + envío'], ['stock', 'Stock'], ['height', 'Altura'],
                   ['loteNumero', 'N° compra'], ['fechaCompra', 'Fecha compra'], ['ventaNumero', 'N° venta'], ['fechaVenta', 'Fecha venta'],
                 ]
                 const thStyle = { padding: '6px 8px', border: '1px solid #ddd', background: '#F3ECDD', cursor: 'pointer', textAlign: 'left', verticalAlign: 'top', position: 'sticky', top: 0, zIndex: 2, boxShadow: 'inset 0 -1px 0 #ddd', userSelect: 'none' }
@@ -8383,8 +8771,11 @@ function Admin() {
                               <span style={thTitleStyle}>Proveedor{arrow('proveedor')}</span>
                               <input onClick={e => e.stopPropagation()} value={f.proveedor} onChange={e => setTableFilter('proveedor', e.target.value)} placeholder="Buscar..." style={filterInputStyle} />
                             </th>
+                            <th style={{ ...thStyle, width: 90 }} onClick={() => toggleTableSort('costoSinEnvio')}>
+                              <span style={thTitleStyle}>Costo{arrow('costoSinEnvio')}</span>
+                            </th>
                             <th style={{ ...thStyle, width: 100 }} onClick={() => toggleTableSort('precioSugerido')}>
-                              <span style={thTitleStyle}>P. sugerido{arrow('precioSugerido')}</span>
+                              <span style={thTitleStyle}>Costo + envío{arrow('precioSugerido')}</span>
                             </th>
                             <th style={{ ...thStyle, width: 100 }} onClick={() => toggleTableSort('price')}>
                               <span style={thTitleStyle}>Precio{arrow('price')}</span>
@@ -8460,6 +8851,7 @@ function Admin() {
                               <td style={tdNombreStyle}>{r.isSeed ? '🌰 ' : ''}{r.name}</td>
                               <td style={tdStyle}>{r.categoriaEmoji} {r.categoria || '—'}</td>
                               <td style={tdStyle}>{r.proveedor || '—'}</td>
+                              <td style={tdStyle}>{r.costoSinEnvio != null ? `$${r.costoSinEnvio.toFixed(2)}` : '—'}</td>
                               <td style={tdStyle}>{r.precioSugerido != null ? `$${r.precioSugerido.toFixed(2)}` : '—'}</td>
                               <td style={tdStyle}>${r.price.toFixed(2)}</td>
                               <td style={tdStyle}>{r.discountPercent > 0 ? `$${r.priceWithDiscount.toFixed(2)} (-${r.discountPercent}%)` : '—'}</td>
@@ -8486,7 +8878,7 @@ function Admin() {
                             </tr>
                           ))}
                           {sortedRows.length === 0 && (
-                            <tr><td colSpan={19} style={{ ...tdStyle, textAlign: 'center' }}>No hay plantas con esos filtros.</td></tr>
+                            <tr><td colSpan={20} style={{ ...tdStyle, textAlign: 'center' }}>No hay plantas con esos filtros.</td></tr>
                           )}
                         </tbody>
                       </table>
@@ -9446,6 +9838,11 @@ function Admin() {
                               value={sbForm.price}
                               onChange={e => setSbForm({ ...sbForm, price: e.target.value })}
                             />
+                            <label className="seed-form-field-label">
+                              📷 Foto (opcional, es la que se ve en Galería)
+                              <input type="file" accept="image/*" onChange={e => setSbFormFile(e.target.files[0] || null)} />
+                            </label>
+                            {sbFormFile && <img src={URL.createObjectURL(sbFormFile)} alt="" style={{ width: 90, height: 90, objectFit: 'cover', borderRadius: 8 }} />}
                             <div className="admin-item-actions">
                               <button type="button" onClick={saveSeedBatch}>Guardar</button>
                               <button type="button" onClick={() => setSbFormOpen(false)}>Cancelar</button>
@@ -9556,6 +9953,13 @@ function Admin() {
                                     )}
 
                                     <div className="admin-item-actions" style={{ marginTop: 8 }}>
+                                      <label className="icon-btn-text" style={{ cursor: 'pointer' }}>
+                                        📷 Foto
+                                        <input type="file" accept="image/*" style={{ display: 'none' }} onChange={e => { addSeedBatchPhoto(batch, e.target.files[0]); e.target.value = '' }} />
+                                      </label>
+                                      <button type="button" onClick={() => setReplanteoForm({ batchId: batch.id, fecha: localDateISO(), texto: '', file: null })}>
+                                        🪴 Replanteo
+                                      </button>
                                       <button type="button" onClick={() => openSbNote(batch)}>
                                         📝 {(batch.content_blocks && batch.content_blocks.length > 0) ? 'Editar notas' : 'Agregar notas'}
                                       </button>
