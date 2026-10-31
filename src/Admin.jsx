@@ -2247,6 +2247,17 @@ function Admin() {
     const { error } = await supabase.from('compras').update(patch).eq('id', compra.id)
     if (error) { undo(); alert('No se pudo actualizar: ' + error.message); setApprovingIds(prev => prev.filter(id => id !== compra.id)); return }
     if (flag === 'recibido' && value && !wasRecibido) await applyRecepcionAPlanta(compra) // solo la primera vez que se marca
+    if (flag === 'recibido' && !value && wasRecibido && compra.plant_id) {
+      // Al desmarcar "recibido" se resta lo que se había sumado; si no, al volver a marcarlo el stock se contaba dos veces.
+      const plant = plants.find(pl => pl.id === compra.plant_id)
+      if (plant) {
+        const nuevo = Math.max(0, (Number(plant.stock) || 0) - (Number(compra.quantity) || 0))
+        const upd = { stock: nuevo }
+        if (plant.stock_disponible != null) upd.stock_disponible = Math.min(Number(plant.stock_disponible) || 0, nuevo)
+        const { error: e2 } = await supabase.from('plants').update(upd).eq('id', plant.id)
+        if (!e2) setPlants(prev => prev.map(pl => (pl.id === plant.id ? { ...pl, ...upd } : pl)))
+      }
+    }
     setApprovingIds(prev => prev.filter(id => id !== compra.id))
   }
 
