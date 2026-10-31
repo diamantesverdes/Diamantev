@@ -3184,7 +3184,7 @@ function Admin() {
     if (!inter) { alert('No se encontró el intercambio.'); return }
     const contacto = intForm.contacto.trim()
     if (!contacto) { alert('Escribe el nombre de la persona o contacto.'); return }
-    const armar = r => ({ itemId: r.itemId || null, name: r.name.trim(), qty: Math.floor(Number(r.qty) || 0), planta: resolverPlantaFila(r) })
+    const armar = r => ({ itemId: r.itemId || null, name: r.name.trim(), qty: Math.floor(Number(r.qty) || 0), planta: resolverPlantaFila(r), file: r.file || null })
     const entregados = intForm.entregados.filter(r => r.name.trim()).map(armar)
     const recibidos = intForm.recibidos.filter(r => r.name.trim()).map(armar)
     if (entregados.length === 0 && recibidos.length === 0) { alert('Deja al menos una planta en el intercambio.'); return }
@@ -3210,8 +3210,9 @@ function Admin() {
       const { error: e0 } = await supabase.from('intercambios').update({ fecha: intForm.fecha || hoyISO(), contacto, nota: intForm.nota.trim() || null }).eq('id', inter.id)
       if (e0) throw new Error(e0.message)
       const creadas = new Map() // plantas nuevas creadas en esta edición (aún no están en la lista cargada)
-      const crearPlanta = async nombre => {
-        const { data: nueva, error: e3 } = await supabase.from('plants').insert({ name: nombre, category_id: null, price: 0, stock: 0, image_url: null, active: false, flagged: false }).select().single()
+      const crearPlanta = async (nombre, archivo) => {
+        const fotoUrl = archivo ? await uploadImage(archivo) : null
+        const { data: nueva, error: e3 } = await supabase.from('plants').insert({ name: nombre, category_id: null, price: 0, stock: 0, image_url: fotoUrl, active: false, flagged: false }).select().single()
         if (e3 || !nueva) throw new Error(`No se pudo crear "${nombre}": ${e3 ? e3.message : ''}`)
         creadas.set(String(nueva.id), nueva)
         return nueva
@@ -3221,7 +3222,7 @@ function Admin() {
       for (const [dir, lista] of [['entregado', entregados], ['recibido', recibidos]]) {
         for (const r of lista) {
           let pl = r.planta
-          if (!pl) pl = await crearPlanta(r.name) // solo pasa en "recibí": planta nueva, oculta y con stock 0
+          if (!pl) pl = await crearPlanta(r.name, r.file) // solo pasa en "recibí": planta nueva, oculta y con stock 0
           if (r.itemId && oldPorId.has(r.itemId)) {
             mantenidos.add(r.itemId)
             const antes = oldPorId.get(r.itemId)
@@ -3270,7 +3271,7 @@ function Admin() {
     if (intForm.id) return editarIntercambio()
     const contacto = intForm.contacto.trim()
     if (!contacto) { alert('Escribe el nombre de la persona o contacto.'); return }
-    const armar = r => ({ name: r.name.trim(), qty: Math.floor(Number(r.qty) || 0), planta: plantPorNombre(r.name) })
+    const armar = r => ({ name: r.name.trim(), qty: Math.floor(Number(r.qty) || 0), planta: plantPorNombre(r.name), file: r.file || null })
     const entregados = intForm.entregados.filter(r => r.name.trim()).map(armar)
     const recibidos = intForm.recibidos.filter(r => r.name.trim()).map(armar)
     if (entregados.length === 0 && recibidos.length === 0) { alert('Agrega al menos una planta.'); return }
@@ -3293,7 +3294,8 @@ function Admin() {
       for (const r of recibidos) {
         let pl = r.planta
         if (!pl) { // planta nueva: se crea oculta y con stock 0
-          const { data: nueva, error: e3 } = await supabase.from('plants').insert({ name: r.name, category_id: null, price: 0, stock: 0, image_url: null, active: false, flagged: false }).select().single()
+          const fotoUrl = r.file ? await uploadImage(r.file) : null
+          const { data: nueva, error: e3 } = await supabase.from('plants').insert({ name: r.name, category_id: null, price: 0, stock: 0, image_url: fotoUrl, active: false, flagged: false }).select().single()
           if (e3 || !nueva) throw new Error(`No se pudo crear "${r.name}": ${e3 ? e3.message : ''}`)
           pl = nueva
         }
@@ -8364,7 +8366,7 @@ function Admin() {
                         if (disp < (Number(r.qty) || 0)) { pista = `⚠️ Solo tienes ${disp} disponible${disp === 1 ? '' : 's'}`; colorPista = '#b03434' }
                         else pista = `Stock: ${pl.stock || 0}${r.itemId ? ` (+${Number(r.origQty) || 0} de este intercambio)` : ''}`
                       }
-                    } else pista = pl ? `Ya existe (stock ${pl.stock || 0}). Lo recibido no se suma hasta que quede Establecida.` : '🌱 Planta nueva: se crea oculta y sin stock.'
+                    } else pista = pl ? `Ya existe (stock ${pl.stock || 0}). Lo recibido no se suma hasta que quede Establecida.` : `🌱 Planta nueva: se crea oculta y sin stock.${r.file ? ' Con foto ✓' : ' Toca 📷 para subir su foto.'}`
                   }
                   const clave = `${lado}-${idx}`
                   const escrito = r.name.trim()
@@ -8376,7 +8378,7 @@ function Admin() {
                     : <div style={{ width: size, height: size, borderRadius: 8, flexShrink: 0, border: '1px dashed #ccc', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: size * 0.45, color: '#bbb' }}>🌱</div>)
                   return (
                     <div key={idx} style={{ position: 'relative', display: 'flex', gap: 6, alignItems: 'center', marginBottom: 8, flexWrap: 'wrap' }}>
-                      {pl ? miniatura(pl, 40) : null}
+                      {pl ? miniatura(pl, 40) : (r.file ? <img src={URL.createObjectURL(r.file)} alt="" style={{ width: 40, height: 40, objectFit: 'cover', borderRadius: 8, flexShrink: 0, border: '1px solid #ddd' }} /> : null)}
                       <input placeholder={lado === 'entregados' ? 'Planta que entregas' : 'Planta que recibes'} value={r.name}
                         onChange={e => setRow({ name: e.target.value })}
                         onFocus={() => setIntFocus(clave)}
@@ -8385,6 +8387,12 @@ function Admin() {
                       <button type="button" aria-label="Elegir planta con fotos" title="Elegir con fotos"
                         onClick={() => setIntPicker({ lado, idx, term: '' })}
                         style={{ width: 36, height: 36, minHeight: 0, padding: 0, fontSize: 18, borderRadius: 10, boxShadow: 'none', cursor: 'pointer' }}>🖼️</button>
+                      {lado === 'recibidos' && !pl && (
+                        <label title="Subir foto desde tu celular" style={{ width: 36, height: 36, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, borderRadius: 10, border: '2px solid #aaa', cursor: 'pointer', background: '#fff', boxSizing: 'border-box' }}>
+                          📷
+                          <input type="file" accept="image/*" style={{ display: 'none' }} onChange={e => { setRow({ file: e.target.files[0] || null }); e.target.value = '' }} />
+                        </label>
+                      )}
                       <input type="number" inputMode="numeric" min="1" value={r.qty} onChange={e => setRow({ qty: e.target.value })} style={{ width: 62, boxSizing: 'border-box' }} aria-label="Cantidad" />
                       <button type="button" aria-label="Quitar fila" onClick={() => setIntForm(f => ({ ...f, [lado]: f[lado].filter((_, j) => j !== idx) }))}
                         style={{ width: 28, border: 'none', background: 'none', boxShadow: 'none', padding: 0, minHeight: 0, fontSize: 16, color: '#b03434', cursor: 'pointer' }}>✕</button>
