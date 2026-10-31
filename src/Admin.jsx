@@ -4302,6 +4302,16 @@ function Admin() {
     })
   }
 
+  // Copia el seguimiento del lote (germinación, replanteo, notas, fotos) a las notas de la planta,
+  // para seguir anotando ahí hasta que florezca y se venda.
+  async function traerSeguimientoSemillas(sb, plantId, avisar = true) {
+    const bl = Array.isArray(sb.content_blocks) ? sb.content_blocks : []
+    const cab = { type: 'text', fromSeedBatch: sb.id, at: new Date().toISOString(), content: `🌰 Seguimiento desde semillas — ${seedBatchRawName(sb)} (${sb.fecha ? new Date(sb.fecha + 'T00:00:00').toLocaleDateString() : 'sin fecha'}${sb.proveedor ? ` · ${sb.proveedor}` : ''}, ${Number(sb.cantidad_semillas) || 0} semillas)` }
+    const { error } = await supabase.from('plant_notes').insert({ plant_id: plantId, content_blocks: [cab, ...bl] })
+    if (error) { if (avisar) alert('No se pudo copiar el seguimiento: ' + error.message); return false }
+    return true
+  }
+
   async function confirmConvertSeedBatch(batch) {
     if (!sbConvertForm.nombre.trim()) { alert('Ponle un nombre a la planta'); return }
     if (!sbConvertForm.category_id) { alert('Elige una categoría'); return }
@@ -4315,6 +4325,7 @@ function Admin() {
     }).select().single()
     if (error) { alert('Error al crear la planta: ' + error.message); return }
     await supabase.from('seed_batches').update({ estado: 'catalogado', converted_plant_id: newPlant.id }).eq('id', batch.id)
+    await traerSeguimientoSemillas(batch, newPlant.id, false)
     setSbConvertId(null)
     loadData()
     alert(`Listo, "${sbConvertForm.nombre}" ya está catalogada en Galería.`)
@@ -7326,6 +7337,42 @@ function Admin() {
                         {photoModalSection === 'compras' && (
                           <div className="historial-block">
                             <h4>📦 Compras</h4>
+                            {seedBatches.filter(sb => sb.converted_plant_id === p.id).map(sb => {
+                              const bl = Array.isArray(sb.content_blocks) ? sb.content_blocks : []
+                              const totalSb = (Number(sb.costo) || 0) + (Number(sb.envio1) || 0) + (Number(sb.envio2) || 0) + (Number(sb.varios) || 0)
+                              return (
+                                <div key={sb.id} style={{ background: '#f3f8ee', border: '1px solid #cfe0c2', borderRadius: 10, padding: '8px 10px', margin: '6px 0' }}>
+                                  <div><strong>🌰 Viene de semillas</strong> · {sb.origen === 'cosecha' ? 'Cosecha propia' : `Compra${sb.proveedor ? ` a ${sb.proveedor}` : ''}`}</div>
+                                  <div style={{ fontSize: 12.5, color: '#5B4636' }}>
+                                    {sb.fecha ? new Date(sb.fecha + 'T00:00:00').toLocaleDateString() : '—'} · {Number(sb.cantidad_semillas) || 0} semillas · Sembradas: {Number(sb.sembradas) || 0} · Costo total: {money(totalSb)}
+                                  </div>
+                                  {!plantNotes.some(n => n.plant_id === p.id && (n.content_blocks || []).some(b => b && b.fromSeedBatch === sb.id)) && (
+                                    <button type="button" style={{ marginTop: 6 }} onClick={async () => { if (await traerSeguimientoSemillas(sb, p.id)) loadData() }}>
+                                      📓 Copiar este seguimiento a las notas de la planta
+                                    </button>
+                                  )}
+                                  {bl.length > 0 && (
+                                    <div style={{ marginTop: 6 }}>
+                                      <strong style={{ fontSize: 12.5 }}>Seguimiento (germinación, replanteo, notas)</strong>
+                                      {bl.map((b, i) => (
+                                        <div key={i} style={{ marginTop: 4 }}>
+                                          {b.at && <div style={{ fontSize: 11.5, color: '#8a8a7a' }}>{formatBlockDate(b.at)}</div>}
+                                          {b.type === 'text' && <p style={{ margin: 0 }}>{b.content}</p>}
+                                          {b.type === 'photo' && b.url && <img src={b.url} alt="" style={{ width: 110, height: 110, objectFit: 'cover', borderRadius: 8 }} />}
+                                          {b.type === 'video' && b.url && <video src={b.url} controls style={{ width: '100%', maxWidth: 260 }} />}
+                                        </div>
+                                      ))}
+                                    </div>
+                                  )}
+                                  {seedBatchEvents.filter(ev => ev.seed_batch_id === sb.id).map(ev => (
+                                    <div key={ev.id} style={{ marginTop: 4, fontSize: 12.5 }}>
+                                      {ev.fecha ? new Date(String(ev.fecha).slice(0, 10) + 'T00:00:00').toLocaleDateString() : ''} · {ev.tipo || ev.evento || ''} {ev.nota || ev.notas || ev.descripcion || ''}
+                                      {ev.photo_url && <img src={ev.photo_url} alt="" style={{ display: 'block', width: 110, height: 110, objectFit: 'cover', borderRadius: 8, marginTop: 2 }} />}
+                                    </div>
+                                  ))}
+                                </div>
+                              )
+                            })}
                             {comprasConTotal.length > 0 && renderMoneyCard({ vendido: vendidoP, cobrado: cobradoP, comprado: compradoP, extra: <div style={{ fontSize: 12, color: '#8a8a7a' }}>La ganancia no descuenta lo que todavía tienes en stock.</div> })}
                             {comprasConTotal.length === 0 ? (
                               <p className="historial-empty">Sin compras registradas.</p>
@@ -8898,7 +8945,8 @@ function Admin() {
                   .filter(c => {
                     const term = ingresosSearch.trim().toLowerCase()
                     if (!term) return true
-                    return (c.proveedor || '').toLowerCase().includes(term) || compraNombre(c).toLowerCase().includes(term)
+                    const catC = categories.find(k => k.id === compraCategoryId(c))
+                    return coincideBusqueda(`${c.proveedor || ''} ${compraNombre(c)} ${c.plant_name || ''} ${c.new_plant_name || ''} ${catC ? catC.name : ''}`, term)
                   })
                   .filter(c => !ingresosDate || (c.created_at || '').slice(0, 10) === ingresosDate)
                   .filter(c => ingresosCategoria === 'all' || compraCategoryId(c) === ingresosCategoria)
