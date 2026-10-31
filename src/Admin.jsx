@@ -4188,7 +4188,9 @@ function Admin() {
     const fecha = localDateISO()
     const { error } = await supabase.from('plant_pups').insert({ plant_id: plant.id, fecha, cantidad: cant, tipo: 'movido' })
     if (error) { alert('Error al pasar a stock: ' + error.message); return }
-    await supabase.from('plants').update({ stock: (plant.stock || 0) + cant }).eq('id', plant.id)
+    const patchStock = { stock: (Number(plant.stock) || 0) + cant }
+    if (plant.stock_disponible != null) patchStock.stock_disponible = (Number(plant.stock_disponible) || 0) + cant
+    await supabase.from('plants').update(patchStock).eq('id', plant.id)
     setShowMoverPupsForm(false)
     setMoverPupsCantidad('')
     loadData()
