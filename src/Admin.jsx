@@ -9472,7 +9472,7 @@ function Admin() {
                           <div key={lote.id} className="admin-item lote-group collapsible-card" data-open={(openCards.has(`cl-${lote.id}`) || editing) ? 'true' : 'false'} style={{ width: '100%', maxWidth: '100%', minWidth: 0, overflow: 'hidden', boxSizing: 'border-box', background: statusPastelBg(lineas, 'recibido') }}>
                             <div className="admin-item-info" style={{ width: '100%', maxWidth: '100%', minWidth: 0, boxSizing: 'border-box' }}>
                               <div className="card-title-row" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
-                                <strong onClick={() => toggleCard(`cl-${lote.id}`)} style={{ flex: 1, minWidth: 0, cursor: 'pointer' }}>{(openCards.has(`cl-${lote.id}`) || editing) ? `▾ 🧺 Compra #${lote.numero}${lote.nota ? ` — ${lote.nota}` : ''}` : `▸ 🧺 Compra #${lote.numero}${(lote.proveedor || lote.nota) ? ` — ${lote.proveedor || lote.nota}` : ''}`}</strong>
+                                <strong onClick={() => toggleCard(`cl-${lote.id}`)} style={{ flex: 1, minWidth: 0, cursor: 'pointer' }}>{(openCards.has(`cl-${lote.id}`) || editing) ? `▾ 🧺 Compra #${lote.numero}${lote.nota ? ` — ${lote.nota.replace(/^Jardín propio · /, '')}` : ''}` : `▸ 🧺 Compra #${lote.numero}${(lote.proveedor || lote.nota) ? ` — ${(lote.proveedor || lote.nota).replace(/^Jardín propio · /, '')}` : ''}`}</strong>
                                 <button type="button" onClick={() => editing ? finishEditingLote(lote, lineasConProrrateo) : setEditingLoteId(lote.id)}>
                                   {editing ? '✅ Listo' : '✏️ Editar'}
                                 </button>
