@@ -9446,9 +9446,25 @@ function Admin() {
 
                     <div className="admin-list">
                       {lotes.length === 0 && comprasSinLote.length === 0 && <p className="status-msg">No hay ingresos registrados.</p>}
+                      {(() => {
+                        const lotesJardin = lotes.filter(l => /^Jardín propio/.test(l.nota || '') && (comprasByLote[l.id] || []).length > 0)
+                        if (lotesJardin.length === 0) return null
+                        const nPlantas = lotesJardin.reduce((sum, l) => sum + (comprasByLote[l.id] || []).length, 0)
+                        const abierta = openCards.has('folder-jardin') || !!(ingresosSearch || ingresosDate || ingresosCategoria !== 'all' || ingresosStatus !== 'all')
+                        return (
+                          <div
+                            onClick={() => toggleCard('folder-jardin')}
+                            style={{ cursor: 'pointer', background: '#E3F4E1', border: '2px solid #9CCB92', borderRadius: 12, padding: '12px 14px', fontWeight: 700, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}
+                          >
+                            <span>{abierta ? '▾' : '▸'} 🌿 Jardín propio</span>
+                            <span style={{ fontWeight: 400, fontSize: 13 }}>{lotesJardin.length} categorías · {nPlantas} plantas</span>
+                          </div>
+                        )
+                      })()}
                       {lotes.map(lote => {
                         const lineas = comprasByLote[lote.id] || []
                         if (lineas.length === 0) return null
+                        if (/^Jardín propio/.test(lote.nota || '') && !(openCards.has('folder-jardin') || ingresosSearch || ingresosDate || ingresosCategoria !== 'all' || ingresosStatus !== 'all')) return null
                         const { subtotal, extras, total: totalLote, lineas: lineasConProrrateo } = loteProration(lote, lineas)
                         const editing = editingLoteId === lote.id
                         const loteDraft = loteDrafts[lote.id] || {}
