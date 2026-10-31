@@ -41,6 +41,26 @@ const esNombreCodigo = n => {
   if (/^[0-9a-f]{8}[\s_-]?[0-9a-f]{4}/i.test(t)) return true
   return t.split(/[\s]+/).some(w => /^(?:(?:IMG|PXL|DSC|DSCN|WP|MVIMG|PHOTO|FOTO|IMAGE)[_-]?)?[0-9a-f_-]{8,}$/i.test(w) && (w.match(/\d/g) || []).length >= 4)
 }
+// Plantas que se numeran ("Epidendrum 5"): si escribes la base ("Epidendrum"), dice cuál es el último número y cuál toca.
+function siguienteNumeroPlanta(texto, plantas) {
+  const t = String(texto || '').trim().replace(/\s+\d+$/, '').trim()
+  if (t.length < 3) return null
+  const base = normalizarBusqueda(t)
+  let max = 0, ultimo = null
+  plantas.forEach(p => {
+    const n = String(p.name || '').trim()
+    const m = n.match(/^(.*\S)\s+(\d+)$/)
+    if (!m) return
+    const pref = normalizarBusqueda(m[1])
+    if (pref === base || pref.endsWith(' ' + base)) {
+      const num = Number(m[2])
+      if (num >= max) { max = num; ultimo = n }
+    }
+  })
+  if (!ultimo) return null
+  const prefijoReal = ultimo.replace(/\s+\d+$/, '')
+  return { ultimo, siguiente: `${prefijoReal} ${max + 1}` }
+}
 const naturalCollator = new Intl.Collator('es', { numeric: true, sensitivity: 'base' })
 
 // ---------- Color de las plantas (detección automática a partir de la foto) ----------
@@ -8413,6 +8433,17 @@ function Admin() {
                         </div>
                       )}
                       {pista && <small style={{ flex: '1 0 100%', color: colorPista }}>{pista}</small>}
+                      {(() => {
+                        if (!r.name.trim() || (pl && normalizarBusqueda(pl.name) === normalizarBusqueda(r.name))) return null
+                        const sig = siguienteNumeroPlanta(r.name, plants)
+                        if (!sig || normalizarBusqueda(sig.siguiente) === normalizarBusqueda(r.name)) return null
+                        return (
+                          <button type="button" onClick={() => setRow({ name: sig.siguiente })}
+                            style={{ flex: '1 0 100%', textAlign: 'left', background: '#eef5e6', border: '1px solid #b9d3a3', borderRadius: 8, padding: '6px 10px', minHeight: 0, boxShadow: 'none', color: '#3b3b32', cursor: 'pointer', fontSize: 13 }}>
+                            🔢 Último: <strong>{sig.ultimo}</strong> → usar <strong>{sig.siguiente}</strong>
+                          </button>
+                        )
+                      })()}
                     </div>
                   )
                 }
