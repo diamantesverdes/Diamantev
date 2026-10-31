@@ -14,7 +14,7 @@ function PlantPicker({ list, selectedId, onSelect }) {
   return (
     <div style={{ maxHeight: 180, overflowY: 'auto', border: '1px solid #ccc', borderRadius: 8, marginBottom: 8, background: '#fff' }}>
       {list.length === 0 && <p className="status-msg" style={{ padding: 8, margin: 0 }}>Sin resultados</p>}
-      {list.map(p => (
+      {[...list].sort(compararPlantasNumeradas).map(p => (
         <div
           key={p.id}
           onClick={() => onSelect(p.id)}
@@ -80,6 +80,18 @@ const PLANT_COLORS = [
   { name: 'Morada',   rgb: [130, 40, 150] },
   { name: 'Bicolor',  rgb: null },
 ]
+// Chips de color: los fijos + los que escribiste a mano (cualquier nombre), solo los que tienen plantas.
+const chipsColor = (counts, sel) => [
+  ...PLANT_COLORS,
+  ...Object.keys(counts).filter(n => !PLANT_COLORS.some(c => c.name === n)).sort((a, b) => a.localeCompare(b, 'es')).map(n => ({ name: n })),
+].filter(c => counts[c.name] || sel === c.name)
+// Orden para listas de elegir planta: alfabético, pero las numeradas ("Epidendrum 24, 23, 22…") de mayor a menor.
+function compararPlantasNumeradas(a, b) {
+  const parse = n => { const m = String(n || '').trim().match(/^(.*\S)\s+(\d+)$/); return m ? { base: m[1], num: Number(m[2]) } : { base: String(n || '').trim(), num: -1 } }
+  const x = parse(a.name), y = parse(b.name)
+  const c = new Intl.Collator('es', { sensitivity: 'base' }).compare(x.base, y.base)
+  return c !== 0 ? c : y.num - x.num
+}
 const colorIndex = name => { const i = PLANT_COLORS.findIndex(c => c.name === name); return i === -1 ? 999 : i }
 function colorDotStyle(name, size = 12) {
   const c = PLANT_COLORS.find(x => x.name === name)
@@ -656,6 +668,7 @@ function Admin() {
   const [filterGroup, setFilterGroup] = useState(null) // 'compra' | 'venta' | 'etiquetas' | null (grupo de filtros desplegado)
   const [galleryColorFilter, setGalleryColorFilter] = useState('all') // 'all' | '__none__' | nombre de color
   const [gallerySortBy, setGallerySortBy] = useState('nombre') // 'nombre' | 'color'
+  const [customColorText, setCustomColorText] = useState('')
   const [colorPickerFor, setColorPickerFor] = useState(null) // { ids: [...], title }
   const [colorScan, setColorScan] = useState(null) // { done, total } mientras detecta
   const colorRunning = useRef(false)
@@ -2160,6 +2173,13 @@ function Admin() {
   // Nombre "vivo" de una línea de compra: si la línea está enlazada a una planta (plant_id),
   // se muestra el nombre ACTUAL de esa planta, así los renombres hechos en la Tabla se reflejan
   // solos en Ingresos. Si no hay planta enlazada, se usa el texto guardado en la compra.
+  // Foto de una línea de compra: la suya, o si no tiene, la de la planta enlazada.
+  function compraFoto(c) {
+    if (c.image_url) return c.image_url
+    const plant = c.plant_id ? plants.find(p => p.id === c.plant_id) : null
+    return plant?.image_url || null
+  }
+
   function compraNombre(c) {
     const plant = c.plant_id ? plants.find(p => p.id === c.plant_id) : null
     return plant?.name || c.plant_name || ''
@@ -5899,7 +5919,7 @@ function Admin() {
                         {withColor && filterGroup === 'color' && (
                           <>
                       <div className="attr-row" style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 10 }}>
-                        {PLANT_COLORS.filter(c => colorCounts[c.name] || galleryColorFilter === c.name).map(c => {
+                        {chipsColor(colorCounts, galleryColorFilter).map(c => {
                           const on = galleryColorFilter === c.name
                           return (
                             <button key={c.name} type="button" onClick={() => setGalleryColorFilter(on ? 'all' : c.name)}
@@ -6187,7 +6207,7 @@ function Admin() {
                                 <details className="attr-panel">
                                   <summary className="attr-title" style={{ cursor: 'pointer' }}>🎨 Color y orden</summary>
                                   <div className="attr-row">
-                                    {PLANT_COLORS.filter(c => colorCounts[c.name] || galleryColorFilter === c.name).map(c => {
+                                    {chipsColor(colorCounts, galleryColorFilter).map(c => {
                                       const on = galleryColorFilter === c.name
                                       return (
                                         <button key={c.name} type="button" onClick={() => setGalleryColorFilter(on ? 'all' : c.name)}
@@ -6449,6 +6469,13 @@ function Admin() {
                                     </button>
                                   )
                                 })}
+                              </div>
+                              <div style={{ display: 'flex', gap: 6, marginTop: 12 }}>
+                                <input value={customColorText} onChange={e => setCustomColorText(e.target.value)} placeholder="Otro color (escríbelo, ej. Salmón)"
+                                  style={{ flex: 1, minWidth: 0, boxSizing: 'border-box' }} />
+                                <button type="button" disabled={!customColorText.trim()}
+                                  onClick={() => { const c = customColorText.trim(); const nombre = c.charAt(0).toUpperCase() + c.slice(1); setPlantsColor(colorPickerFor.ids, nombre); setCustomColorText(''); setColorPickerFor(null) }}
+                                  style={{ width: 'auto', padding: '8px 14px' }}>Guardar</button>
                               </div>
                               <button type="button"
                                 onClick={() => { const ids = colorPickerFor.ids; setColorPickerFor(null); redetectColors(ids) }}
@@ -8037,7 +8064,7 @@ function Admin() {
                                     return (
                                     <tr key={d.id}>
                                       <td style={{ padding: 2, border: '1px solid #ddd', textAlign: 'center', whiteSpace: 'nowrap' }}>
-                                        {plant && plant.image_url ? <img src={plant.image_url} alt={d.plant_name} style={{ width: 22, height: 22, objectFit: 'cover', borderRadius: 3 }} /> : '—'}
+                                        {plant && plant.image_url ? <img src={plant.image_url} alt={d.plant_name} style={{ width: 34, height: 34, objectFit: 'cover', borderRadius: 3 }} /> : '—'}
                                       </td>
                                       <td style={{ padding: 2, border: '1px solid #ddd', whiteSpace: 'normal', maxWidth: 120, wordBreak: 'break-word' }}>
                                         {editingV ? <input defaultValue={d.plant_name} onBlur={e => updateDecrementoField(d, 'plant_name', e.target.value)} style={{ width: 90, fontSize: 11 }} /> : d.plant_name}
@@ -8256,7 +8283,7 @@ function Admin() {
                                       <tbody>
                                         {items.map(it => (
                                           <tr key={it.id}>
-                                            <td style={{ padding: 2, border: '1px solid #ddd', textAlign: 'center', whiteSpace: 'nowrap' }}>{it._plant?.image_url ? <img src={it._plant.image_url} alt={it._plant.name} style={{ width: 22, height: 22, objectFit: 'cover', borderRadius: 3 }} /> : '—'}</td>
+                                            <td style={{ padding: 2, border: '1px solid #ddd', textAlign: 'center', whiteSpace: 'nowrap' }}>{it._plant?.image_url ? <img src={it._plant.image_url} alt={it._plant.name} style={{ width: 34, height: 34, objectFit: 'cover', borderRadius: 3 }} /> : '—'}</td>
                                             <td style={{ padding: 2, border: '1px solid #ddd', whiteSpace: 'normal', maxWidth: 100, wordBreak: 'break-word' }}>{it._plant ? it._plant.name : 'Planta'}</td>
                                             <td style={{ padding: 2, border: '1px solid #ddd', textAlign: 'center', whiteSpace: 'nowrap' }}>{it.quantity}</td>
                                             <td style={{ padding: 2, border: '1px solid #ddd', textAlign: 'right', whiteSpace: 'nowrap' }}>${it._unitPrice.toFixed(2)}</td>
@@ -8391,7 +8418,7 @@ function Admin() {
                   const clave = `${lado}-${idx}`
                   const escrito = r.name.trim()
                   const sugerencias = (intFocus === clave && escrito && !(pl && normalizarBusqueda(pl.name) === normalizarBusqueda(escrito)))
-                    ? plants.filter(x => coincideBusqueda(x.name, escrito)).sort((a, b) => String(a.name).localeCompare(String(b.name), 'es', { numeric: true, sensitivity: 'base' })).slice(0, 6)
+                    ? plants.filter(x => coincideBusqueda(x.name, escrito)).sort(compararPlantasNumeradas).slice(0, 6)
                     : []
                   const miniatura = (pl2, size) => (pl2 && pl2.image_url
                     ? <img src={pl2.image_url} alt="" loading="lazy" style={{ width: size, height: size, objectFit: 'cover', borderRadius: 8, flexShrink: 0, border: '1px solid #ddd' }} />
@@ -8519,7 +8546,7 @@ function Admin() {
                       (() => {
                         const lista = plants
                           .filter(x => coincideBusqueda(x.name, intPicker.term))
-                          .sort((a, b) => String(a.name).localeCompare(String(b.name), 'es', { numeric: true, sensitivity: 'base' }))
+                          .sort(compararPlantasNumeradas)
                         const elegir = x => {
                           const { lado, idx } = intPicker
                           setIntForm(f => ({ ...f, [lado]: f[lado].map((q, j) => (j === idx ? { ...q, name: x.name } : q)) }))
@@ -9554,7 +9581,7 @@ function Admin() {
                                       return (
                                       <tr key={c.id}>
                                         <td style={{ padding: 2, border: '1px solid #ddd', textAlign: 'center', whiteSpace: 'nowrap' }}>
-                                          {c.image_url ? <img src={c.image_url} alt={compraNombre(c)} style={{ width: 22, height: 22, objectFit: 'cover', borderRadius: 3 }} /> : '—'}
+                                          {compraFoto(c) ? <img src={compraFoto(c)} alt={compraNombre(c)} style={{ width: 34, height: 34, objectFit: 'cover', borderRadius: 3 }} /> : '—'}
                                           {editing && (
                                             <label className="file-label" style={{ display: 'block', marginTop: 1, fontSize: 8, background: 'transparent', color: 'inherit', border: '1px solid #ccc' }}>
                                               📷
@@ -9687,7 +9714,7 @@ function Admin() {
                       })}
                       {comprasSinLote.map(c => (
                         <div key={c.id} className="admin-item">
-                          {c.image_url ? <img src={c.image_url} alt={compraNombre(c)} /> : <div className="no-img-sm">Sin foto</div>}
+                          {compraFoto(c) ? <img src={compraFoto(c)} alt={compraNombre(c)} /> : <div className="no-img-sm">Sin foto</div>}
                           <div className="admin-item-info">
                             <input
                               key={`${c.id}-${compraNombre(c)}`}
