@@ -2844,6 +2844,28 @@ function Admin() {
     setApprovingIds(prev => prev.filter(id => id !== d.id))
   }
 
+  // Marca TODAS las líneas de una venta como pagadas o entregadas de una sola vez.
+  async function marcarVentaLote(loteId, flag, value) {
+    const lineas = decrementos.filter(d => d.lote_id === loteId && (flag === 'pagado' ? pagadoDe(d) : entregadoDe(d)) !== value)
+    if (lineas.length === 0) return
+    const ids = lineas.map(d => d.id)
+    setApprovingIds(prev => [...prev, ...ids])
+    const antes = decrementos.filter(d => ids.includes(d.id))
+    const nuevoStatus = d => {
+      const pagado = flag === 'pagado' ? value : pagadoDe(d)
+      const entregado = flag === 'entregado' ? value : entregadoDe(d)
+      return entregado ? 'entregado' : pagado ? 'pagado' : 'pedido'
+    }
+    setDecrementos(prev => prev.map(d => (ids.includes(d.id) ? { ...d, [flag]: value, status: nuevoStatus(d) } : d)))
+    const resultados = await Promise.all(lineas.map(d => supabase.from('decrementos').update({ [flag]: value, status: nuevoStatus(d) }).eq('id', d.id)))
+    const fallo = resultados.find(r => r.error)
+    if (fallo) {
+      setDecrementos(prev => prev.map(d => antes.find(b => b.id === d.id) || d))
+      alert('No se pudo actualizar toda la venta: ' + fallo.error.message)
+    }
+    setApprovingIds(prev => prev.filter(id => !ids.includes(id)))
+  }
+
   async function updateDecrementoAnticipo(d, value) {
     const patch = { anticipo: value }
     const undo = patchLocal(setDecrementos, decrementos, [d.id], patch)
@@ -2961,8 +2983,24 @@ function Admin() {
   // Factura como FOTO (imagen JPG) para enviar por WhatsApp u otra app
   async function shareInvoiceImage(params) {
     try {
-      const W = 900, PAD = 48, ROW = 46, SCALE = 2
+      const W = 900, PAD = 48, SCALE = 2
+      let ROW = 46
       const lineas = params.lineas || []
+      // Miniaturas de cada planta (si no se pueden cargar, esa fila queda sin foto y la factura sale igual)
+      const cargarFoto = url => new Promise(resolve => {
+        const img = new Image()
+        img.crossOrigin = 'anonymous'
+        const t = setTimeout(() => resolve(null), 8000)
+        img.onload = () => { clearTimeout(t); resolve(img) }
+        img.onerror = () => { clearTimeout(t); resolve(null) }
+        img.src = url
+      })
+      const fotos = await Promise.all(lineas.map(l => {
+        const url = l.photo_url || l.image_url || (l.plant_id ? plants.find(pl => String(pl.id) === String(l.plant_id))?.image_url : null)
+        return url ? cargarFoto(url) : Promise.resolve(null)
+      }))
+      const hayFotos = fotos.some(Boolean)
+      if (hayFotos) ROW = 78
       let banner = null
       try {
         banner = await new Promise((resolve, reject) => {
@@ -3027,10 +3065,23 @@ function Admin() {
       lineas.forEach((l, i) => {
         if (i % 2 === 0) { ctx.fillStyle = 'rgba(255,255,255,0.65)'; ctx.fillRect(PAD, y, W - 2 * PAD, ROW) }
         ctx.fillStyle = '#3b3b32'
-        ctx.textAlign = 'left'; ctx.fillText(fit(l.plant_name, colQty - 40 - colName), colName, y + 31)
-        ctx.textAlign = 'center'; ctx.fillText(String(l.quantity), colQty, y + 31)
-        ctx.textAlign = 'right'; ctx.fillText(money(l.unit_price), colUnit, y + 31)
-        ctx.fillText(money(l._lineTotal), colTot, y + 31)
+        const ty = y + ROW / 2 + 8
+        const nameX = colName + (hayFotos ? 74 : 0)
+        const foto = fotos[i]
+        if (foto) {
+          const S = 62, fx = colName - 6, fy = y + (ROW - S) / 2
+          ctx.save()
+          ctx.beginPath()
+          if (ctx.roundRect) ctx.roundRect(fx, fy, S, S, 8); else ctx.rect(fx, fy, S, S)
+          ctx.clip()
+          const lado = Math.min(foto.naturalWidth, foto.naturalHeight)
+          ctx.drawImage(foto, (foto.naturalWidth - lado) / 2, (foto.naturalHeight - lado) / 2, lado, lado, fx, fy, S, S)
+          ctx.restore()
+        }
+        ctx.textAlign = 'left'; ctx.fillText(fit(l.plant_name, colQty - 40 - nameX), nameX, ty)
+        ctx.textAlign = 'center'; ctx.fillText(String(l.quantity), colQty, ty)
+        ctx.textAlign = 'right'; ctx.fillText(money(l.unit_price), colUnit, ty)
+        ctx.fillText(money(l._lineTotal), colTot, ty)
         y += ROW
       })
 
@@ -3118,7 +3169,7 @@ function Admin() {
       numeroLabel: `Pedido #${order.id}`,
       cliente: order.customer_name,
       dateStr: new Date(order.created_at).toLocaleDateString(),
-      lineas: items.map(it => ({ plant_name: it._plant ? it._plant.name : 'Planta', quantity: it.quantity, unit_price: it._unitPrice, _lineTotal: it._lineTotal })),
+      lineas: items.map(it => ({ plant_name: it._plant ? it._plant.name : 'Planta', plant_id: it.plant_id, quantity: it.quantity, unit_price: it._unitPrice, _lineTotal: it._lineTotal })),
       subtotal, envio1: order.envio1, envio2: order.envio2, varios: order.varios, total,
     })
   }
@@ -3128,7 +3179,7 @@ function Admin() {
       numeroLabel: `Pedido #${order.id}`,
       cliente: order.customer_name,
       dateStr: new Date(order.created_at).toLocaleDateString(),
-      lineas: items.map(it => ({ plant_name: it._plant ? it._plant.name : 'Planta', quantity: it.quantity, unit_price: it._unitPrice, _lineTotal: it._lineTotal })),
+      lineas: items.map(it => ({ plant_name: it._plant ? it._plant.name : 'Planta', plant_id: it.plant_id, quantity: it.quantity, unit_price: it._unitPrice, _lineTotal: it._lineTotal })),
       subtotal, envio1: order.envio1, envio2: order.envio2, varios: order.varios, total,
       filenameSlug: `factura-pedido-${order.id}`,
     })
@@ -3139,7 +3190,7 @@ function Admin() {
       numeroLabel: `Pedido #${order.id}`,
       cliente: order.customer_name,
       dateStr: new Date(order.created_at).toLocaleDateString(),
-      lineas: items.map(it => ({ plant_name: it._plant ? it._plant.name : 'Planta', quantity: it.quantity, unit_price: it._unitPrice, _lineTotal: it._lineTotal })),
+      lineas: items.map(it => ({ plant_name: it._plant ? it._plant.name : 'Planta', plant_id: it.plant_id, quantity: it.quantity, unit_price: it._unitPrice, _lineTotal: it._lineTotal })),
       subtotal, envio1: order.envio1, envio2: order.envio2, varios: order.varios, total,
       filenameSlug: `factura-pedido-${order.id}`,
     })
@@ -8255,6 +8306,24 @@ function Admin() {
                                 >
                                   ➕ Agregar planta
                                 </button>
+                                {lineas.some(d => !pagadoDe(d)) && (
+                                  <button
+                                    type="button"
+                                    onClick={() => marcarVentaLote(lote.id, 'pagado', true)}
+                                    style={{ padding: '6px 10px', fontSize: '0.8rem', minHeight: 0, lineHeight: 1.2, borderRadius: 8, boxShadow: 'none', whiteSpace: 'nowrap', flex: '0 0 auto', boxSizing: 'border-box' }}
+                                  >
+                                    💵 Toda pagada
+                                  </button>
+                                )}
+                                {lineas.some(d => !entregadoDe(d)) && (
+                                  <button
+                                    type="button"
+                                    onClick={() => marcarVentaLote(lote.id, 'entregado', true)}
+                                    style={{ padding: '6px 10px', fontSize: '0.8rem', minHeight: 0, lineHeight: 1.2, borderRadius: 8, boxShadow: 'none', whiteSpace: 'nowrap', flex: '0 0 auto', boxSizing: 'border-box' }}
+                                  >
+                                    📦 Toda entregada
+                                  </button>
+                                )}
                                 <button
                                   type="button"
                                   onClick={() => deleteVentaLote(lote.id)}
