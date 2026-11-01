@@ -1569,9 +1569,47 @@ function Admin() {
     await supabase.auth.signOut()
   }
 
-  async function uploadImage(file, bucket = 'plant-photos') {
-    const ext = file.name.split('.').pop()
-    const fileName = `${Date.now()}.${ext}`
+  // Reduce las fotos antes de subirlas (ahorra el almacenamiento de Supabase): máx. 1600 px de lado, WebP (o JPG) al 82 %.
+  // Los videos, GIF y cualquier archivo que no sea foto se suben tal cual; si la foto comprimida no pesa menos, se sube la original.
+  async function comprimirImagen(file, maxLado = 1600, calidad = 0.82) {
+    try {
+      if (!file || !file.type || !file.type.startsWith('image/') || /gif|svg/i.test(file.type)) return file
+      let bmp = null
+      try { bmp = await createImageBitmap(file) } catch (e) { bmp = null }
+      let w, h, fuente
+      if (bmp) { w = bmp.width; h = bmp.height; fuente = bmp } else {
+        const url = URL.createObjectURL(file)
+        const img = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = url })
+        w = img.naturalWidth; h = img.naturalHeight; fuente = img
+        setTimeout(() => URL.revokeObjectURL(url), 5000)
+      }
+      const escala = Math.min(1, maxLado / Math.max(w, h))
+      const cw = Math.max(1, Math.round(w * escala)), ch = Math.max(1, Math.round(h * escala))
+      const canvas = document.createElement('canvas')
+      canvas.width = cw; canvas.height = ch
+      const ctx = canvas.getContext('2d')
+      ctx.fillStyle = '#fff'
+      ctx.fillRect(0, 0, cw, ch)
+      ctx.drawImage(fuente, 0, 0, cw, ch)
+      if (bmp && bmp.close) bmp.close()
+      let blob = await new Promise(r => canvas.toBlob(r, 'image/webp', calidad))
+      let ext = 'webp'
+      if (!blob || blob.type !== 'image/webp') {
+        blob = await new Promise(r => canvas.toBlob(r, 'image/jpeg', calidad))
+        ext = 'jpg'
+      }
+      if (!blob || blob.size >= file.size) return file
+      const nombre = (file.name || 'foto').replace(/\.[^.]+$/, '') + '.' + ext
+      return new File([blob], nombre, { type: blob.type })
+    } catch (e) {
+      return file
+    }
+  }
+
+  async function uploadImage(originalFile, bucket = 'plant-photos') {
+    const file = await comprimirImagen(originalFile)
+    const ext = (file.name || 'archivo').split('.').pop()
+    const fileName = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}.${ext}`
     const { error } = await supabaseStorage.storage.from(bucket).upload(fileName, file)
     if (error) { alert('Error al subir el archivo: ' + error.message); return null }
     const { data } = supabaseStorage.storage.from(bucket).getPublicUrl(fileName)
