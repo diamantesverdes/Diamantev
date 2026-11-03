@@ -10,6 +10,31 @@ import { addToQueue, isOnline, queueLength, processQueue } from './offlineQueue'
 // Componentes estables fuera de Admin(): si se definieran adentro, React los
 // recrearía en cada render (por ejemplo, en cada tecla escrita al buscar) y
 // los remontaría por completo, causando parpadeos/pérdida de scroll y foco.
+// ---------- Videos por enlace (Google Drive, YouTube…): no ocupan el almacenamiento de Supabase ----------
+function bloqueVideo(file) {
+  const at = new Date().toISOString()
+  return typeof file === 'string' ? { type: 'video', url: file, link: true, at } : { type: 'video', file, at }
+}
+function agregarEnlaceVideo(guardar) {
+  const url = (window.prompt('Pega el enlace del video (Google Drive, YouTube, etc.).\nEn Google Drive: Compartir → "Cualquier persona con el enlace".', '') || '').trim()
+  if (!url) return
+  if (!/^https?:\/\//i.test(url)) { alert('El enlace debe empezar con https://'); return }
+  guardar(url)
+}
+// Un video guardado en Supabase se reproduce aquí; un enlace externo se muestra como botón que lo abre.
+function NoteVideo({ src, className, style }) {
+  const esEnlace = src && !/\/storage\/v1\/object\//.test(String(src)) && /^https?:/i.test(String(src)) && !/\.(mp4|webm|mov|m4v)(\?|$)/i.test(String(src))
+  if (esEnlace) {
+    return (
+      <a href={src} target="_blank" rel="noopener noreferrer"
+        style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '10px 14px', background: '#eef5e6', border: '1px solid #b9d3a3', borderRadius: 10, color: '#3b3b32', textDecoration: 'none', fontWeight: 600, maxWidth: '100%', boxSizing: 'border-box' }}>
+        ▶️ Ver video <span style={{ fontWeight: 400, fontSize: 12, color: '#7a7060', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{String(src).replace(/^https?:\/\//, '').slice(0, 40)}</span>
+      </a>
+    )
+  }
+  return <NoteVideo src={src} className={className} style={style} />
+}
+
 function PlantPicker({ list, selectedId, onSelect }) {
   return (
     <div style={{ maxHeight: 180, overflowY: 'auto', border: '1px solid #ccc', borderRadius: 8, marginBottom: 8, background: '#fff' }}>
@@ -669,6 +694,8 @@ function Admin() {
   const [galleryColorFilter, setGalleryColorFilter] = useState('all') // 'all' | '__none__' | nombre de color
   const [gallerySortBy, setGallerySortBy] = useState('nombre') // 'nombre' | 'color'
   const [customColorText, setCustomColorText] = useState('')
+  const [optFotos, setOptFotos] = useState({ corriendo: false, texto: '' })
+  const optFotosCancel = useRef(false)
   const [colorPickerFor, setColorPickerFor] = useState(null) // { ids: [...], title }
   const [colorScan, setColorScan] = useState(null) // { done, total } mientras detecta
   const colorRunning = useRef(false)
@@ -1571,7 +1598,7 @@ function Admin() {
 
   // Reduce las fotos antes de subirlas (ahorra el almacenamiento de Supabase): máx. 1600 px de lado, WebP (o JPG) al 82 %.
   // Los videos, GIF y cualquier archivo que no sea foto se suben tal cual; si la foto comprimida no pesa menos, se sube la original.
-  async function comprimirImagen(file, maxLado = 1600, calidad = 0.82) {
+  async function comprimirImagen(file, maxLado = 1600, calidad = 0.82, mismoFormato = false) {
     try {
       if (!file || !file.type || !file.type.startsWith('image/') || /gif|svg/i.test(file.type)) return file
       let bmp = null
@@ -1592,17 +1619,71 @@ function Admin() {
       ctx.fillRect(0, 0, cw, ch)
       ctx.drawImage(fuente, 0, 0, cw, ch)
       if (bmp && bmp.close) bmp.close()
-      let blob = await new Promise(r => canvas.toBlob(r, 'image/webp', calidad))
-      let ext = 'webp'
-      if (!blob || blob.type !== 'image/webp') {
-        blob = await new Promise(r => canvas.toBlob(r, 'image/jpeg', calidad))
-        ext = 'jpg'
+      let blob, ext
+      if (mismoFormato) {
+        // Para optimizar fotos viejas sin cambiar su formato (así nada que dependa de la extensión se rompe)
+        const t = /png/i.test(file.type) ? 'image/png' : /webp/i.test(file.type) ? 'image/webp' : 'image/jpeg'
+        blob = await new Promise(r => canvas.toBlob(r, t, calidad))
+        ext = t === 'image/png' ? 'png' : t === 'image/webp' ? 'webp' : 'jpg'
+      } else {
+        blob = await new Promise(r => canvas.toBlob(r, 'image/webp', calidad))
+        ext = 'webp'
+        if (!blob || blob.type !== 'image/webp') {
+          blob = await new Promise(r => canvas.toBlob(r, 'image/jpeg', calidad))
+          ext = 'jpg'
+        }
       }
       if (!blob || blob.size >= file.size) return file
       const nombre = (file.name || 'foto').replace(/\.[^.]+$/, '') + '.' + ext
       return new File([blob], nombre, { type: blob.type })
     } catch (e) {
       return file
+    }
+  }
+
+  // Optimiza las fotos que ya están en Supabase Storage, sobrescribiéndolas en el MISMO archivo (la dirección no cambia,
+  // así no hay que tocar la base de datos). Solo toca fotos de más de 300 KB y solo si ganan al menos un 20 %.
+  async function optimizarFotosAntiguas(limite) {
+    if (optFotos.corriendo) return
+    if (!confirm(limite ? `Prueba: se optimizarán hasta ${limite} fotos y se sobrescribirán (no hay vuelta atrás con esas fotos). ¿Seguir?` : 'Se optimizarán TODAS las fotos pesadas y se sobrescribirán. Las originales no se pueden recuperar. ¿Seguir?')) return
+    optFotosCancel.current = false
+    setOptFotos({ corriendo: true, texto: 'Buscando fotos…' })
+    let hechas = 0, saltadas = 0, ahorro = 0
+    try {
+      for (const bucket of ['plant-photos', 'category-notes']) {
+        let offset = 0
+        while (true) {
+          const { data: lista, error } = await supabaseStorage.storage.from(bucket).list('', { limit: 100, offset, sortBy: { column: 'name', order: 'asc' } })
+          if (error) throw new Error(error.message)
+          if (!lista || lista.length === 0) break
+          for (const it of lista) {
+            if (optFotosCancel.current) throw new Error('__cancelado__')
+            if (limite && hechas >= limite) throw new Error('__limite__')
+            const tam = Number(it.metadata?.size) || 0
+            const tipo = String(it.metadata?.mimetype || '')
+            if (!it.id || !tipo.startsWith('image/') || /gif|svg/i.test(tipo) || tam < 300 * 1024) { saltadas++; continue }
+            setOptFotos({ corriendo: true, texto: `${bucket}: ${it.name} (${(tam / 1048576).toFixed(1)} MB) — optimizadas ${hechas}, ahorro ${(ahorro / 1048576).toFixed(1)} MB` })
+            const url = supabaseStorage.storage.from(bucket).getPublicUrl(it.name).data.publicUrl
+            let blob
+            try { const r = await fetch(`${url}?t=${Date.now()}`); if (!r.ok) throw new Error('descarga'); blob = await r.blob() } catch (e) { saltadas++; continue }
+            const original = new File([blob], it.name, { type: blob.type || tipo })
+            const nueva = await comprimirImagen(original, 1600, 0.82, true)
+            if (nueva === original || nueva.size > original.size * 0.8) { saltadas++; continue }
+            const { error: eUp } = await supabaseStorage.storage.from(bucket).upload(it.name, nueva, { upsert: true, contentType: nueva.type, cacheControl: '3600' })
+            if (eUp) throw new Error('No se pudo sobrescribir: ' + eUp.message + '\n\nSi dice "row-level security" o "policy", falta permitir actualizar archivos. Ejecuta en el SQL Editor de tu proyecto de almacenamiento el archivo permitir_optimizar_fotos.sql')
+            hechas++
+            ahorro += original.size - nueva.size
+          }
+          if (lista.length < 100) break
+          offset += 100
+        }
+      }
+      setOptFotos({ corriendo: false, texto: `✅ Listo: ${hechas} foto(s) optimizadas, ${(ahorro / 1048576).toFixed(1)} MB ahorrados. (${saltadas} omitidas: ya eran livianas, videos u otros.)` })
+    } catch (e) {
+      const m = String(e.message || e)
+      if (m === '__limite__') setOptFotos({ corriendo: false, texto: `✅ Prueba terminada: ${hechas} foto(s) optimizadas, ${(ahorro / 1048576).toFixed(1)} MB ahorrados. Revisa en Galería que se vean bien.` })
+      else if (m === '__cancelado__') setOptFotos({ corriendo: false, texto: `⏹️ Detenido: ${hechas} foto(s) optimizadas, ${(ahorro / 1048576).toFixed(1)} MB ahorrados.` })
+      else { setOptFotos({ corriendo: false, texto: `⚠️ Se detuvo: ${m}` }); alert(m) }
     }
   }
 
@@ -2331,7 +2412,7 @@ function Admin() {
     setLoteNoteBlocks(prev => {
       const next = [...prev]
       if (loteNoteCurrentText.trim()) next.push({ type: 'text', content: loteNoteCurrentText })
-      next.push({ type: 'video', file })
+      next.push(bloqueVideo(file))
       return next
     })
     setLoteNoteCurrentText('')
@@ -2474,7 +2555,7 @@ function Admin() {
     setCategoryNoteBlocks(prev => {
       const next = [...prev]
       if (categoryNoteCurrentText.trim()) next.push({ type: 'text', content: categoryNoteCurrentText.trim(), at: new Date().toISOString() })
-      next.push({ type: 'video', file, at: new Date().toISOString() })
+      next.push(bloqueVideo(file))
       return next
     })
     setCategoryNoteCurrentText('')
@@ -3980,7 +4061,7 @@ function Admin() {
 
   async function updatePlantVideo(id, file) {
     if (!file) return
-    const url = await uploadImage(file, 'plant-photos')
+    const url = typeof file === 'string' ? file : await uploadImage(file, 'plant-photos')
     if (url) {
       await supabase.from('plants').update({ video_url: url }).eq('id', id)
       loadData()
@@ -4113,7 +4194,7 @@ function Admin() {
     setPlantNoteBlocks(prev => {
       const next = [...prev]
       if (plantNoteCurrentText.trim()) next.push({ type: 'text', content: plantNoteCurrentText.trim(), at: new Date().toISOString() })
-      next.push({ type: 'video', file, at: new Date().toISOString() })
+      next.push(bloqueVideo(file))
       return next
     })
     setPlantNoteCurrentText('')
@@ -4410,7 +4491,7 @@ function Admin() {
     setSbNoteBlocks(prev => {
       const next = [...prev]
       if (sbNoteCurrentText.trim()) next.push({ type: 'text', content: sbNoteCurrentText.trim(), at: new Date().toISOString() })
-      next.push({ type: 'video', file, at: new Date().toISOString() })
+      next.push(bloqueVideo(file))
       return next
     })
     setSbNoteCurrentText('')
@@ -4827,7 +4908,7 @@ function Admin() {
         const plant = plants.find(p => p.id === n.plant_id)
         const folder = `notas-plantas/${safeFileName(plant?.name, n.plant_id)}`
         ;(n.content_blocks || []).forEach((b, i) => {
-          if ((b.type === 'photo' || b.type === 'video') && b.url) {
+          if ((b.type === 'photo' || (b.type === 'video' && !b.link)) && b.url) {
             mediaJobs.push({ url: b.url, path: `${folder}/nota-${n.id}-${i}.${extFromUrl(b.url)}` })
           }
         })
@@ -4837,7 +4918,7 @@ function Admin() {
       })
       lotes.forEach(l => {
         ;(l.content_blocks || []).forEach((b, i) => {
-          if ((b.type === 'photo' || b.type === 'video') && b.url) {
+          if ((b.type === 'photo' || (b.type === 'video' && !b.link)) && b.url) {
             mediaJobs.push({ url: b.url, path: `notas-compras/lote-${l.numero || l.id}-${i}.${extFromUrl(b.url)}` })
           }
         })
@@ -4850,7 +4931,7 @@ function Admin() {
       })
       seedBatches.forEach(batch => {
         ;(batch.content_blocks || []).forEach((b, i) => {
-          if ((b.type === 'photo' || b.type === 'video') && b.url) {
+          if ((b.type === 'photo' || (b.type === 'video' && !b.link)) && b.url) {
             mediaJobs.push({ url: b.url, path: `notas-semillas/${safeFileName(batch.nombre, batch.id)}-${i}.${extFromUrl(b.url)}` })
           }
         })
@@ -5339,7 +5420,7 @@ function Admin() {
       const blocks = lote.content_blocks || []
       const textBlocks = blocks.filter(b => b.type === 'text').map(b => b.content).join('\n')
       const shareText = textBlocks ? `${header}:\n${textBlocks}` : header
-      const fileUrls = blocks.filter(b => (b.type === 'photo' || b.type === 'video') && b.url).map(b => b.url)
+      const fileUrls = blocks.filter(b => (b.type === 'photo' || (b.type === 'video' && !b.link)) && b.url).map(b => b.url)
       const files = (await Promise.all(fileUrls.map(urlToFile))).filter(Boolean)
 
       if (navigator.share && files.length > 0 && navigator.canShare && navigator.canShare({ files })) {
@@ -5362,7 +5443,7 @@ function Admin() {
       const blocks = batch.content_blocks || []
       const textBlocks = blocks.filter(b => b.type === 'text').map(b => b.content).join('\n')
       const shareText = textBlocks ? `${header}:\n${textBlocks}` : header
-      const fileUrls = blocks.filter(b => (b.type === 'photo' || b.type === 'video') && b.url).map(b => b.url)
+      const fileUrls = blocks.filter(b => (b.type === 'photo' || (b.type === 'video' && !b.link)) && b.url).map(b => b.url)
       const files = (await Promise.all(fileUrls.map(urlToFile))).filter(Boolean)
 
       if (navigator.share && files.length > 0 && navigator.canShare && navigator.canShare({ files })) {
@@ -5385,7 +5466,7 @@ function Admin() {
       const header = `🪴 ${plant ? plant.name : 'Planta'} (${new Date(n.created_at).toLocaleDateString()})`
       const textBlocks = (n.content_blocks || []).filter(b => b.type === 'text').map(b => b.content).join('\n')
       const shareText = textBlocks ? `${header}:\n${textBlocks}` : header
-      const fileUrls = (n.content_blocks || []).filter(b => (b.type === 'photo' || b.type === 'video') && b.url).map(b => b.url)
+      const fileUrls = (n.content_blocks || []).filter(b => (b.type === 'photo' || (b.type === 'video' && !b.link)) && b.url).map(b => b.url)
       const files = (await Promise.all(fileUrls.map(urlToFile))).filter(Boolean)
 
       if (navigator.share && files.length > 0 && navigator.canShare && navigator.canShare({ files })) {
@@ -6857,6 +6938,18 @@ function Admin() {
 
               {!loading && view === 'categorias' && (
                 <>
+                  <div className="admin-form" style={{ marginBottom: 14 }}>
+                    <h3>🗜️ Optimizar fotos antiguas</h3>
+                    <p style={{ fontSize: 13, margin: '0 0 8px', color: '#5a5040' }}>
+                      Reduce el peso de las fotos que ya subiste (las nuevas ya se optimizan solas) para ahorrar almacenamiento. Se sobrescriben en el mismo archivo, así que las fotos se siguen viendo igual en toda la app. No se pueden recuperar las originales: haz primero la prueba.
+                    </p>
+                    <div className="admin-item-actions">
+                      <button type="button" disabled={optFotos.corriendo} onClick={() => optimizarFotosAntiguas(5)}>🧪 Probar con 5 fotos</button>
+                      <button type="button" disabled={optFotos.corriendo} onClick={() => optimizarFotosAntiguas(0)}>🗜️ Optimizar todas</button>
+                      {optFotos.corriendo && <button type="button" className="danger" onClick={() => { optFotosCancel.current = true }}>⏹️ Detener</button>}
+                    </div>
+                    {optFotos.texto && <p style={{ fontSize: 12.5, margin: '8px 0 0', wordBreak: 'break-word' }}>{optFotos.texto}</p>}
+                  </div>
                   <form className="admin-form" onSubmit={addCategory}>
                     <h3>Agregar categoría nueva</h3>
                     <input placeholder="Nombre de la categoría" value={newCatName} onChange={e => setNewCatName(e.target.value)} />
@@ -7087,7 +7180,7 @@ function Admin() {
                                   )}
                                   {b.type === 'text' && <p>{b.content}</p>}
                                   {b.type === 'photo' && b.url && <img src={b.url} alt="" className="note-sheet-photo" />}
-                                  {b.type === 'video' && b.url && <video src={b.url} controls className="note-video" />}
+                                  {b.type === 'video' && b.url && <NoteVideo src={b.url} className="note-video" />}
                                 </div>
                               ))
                             )}
@@ -7262,18 +7355,24 @@ function Admin() {
                                 {current.type === 'image' ? (
                                   current.url ? <img src={current.url} alt={current.label} style={{ width: '100%', maxHeight: '55vh', objectFit: 'contain', borderRadius: 8 }} /> : <div className="no-img-sm" style={{ height: 200 }}>Sin foto</div>
                                 ) : (
-                                  current.url ? <video src={current.url} controls className="note-video" style={{ width: '100%', maxHeight: '55vh' }} /> : <div className="no-img-sm" style={{ height: 200 }}>Sin video</div>
+                                  current.url ? <NoteVideo src={current.url} className="note-video" style={{ width: '100%', maxHeight: '55vh' }} /> : <div className="no-img-sm" style={{ height: 200 }}>Sin video</div>
                                 )}
                                 <div style={{ marginTop: 4, fontSize: 13, color: '#888' }}>{current.label} ({photoModalIndex + 1}/{slides.length})</div>
+                                {current.type === 'video' ? (
+                                  <button type="button" onClick={() => agregarEnlaceVideo(url => current.onUpload(url))} style={{ display: 'inline-block', marginTop: 4, background: 'transparent', color: 'inherit', border: '1px solid #ccc' }}>
+                                    {current.url ? '🔗 Cambiar enlace del video' : '🔗 Pegar enlace del video'}
+                                  </button>
+                                ) : (
                                 <label className="file-label" style={{ display: 'inline-block', marginTop: 4, background: 'transparent', color: 'inherit', border: '1px solid #ccc' }}>
                                   {current.url ? `Cambiar ${current.label}` : `Subir ${current.label}`}
                                   <input
                                     type="file"
-                                    accept={current.type === 'video' ? 'video/*' : 'image/*'}
+                                    accept="image/*"
                                     style={{ display: 'none' }}
                                     onChange={e => { current.onUpload(e.target.files[0]); e.target.value = '' }}
                                   />
                                 </label>
+                                )}
                                 {current.type === 'image' && current.field && current.url && (
                                   <div>
                                     <button
@@ -7597,7 +7696,7 @@ function Admin() {
                                   <div key={i}>
                                     {b.type === 'text' && <p className="task-note">{b.content}</p>}
                                     {b.type === 'photo' && <img src={b.url} alt="" className="note-block-photo" />}
-                                    {b.type === 'video' && <video src={b.url} controls className="note-video" />}
+                                    {b.type === 'video' && <NoteVideo src={b.url} className="note-video" />}
                                   </div>
                                 ))}
                               </div>
@@ -7630,7 +7729,7 @@ function Admin() {
                                           {b.at && <div style={{ fontSize: 11.5, color: '#8a8a7a' }}>{formatBlockDate(b.at)}</div>}
                                           {b.type === 'text' && <p style={{ margin: 0 }}>{b.content}</p>}
                                           {b.type === 'photo' && b.url && <img src={b.url} alt="" style={{ width: 110, height: 110, objectFit: 'cover', borderRadius: 8 }} />}
-                                          {b.type === 'video' && b.url && <video src={b.url} controls style={{ width: '100%', maxWidth: 260 }} />}
+                                          {b.type === 'video' && b.url && <NoteVideo src={b.url} style={{ width: '100%', maxWidth: 260 }} />}
                                         </div>
                                       ))}
                                     </div>
@@ -7938,7 +8037,7 @@ function Admin() {
                               {b.type === 'text' && <p>{b.content}</p>}
                               {b.type === 'photo' && <img src={b.url || URL.createObjectURL(b.file)} alt="" className="note-sheet-photo" />}
                               {b.type === 'video' && (
-                                <video src={b.url || URL.createObjectURL(b.file)} controls className="note-video" />
+                                <NoteVideo src={b.url || URL.createObjectURL(b.file)} className="note-video" />
                               )}
                             </>
                           )}
@@ -7978,15 +8077,7 @@ function Admin() {
                             onChange={e => { insertPhotoBlockToPlantNote(e.target.files[0]); e.target.value = '' }}
                           />
                         </label>
-                        <label className="icon-btn" title="Insertar video aquí">
-                          🎥
-                          <input
-                            type="file"
-                            accept="video/*"
-                            style={{ display: 'none' }}
-                            onChange={e => { insertVideoBlockToPlantNote(e.target.files[0]); e.target.value = '' }}
-                          />
-                        </label>
+                        <button type="button" className="icon-btn" title="Pegar enlace de video (Google Drive, YouTube)" onClick={() => agregarEnlaceVideo(insertVideoBlockToPlantNote)}>🔗🎥</button>
                         <button
                           type="button"
                           className="icon-btn"
@@ -8917,7 +9008,7 @@ function Admin() {
                                     <div key={i}>
                                       {b.type === 'text' && <p className="task-note">{b.content}</p>}
                                       {b.type === 'photo' && <img src={b.url} alt="" className="note-block-photo" />}
-                                      {b.type === 'video' && <video src={b.url} controls className="note-video" />}
+                                      {b.type === 'video' && <NoteVideo src={b.url} className="note-video" />}
                                     </div>
                                   ))}
                                 </div>
@@ -10009,7 +10100,7 @@ function Admin() {
                                 {b.type === 'text' && <p>{b.content}</p>}
                                 {b.type === 'photo' && <img src={b.url || URL.createObjectURL(b.file)} alt="" className="note-sheet-photo" />}
                                 {b.type === 'video' && (
-                                  <video src={b.url || URL.createObjectURL(b.file)} controls className="note-video" />
+                                  <NoteVideo src={b.url || URL.createObjectURL(b.file)} className="note-video" />
                                 )}
                               </div>
                             ))}
@@ -10041,15 +10132,7 @@ function Admin() {
                                   onChange={e => { insertPhotoBlockToLoteNote(e.target.files[0]); e.target.value = '' }}
                                 />
                               </label>
-                              <label className="icon-btn" title="Insertar video aquí">
-                                🎥
-                                <input
-                                  type="file"
-                                  accept="video/*"
-                                  style={{ display: 'none' }}
-                                  onChange={e => { insertVideoBlockToLoteNote(e.target.files[0]); e.target.value = '' }}
-                                />
-                              </label>
+                              <button type="button" className="icon-btn" title="Pegar enlace de video (Google Drive, YouTube)" onClick={() => agregarEnlaceVideo(insertVideoBlockToLoteNote)}>🔗🎥</button>
                               {loteNoteBlocks.length > 0 && (
                                 <button type="button" className="icon-btn-text" onClick={removeLastLoteNoteBlock}>Deshacer</button>
                               )}
@@ -10478,7 +10561,7 @@ function Admin() {
                                     {b.type === 'text' && <p>{b.content}</p>}
                                     {b.type === 'photo' && <img src={b.url || URL.createObjectURL(b.file)} alt="" className="note-sheet-photo" />}
                                     {b.type === 'video' && (
-                                      <video src={b.url || URL.createObjectURL(b.file)} controls className="note-video" />
+                                      <NoteVideo src={b.url || URL.createObjectURL(b.file)} className="note-video" />
                                     )}
                                   </>
                                 )}
@@ -10507,15 +10590,7 @@ function Admin() {
                                   onChange={e => { insertPhotoBlockToSbNote(e.target.files[0]); e.target.value = '' }}
                                 />
                               </label>
-                              <label className="icon-btn" title="Insertar video aquí">
-                                🎥
-                                <input
-                                  type="file"
-                                  accept="video/*"
-                                  style={{ display: 'none' }}
-                                  onChange={e => { insertVideoBlockToSbNote(e.target.files[0]); e.target.value = '' }}
-                                />
-                              </label>
+                              <button type="button" className="icon-btn" title="Pegar enlace de video (Google Drive, YouTube)" onClick={() => agregarEnlaceVideo(insertVideoBlockToSbNote)}>🔗🎥</button>
                               {sbNoteBlocks.length > 0 && (
                                 <button type="button" className="icon-btn-text" onClick={removeLastSbNoteBlock}>Deshacer</button>
                               )}
@@ -10751,7 +10826,7 @@ function Admin() {
                     <>
                       {b.type === 'text' && <p>{b.content}</p>}
                       {b.type === 'photo' && <img src={b.file ? URL.createObjectURL(b.file) : b.url} alt="" className="note-sheet-photo" />}
-                      {b.type === 'video' && <video src={b.file ? URL.createObjectURL(b.file) : b.url} controls className="note-video" />}
+                      {b.type === 'video' && <NoteVideo src={b.file ? URL.createObjectURL(b.file) : b.url} className="note-video" />}
                     </>
                   )}
                 </div>
@@ -10778,10 +10853,7 @@ function Admin() {
                   📷
                   <input type="file" accept="image/*" capture="environment" style={{ display: 'none' }} onChange={e => { insertPhotoBlockToCategoryNote(e.target.files); e.target.value = '' }} />
                 </label>
-                <label className="icon-btn" title="Insertar video aquí">
-                  🎥
-                  <input type="file" accept="video/*" style={{ display: 'none' }} onChange={e => { insertVideoBlockToCategoryNote(e.target.files[0]); e.target.value = '' }} />
-                </label>
+                <button type="button" className="icon-btn" title="Pegar enlace de video (Google Drive, YouTube)" onClick={() => agregarEnlaceVideo(insertVideoBlockToCategoryNote)}>🔗🎥</button>
                 <button
                   type="button"
                   className="icon-btn"
