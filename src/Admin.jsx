@@ -6214,13 +6214,13 @@ function Admin() {
                                   )}
                         {withColor && filterGroup === 'color' && (
                           <>
-                      <div className="attr-row" style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 10 }}>
+                      <div className="attr-row" style={{ display: 'flex', flexWrap: 'nowrap', gap: 6, marginTop: 8, overflowX: 'auto', paddingBottom: 4, WebkitOverflowScrolling: 'touch' }}>
                         {chipsColor(colorCounts, galleryColorFilter).map(c => {
                           const on = galleryColorFilter === c.name
                           return (
                             <button key={c.name} type="button" onClick={() => setGalleryColorFilter(on ? 'all' : c.name)}
                               className={`attr-pill${on ? ' is-active' : ''}`}
-                              style={{ padding: '5px 10px', minHeight: 0, fontSize: 13 }}>
+                              style={{ padding: '5px 10px', minHeight: 0, fontSize: 13, flexShrink: 0, whiteSpace: 'nowrap' }}>
                               <span style={{ ...colorDotStyle(c.name, 13), marginRight: 6, verticalAlign: 'middle' }} />
                               {c.name} ({colorCounts[c.name] || 0}){on ? ' ✓' : ''}
                             </button>
@@ -6228,21 +6228,21 @@ function Admin() {
                         })}
                         <button type="button" onClick={() => setGalleryColorFilter(galleryColorFilter === '__none__' ? 'all' : '__none__')}
                           className={`attr-pill${galleryColorFilter === '__none__' ? ' is-active is-neg' : ''}`}
-                          style={{ padding: '5px 10px', minHeight: 0, fontSize: 13 }}>
+                          style={{ padding: '5px 10px', minHeight: 0, fontSize: 13, flexShrink: 0, whiteSpace: 'nowrap' }}>
                           <span className="attr-icon">❔</span>Sin color ({plantsSinColor.length}){galleryColorFilter === '__none__' ? ' ✓' : ''}
                         </button>
                       </div>
-                          <p className="attr-label" style={{ marginTop: 10 }}>Ordenar</p>
-                          <div className="attr-row" style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-                            <button type="button" onClick={() => setGallerySortBy('nombre')} className={`attr-pill${gallerySortBy === 'nombre' ? ' is-active' : ''}`}>
+                          <div className="attr-row" style={{ display: 'flex', flexWrap: 'nowrap', gap: 6, marginTop: 4, overflowX: 'auto', alignItems: 'center', WebkitOverflowScrolling: 'touch' }}>
+                            <span style={{ fontSize: 12, color: '#7a7060', flexShrink: 0 }}>Ordenar:</span>
+                            <button type="button" onClick={() => setGallerySortBy('nombre')} className={`attr-pill${gallerySortBy === 'nombre' ? ' is-active' : ''}`} style={{ padding: '5px 10px', minHeight: 0, fontSize: 13, flexShrink: 0, whiteSpace: 'nowrap' }}>
                               <span className="attr-icon">🔤</span>Por nombre{gallerySortBy === 'nombre' ? ' ✓' : ''}
                             </button>
-                            <button type="button" onClick={() => setGallerySortBy('color')} className={`attr-pill${gallerySortBy === 'color' ? ' is-active' : ''}`}>
+                            <button type="button" onClick={() => setGallerySortBy('color')} className={`attr-pill${gallerySortBy === 'color' ? ' is-active' : ''}`} style={{ padding: '5px 10px', minHeight: 0, fontSize: 13, flexShrink: 0, whiteSpace: 'nowrap' }}>
                               <span className="attr-icon">🎨</span>Por color{gallerySortBy === 'color' ? ' ✓' : ''}
                             </button>
                             <button type="button" disabled={!!colorScan || plantsPorDetectar.length === 0}
                               onClick={() => runColorDetection(plantsPorDetectar)}
-                              className="attr-pill">
+                              className="attr-pill" style={{ padding: '5px 10px', minHeight: 0, fontSize: 13, flexShrink: 0, whiteSpace: 'nowrap' }}>
                               <span className="attr-icon">🪄</span>
                               {colorScan ? `Detectando ${colorScan.done}/${colorScan.total}...` : `Detectar colores (${plantsPorDetectar.length})`}
                             </button>
