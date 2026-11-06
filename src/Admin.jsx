@@ -6219,14 +6219,16 @@ function Admin() {
                           const on = galleryColorFilter === c.name
                           return (
                             <button key={c.name} type="button" onClick={() => setGalleryColorFilter(on ? 'all' : c.name)}
-                              className={`attr-pill${on ? ' is-active' : ''}`}>
+                              className={`attr-pill${on ? ' is-active' : ''}`}
+                              style={{ padding: '5px 10px', minHeight: 0, fontSize: 13 }}>
                               <span style={{ ...colorDotStyle(c.name, 13), marginRight: 6, verticalAlign: 'middle' }} />
                               {c.name} ({colorCounts[c.name] || 0}){on ? ' ✓' : ''}
                             </button>
                           )
                         })}
                         <button type="button" onClick={() => setGalleryColorFilter(galleryColorFilter === '__none__' ? 'all' : '__none__')}
-                          className={`attr-pill${galleryColorFilter === '__none__' ? ' is-active is-neg' : ''}`}>
+                          className={`attr-pill${galleryColorFilter === '__none__' ? ' is-active is-neg' : ''}`}
+                          style={{ padding: '5px 10px', minHeight: 0, fontSize: 13 }}>
                           <span className="attr-icon">❔</span>Sin color ({plantsSinColor.length}){galleryColorFilter === '__none__' ? ' ✓' : ''}
                         </button>
                       </div>
@@ -6252,7 +6254,7 @@ function Admin() {
 
                     return (
                       <>
-                        <div id="gallery-sticky-bar" style={{ position: 'sticky', top: 0, zIndex: 40, background: '#fff', border: '1px solid #E8DFC8', borderRadius: 14, boxShadow: '0 2px 8px rgba(0,0,0,0.08)', padding: '8px 8px 6px', marginBottom: 8 }}>
+                        <div id="gallery-sticky-bar" style={{ position: 'sticky', top: 0, zIndex: 40, background: '#fff', border: '1px solid #E8DFC8', borderRadius: 14, boxShadow: '0 2px 8px rgba(0,0,0,0.08)', padding: '8px 8px 6px', marginBottom: 8, maxHeight: '46vh', overflowY: 'auto', WebkitOverflowScrolling: 'touch', overscrollBehavior: 'contain' }}>
                         <div className="filter-bar" style={{ flexWrap: 'wrap', rowGap: 8 }}>
                           <button
                             type="button"
