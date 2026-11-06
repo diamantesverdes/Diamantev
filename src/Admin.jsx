@@ -8745,7 +8745,7 @@ function Admin() {
                   const clave = `${lado}-${idx}`
                   const escrito = r.name.trim()
                   const sugerencias = (intFocus === clave && escrito && !(pl && normalizarBusqueda(pl.name) === normalizarBusqueda(escrito)))
-                    ? plants.filter(x => coincideBusqueda(x.name, escrito)).sort(compararPlantasNumeradas).slice(0, 6)
+                    ? plants.filter(x => coincideBusqueda(x.name, escrito)).sort(compararPlantasNumeradas).slice(0, 40)
                     : []
                   const miniatura = (pl2, size) => (pl2 && pl2.image_url
                     ? <img src={pl2.image_url} alt="" loading="lazy" style={{ width: size, height: size, objectFit: 'cover', borderRadius: 8, flexShrink: 0, border: '1px solid #ddd' }} />
@@ -8771,7 +8771,7 @@ function Admin() {
                       <button type="button" aria-label="Quitar fila" onClick={() => setIntForm(f => ({ ...f, [lado]: f[lado].filter((_, j) => j !== idx) }))}
                         style={{ width: 28, border: 'none', background: 'none', boxShadow: 'none', padding: 0, minHeight: 0, fontSize: 16, color: '#b03434', cursor: 'pointer' }}>✕</button>
                       {sugerencias.length > 0 && (
-                        <div style={{ flex: '1 0 100%', background: '#fff', border: '1px solid #d8cfb8', borderRadius: 10, overflow: 'hidden', boxShadow: '0 4px 12px rgba(0,0,0,0.12)' }}>
+                        <div style={{ flex: '1 0 100%', background: '#fff', border: '1px solid #d8cfb8', borderRadius: 10, overflowY: 'auto', maxHeight: 280, boxShadow: '0 4px 12px rgba(0,0,0,0.12)' }}>
                           {sugerencias.map(x => (
                             <button key={x.id} type="button"
                               onMouseDown={e => e.preventDefault()}
@@ -8921,7 +8921,39 @@ function Admin() {
                           </div>
                           <datalist id="int-plantas">{plants.map(pl => <option key={pl.id} value={pl.name} />)}</datalist>
                           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 6 }}>
-                            <input placeholder="Persona o contacto" value={intForm.contacto} onChange={e => setIntForm(f => ({ ...f, contacto: e.target.value }))} style={{ flex: '1 1 180px', minWidth: 0, boxSizing: 'border-box' }} />
+                            {(() => {
+                              const conocidos = [...new Set([
+                                ...lotes.map(l => l.proveedor),
+                                ...plants.map(p => p.proveedor),
+                                ...intercambios.map(i => i.contacto),
+                                ...ventaLotes.map(l => l.cliente),
+                              ].map(n => String(n || '').trim()).filter(Boolean))]
+                              const escritoC = intForm.contacto.trim()
+                              const sugC = intFocus === 'contacto'
+                                ? conocidos.filter(n => normalizarBusqueda(n) !== normalizarBusqueda(escritoC) && (!escritoC || coincideBusqueda(n, escritoC))).sort((a, b) => a.localeCompare(b)).slice(0, 30)
+                                : []
+                              return (
+                                <div style={{ flex: '1 1 180px', minWidth: 0, position: 'relative' }}>
+                                  <input placeholder="Persona o contacto" value={intForm.contacto}
+                                    onChange={e => setIntForm(f => ({ ...f, contacto: e.target.value }))}
+                                    onFocus={() => setIntFocus('contacto')}
+                                    onBlur={() => setTimeout(() => setIntFocus(f => (f === 'contacto' ? null : f)), 200)}
+                                    style={{ width: '100%', minWidth: 0, boxSizing: 'border-box' }} />
+                                  {sugC.length > 0 && (
+                                    <div style={{ position: 'absolute', left: 0, right: 0, top: '100%', zIndex: 5, background: '#fff', border: '1px solid #d8cfb8', borderRadius: 10, overflowY: 'auto', maxHeight: 220, boxShadow: '0 4px 12px rgba(0,0,0,0.12)' }}>
+                                      {sugC.map(n => (
+                                        <button key={n} type="button"
+                                          onMouseDown={e => e.preventDefault()}
+                                          onClick={() => { setIntForm(f => ({ ...f, contacto: n })); setIntFocus(null) }}
+                                          style={{ display: 'block', width: '100%', textAlign: 'left', background: '#fff', border: 'none', borderBottom: '1px solid #f0eadb', borderRadius: 0, boxShadow: 'none', padding: '8px 10px', minHeight: 0, color: '#3b3b32', cursor: 'pointer', fontSize: 14 }}>
+                                          🚚 {n}
+                                        </button>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
+                              )
+                            })()}
                             <input type="date" value={intForm.fecha} onChange={e => setIntForm(f => ({ ...f, fecha: e.target.value }))} style={{ flex: '0 1 150px', boxSizing: 'border-box' }} />
                           </div>
                           <input placeholder="Nota (opcional)" value={intForm.nota} onChange={e => setIntForm(f => ({ ...f, nota: e.target.value }))} style={{ width: '100%', boxSizing: 'border-box', marginBottom: 6 }} />
