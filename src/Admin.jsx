@@ -266,7 +266,7 @@ function formatBlockDate(iso) {
 // Además del nombre, un lote de semillas también "contiene" la palabra semilla/semillas,
 // aunque su nombre (ej. "Mix Tigridias") no la tenga escrita.
 function textoBuscableItem(item) {
-  return item.name + (item.isSeed ? ' semilla semillas' : '')
+  return item.name + (item.codigo ? ' ' + item.codigo : '') + (item.isSeed ? ' semilla semillas' : '')
 }
 
 function normalizarBusqueda(t) {
@@ -5192,6 +5192,15 @@ function Admin() {
           doc.setFont(undefined, 'bold')
           doc.setFontSize(13)
           doc.text(p.name.toUpperCase(), x + labelW / 2, y + bannerH / 2 + 3, { align: 'center', maxWidth: labelW - 4 })
+          if (p.codigo) {
+            doc.setFontSize(10)
+            const cw = doc.getTextWidth(p.codigo) + 4
+            doc.setFillColor(255, 255, 255)
+            doc.rect(x, y + labelH - 6, cw, 6, 'F')
+            doc.setTextColor(26, 46, 74)
+            doc.text(p.codigo, x + 2, y + labelH - 1.8)
+            doc.setTextColor(255, 255, 255)
+          }
           doc.setFont(undefined, 'normal')
         }
         hasContent = true
@@ -5251,7 +5260,7 @@ function Admin() {
           const maxW = textW - 3
           const cx = textX0 + textW / 2
 
-          const name = String(p.name || '').toUpperCase()
+          const name = (p.codigo ? p.codigo + '  ' : '') + String(p.name || '').toUpperCase()
           doc.setFont(undefined, 'bold')
           // Una sola línea: baja el tamaño de letra hasta que el nombre entre.
           let size = 14
@@ -6708,6 +6717,7 @@ function Admin() {
                                   {p.image_url ? <img src={p.image_url} alt={p.name} /> : <div className="no-img-sm">{p.isSeed ? '🌰 Semillas' : 'Sin foto'}</div>}
                                 </div>
                                 <span>{p.name}</span>
+                                {p.codigo && <span style={{ fontSize: '0.7rem', fontWeight: 700, color: '#7a7060', letterSpacing: 0.5 }}>{p.codigo}</span>}
                                 {p.isSeed && <span style={{ fontSize: '0.78rem', fontWeight: 600, color: '#6b5a45' }}>🌰 Semilla · Stock {p.stock} · ${p.price.toFixed(2)}</span>}
                                 {!p.isSeed && (
                                   <button
@@ -7369,7 +7379,7 @@ function Admin() {
                       <div className="free-note-modal-header" style={{ flexShrink: 0 }}>
                         <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
                           <button type="button" onClick={() => setPhotoModalMenuOpen(!photoModalMenuOpen)}>☰</button>
-                          <h4>{p.name}</h4>
+                          <h4>{p.name}{p.codigo && <span style={{ display: 'block', fontSize: '0.72rem', fontWeight: 700, color: '#7a7060', letterSpacing: 0.5 }}>{p.codigo}</span>}</h4>
                         </div>
                         <button type="button" className="modal-close-btn" onClick={() => { setPhotoModalPlantId(null); setPhotoModalMenuOpen(false); setPhotoModalSection('fotos') }}>✕</button>
                       </div>
