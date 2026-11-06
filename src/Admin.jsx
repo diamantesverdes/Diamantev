@@ -5943,15 +5943,16 @@ function Admin() {
                         return true
                       })
                       .sort((a, b) => {
-                        if (gallerySortBy === 'color') {
-                          const ia = colorIndex(a.color), ib = colorIndex(b.color)
-                          if (ia !== ib) return ia - ib
-                        }
+                        // Primero se agrupa por categoría (si se ven todas); dentro de cada categoría, "Por color" ordena por color.
                         if (galleryFilter === 'all') {
                           const catA = categories.find(c => c.id === a.category_id)?.name || 'zzz'
                           const catB = categories.find(c => c.id === b.category_id)?.name || 'zzz'
                           const catCompare = catA.localeCompare(catB, 'es', { numeric: true, sensitivity: 'base' })
                           if (catCompare !== 0) return catCompare
+                        }
+                        if (gallerySortBy === 'color') {
+                          const ia = colorIndex(a.color), ib = colorIndex(b.color)
+                          if (ia !== ib) return ia - ib
                         }
                         // Los nombres que son solo un código van al final
                         const codeA = esNombreCodigo(a.name), codeB = esNombreCodigo(b.name)
@@ -6234,10 +6235,10 @@ function Admin() {
                       </div>
                           <div className="attr-row" style={{ display: 'flex', flexWrap: 'nowrap', gap: 6, marginTop: 4, overflowX: 'auto', alignItems: 'center', WebkitOverflowScrolling: 'touch' }}>
                             <span style={{ fontSize: 12, color: '#7a7060', flexShrink: 0 }}>Ordenar:</span>
-                            <button type="button" onClick={() => setGallerySortBy('nombre')} className={`attr-pill${gallerySortBy === 'nombre' ? ' is-active' : ''}`} style={{ padding: '5px 10px', minHeight: 0, fontSize: 13, flexShrink: 0, whiteSpace: 'nowrap' }}>
+                            <button type="button" onClick={() => { setGallerySortBy('nombre'); setFilterGroup(null) }} className={`attr-pill${gallerySortBy === 'nombre' ? ' is-active' : ''}`} style={{ padding: '5px 10px', minHeight: 0, fontSize: 13, flexShrink: 0, whiteSpace: 'nowrap' }}>
                               <span className="attr-icon">🔤</span>Por nombre{gallerySortBy === 'nombre' ? ' ✓' : ''}
                             </button>
-                            <button type="button" onClick={() => setGallerySortBy('color')} className={`attr-pill${gallerySortBy === 'color' ? ' is-active' : ''}`} style={{ padding: '5px 10px', minHeight: 0, fontSize: 13, flexShrink: 0, whiteSpace: 'nowrap' }}>
+                            <button type="button" onClick={() => { setGallerySortBy('color'); setFilterGroup(null) }} className={`attr-pill${gallerySortBy === 'color' ? ' is-active' : ''}`} style={{ padding: '5px 10px', minHeight: 0, fontSize: 13, flexShrink: 0, whiteSpace: 'nowrap' }}>
                               <span className="attr-icon">🎨</span>Por color{gallerySortBy === 'color' ? ' ✓' : ''}
                             </button>
                             <button type="button" disabled={!!colorScan || plantsPorDetectar.length === 0}
@@ -6390,8 +6391,8 @@ function Admin() {
                           onScroll={updateIconEdge}
                           style={{ display: 'flex', flexWrap: 'nowrap', gap: 6, overflowX: 'auto', WebkitOverflowScrolling: 'touch', scrollbarWidth: 'none', paddingTop: 6, paddingBottom: 2 }}
                         >
-                          {iconPills}
                           {colorChip}
+                          {iconPills}
                         </div>
                         {!(iconRowEdge.start && iconRowEdge.end) && (
                           <div style={{ display: 'flex', justifyContent: 'center', gap: 12, marginTop: 2 }}>
