@@ -720,6 +720,9 @@ function Admin() {
     return next === cur ? prev : { ...prev, [modeKey]: next }
   })
   const [photoModalPlantId, setPhotoModalPlantId] = useState(null)
+  const [trashedPlants, setTrashedPlants] = useState([]) // plantas en la Papelera (deleted_at no nulo)
+  const [trashOpen, setTrashOpen] = useState(false)
+  const [confirmTrash, setConfirmTrash] = useState(null) // { mode: 'trash' | 'purge', plant, onSuccess }
   const [seedSheetId, setSeedSheetId] = useState(null) // lote de semillas abierto desde Galería/Tabla
   const [seedSheetSection, setSeedSheetSection] = useState('resumen')
   const [seedSheetMenuOpen, setSeedSheetMenuOpen] = useState(false)
@@ -1526,7 +1529,8 @@ function Admin() {
     const { data: flrs } = await supabase.from('floraciones').select('*').order('fecha', { ascending: false })
     const { data: pps } = await supabase.from('plant_pups').select('*').order('fecha', { ascending: false })
     setCategories(cats || [])
-    setPlants(pls || [])
+    setPlants((pls || []).filter(p => !p.deleted_at))
+    setTrashedPlants((pls || []).filter(p => p.deleted_at))
     setOrders(ords || [])
     setCompras(comps || [])
     setLotes(lts || [])
@@ -4086,11 +4090,18 @@ function Admin() {
   async function repairPendingPlantLinks() {
     // Antes solo agarraba compras con categoría asignada; esto dejaba afuera líneas viejas
     // (ej. de "Escanear factura") que quedaron sin categoría Y sin planta creada.
-    const pendientes = compras.filter(c => !c.plant_id && c.plant_name)
+    // También cuenta las líneas cuyo plant_id apunta a una planta que ya no existe (borrada), no solo las que quedaron en blanco.
+    const existe = id => plants.some(p => p.id === id) || trashedPlants.some(p => p.id === id)
+    const pendientes = compras.filter(c => c.plant_name && (!c.plant_id || !existe(c.plant_id)))
     if (pendientes.length === 0) { alert('No hay compras pendientes por vincular. Todo está en orden.'); return }
     if (!confirm(`Se encontraron ${pendientes.length} línea(s) de compra sin planta creada (nunca llegaron a "Recibido"). Se creará una planta para cada una (con stock 0) y quedará enlazada. ¿Continuar?`)) return
     let fixed = 0
+    const recreadas = new Map() // misma planta borrada con varias líneas de compra -> se recrea una sola vez
     for (const c of pendientes) {
+      if (c.plant_id && recreadas.has(c.plant_id)) {
+        await supabase.from('compras').update({ plant_id: recreadas.get(c.plant_id) }).eq('id', c.id)
+        continue
+      }
       const { data: newPlant, error } = await supabase.from('plants').insert({
         name: c.plant_name,
         category_id: c.new_plant_category || null,
@@ -4102,6 +4113,7 @@ function Admin() {
       }).select().single()
       if (!error && newPlant) {
         await supabase.from('compras').update({ plant_id: newPlant.id }).eq('id', c.id)
+        if (c.plant_id) recreadas.set(c.plant_id, newPlant.id)
         fixed++
       }
     }
@@ -4120,19 +4132,48 @@ function Admin() {
     loadData()
   }
 
-  async function deletePlant(id, onSuccess) {
-    if (!confirm('¿Borrar esta planta permanentemente? Esta acción no se puede deshacer.')) return
-    const { error } = await supabase.from('plants').delete().eq('id', id)
+  // ---------- Papelera de plantas ----------
+  // "Borrar" ya no elimina nada: pregunta primero y manda la planta a la Papelera (columna deleted_at).
+  // Sus compras, ventas y notas se conservan. Desde la Papelera se puede restaurar o borrar definitivamente.
+  function deletePlant(id, onSuccess) {
+    const plant = plants.find(x => x.id === id)
+    if (!plant) return
+    setConfirmTrash({ mode: 'trash', plant, onSuccess })
+  }
+
+  const errorPapelera = (error, accion) =>
+    /deleted_at/.test(error.message || '')
+      ? 'Falta preparar Supabase: ejecuta el archivo papelera_plantas.sql en el SQL Editor.\n\nDetalle: ' + error.message
+      : `Error al ${accion}: ` + error.message
+
+  async function trashPlantNow(plant, onSuccess) {
+    const { error } = await supabase.from('plants').update({
+      deleted_at: new Date().toISOString(),
+      marcado_cliente: false, // desaparece de la tienda del cliente al instante
+      shared_visible: false,  // y del link compartido
+    }).eq('id', plant.id)
+    if (error) { alert(errorPapelera(error, 'mover la planta a la papelera')); return }
+    await loadData()
+    if (onSuccess) onSuccess()
+  }
+
+  async function restorePlant(id) {
+    const { error } = await supabase.from('plants').update({ deleted_at: null }).eq('id', id)
+    if (error) { alert(errorPapelera(error, 'restaurar la planta')); return }
+    await loadData()
+  }
+
+  async function purgePlantNow(plant) {
+    const { error } = await supabase.from('plants').delete().eq('id', plant.id)
     if (error) {
       if (error.code === '23503') {
-        alert('Esta planta no se puede borrar porque todavía tiene historial relacionado (compras, ventas, notas, floraciones, etc. — se perdería ese historial).')
+        alert('Esta planta no se puede borrar definitivamente porque todavía tiene historial relacionado (compras, ventas, notas, floraciones, etc.). Déjala en la papelera.')
       } else {
         alert('Error al borrar la planta: ' + error.message)
       }
       return
     }
     await loadData()
-    if (onSuccess) onSuccess()
   }
 
   // ---------- Notas libres por planta ----------
@@ -5738,6 +5779,9 @@ function Admin() {
             </button>
             <button type="button" onClick={() => { setHomeMenuOpen(false); repairPendingPlantLinks() }} style={sideMenuItemStyle}>
               <span style={{ fontSize: 18 }}>🔧</span> Vincular pendientes
+            </button>
+            <button type="button" onClick={() => { setHomeMenuOpen(false); setTrashOpen(true) }} style={sideMenuItemStyle}>
+              <span style={{ fontSize: 18 }}>🗑️</span> Papelera{trashedPlants.length ? ` (${trashedPlants.length})` : ''}
             </button>
             <div style={{ flex: 1 }} />
             <hr style={{ border: 'none', borderTop: '1px solid #E8DFC8', margin: '6px 0' }} />
@@ -7434,7 +7478,7 @@ function Admin() {
                                   className="danger"
                                   onClick={() => deletePlant(p.id, () => { setPhotoModalPlantId(null); setPhotoModalMenuOpen(false); setPhotoModalSection('fotos') })}
                                 >
-                                  🗑️ Borrar planta permanentemente
+                                  🗑️ Mover a la papelera
                                 </button>
                               </div>
                             </div>
@@ -10912,6 +10956,81 @@ function Admin() {
         document.body
       )}
     </div>
+
+    {/* ---------- Confirmación de borrado (mover a papelera / borrar definitivamente) ---------- */}
+    {confirmTrash && createPortal(
+      <div
+        onClick={() => setConfirmTrash(null)}
+        style={{ position: 'fixed', inset: 0, zIndex: 4000, background: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}
+      >
+        <div onClick={e => e.stopPropagation()} style={{ background: '#fffdf6', borderRadius: 14, padding: 20, maxWidth: 360, width: '100%', boxShadow: '0 8px 30px rgba(0,0,0,0.3)' }}>
+          <h4 style={{ margin: '0 0 8px', color: '#4a3a2a' }}>
+            {confirmTrash.mode === 'trash' ? '🗑️ ¿Mover a la papelera?' : '⚠️ ¿Borrar definitivamente?'}
+          </h4>
+          <p style={{ margin: '0 0 14px', fontSize: 14, color: '#4a3a2a' }}>
+            <b>{confirmTrash.plant.name}</b>
+            {confirmTrash.mode === 'trash'
+              ? ' dejará de verse en la galería y en la tienda. Sus compras, ventas y notas se conservan, y podrás restaurarla desde ☰ → Papelera.'
+              : ' se borrará para siempre. Esta acción no se puede deshacer.'}
+          </p>
+          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+            <button type="button" onClick={() => setConfirmTrash(null)} style={{ padding: '10px 16px', borderRadius: 8, border: '1px solid #ccc', background: '#fff', fontWeight: 700, cursor: 'pointer' }}>
+              Cancelar
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                const { mode, plant, onSuccess } = confirmTrash
+                setConfirmTrash(null)
+                if (mode === 'trash') trashPlantNow(plant, onSuccess)
+                else purgePlantNow(plant)
+              }}
+              style={{ padding: '10px 16px', borderRadius: 8, border: 'none', background: '#b03434', color: '#fff', fontWeight: 700, cursor: 'pointer' }}
+            >
+              {confirmTrash.mode === 'trash' ? 'Mover a la papelera' : 'Borrar para siempre'}
+            </button>
+          </div>
+        </div>
+      </div>,
+      document.body
+    )}
+
+    {/* ---------- Papelera de plantas ---------- */}
+    {trashOpen && createPortal(
+      <div
+        onClick={() => setTrashOpen(false)}
+        style={{ position: 'fixed', inset: 0, zIndex: 3500, background: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}
+      >
+        <div onClick={e => e.stopPropagation()} style={{ background: '#fffdf6', width: '100%', maxWidth: 480, maxHeight: '85vh', overflowY: 'auto', borderRadius: '16px 16px 0 0', padding: 16, boxSizing: 'border-box' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+            <h4 style={{ margin: 0, color: '#4a3a2a' }}>🗑️ Papelera ({trashedPlants.length})</h4>
+            <button type="button" className="modal-close-btn" onClick={() => setTrashOpen(false)}>✕</button>
+          </div>
+          <p style={{ margin: '0 0 12px', fontSize: 12.5, color: '#7a7060' }}>
+            Al restaurar, la planta vuelve a la galería pero queda oculta de la tienda: vuelve a marcarla para el cliente si la quieres mostrar.
+          </p>
+          {trashedPlants.length === 0 && <p className="status-msg">La papelera está vacía.</p>}
+          {trashedPlants.map(p => (
+            <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', borderBottom: '1px solid #eee' }}>
+              {p.image_url
+                ? <img src={p.image_url} alt="" style={{ width: 48, height: 48, objectFit: 'cover', borderRadius: 8, flexShrink: 0 }} />
+                : <div style={{ width: 48, height: 48, borderRadius: 8, background: '#eef5e6', flexShrink: 0 }} />}
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontWeight: 700, color: '#4a3a2a', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name}</div>
+                <div style={{ fontSize: 12, color: '#7a7060' }}>Borrada el {new Date(p.deleted_at).toLocaleDateString('es')}</div>
+              </div>
+              <button type="button" onClick={() => restorePlant(p.id)} style={{ padding: '8px 10px', borderRadius: 8, border: 'none', background: '#4a5d3a', color: '#fff', fontWeight: 700, cursor: 'pointer' }}>
+                ♻️ Restaurar
+              </button>
+              <button type="button" aria-label="Borrar definitivamente" onClick={() => setConfirmTrash({ mode: 'purge', plant: p })} style={{ padding: '8px 10px', borderRadius: 8, border: '1px solid #b03434', background: '#fff', color: '#b03434', fontWeight: 700, cursor: 'pointer' }}>
+                ✕
+              </button>
+            </div>
+          ))}
+        </div>
+      </div>,
+      document.body
+    )}
 
     {/* ---------- Botones flotantes: menú ☰ y volver arriba ⬆ ---------- */}
     {showFloatNav && createPortal(
