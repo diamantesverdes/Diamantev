@@ -6640,10 +6640,9 @@ function Admin() {
                                         placeholder={config.placeholder}
                                         value={config.search}
                                         onChange={e => config.setSearch(e.target.value)}
-                                        autoFocus
                                       />
                                     </div>
-                                    <div className="sub-sheet-list">
+                                    <div className="sub-sheet-list" onTouchStart={() => { const a = document.activeElement; if (a && a.tagName === 'INPUT') a.blur() }}>
                                       {config.options.map(opt => (
                                         <div
                                           key={opt.value}
@@ -10936,10 +10935,9 @@ function Admin() {
                 placeholder="Buscar categoría..."
                 value={bulkCategorySearch}
                 onChange={e => setBulkCategorySearch(e.target.value)}
-                autoFocus
               />
             </div>
-            <div className="sub-sheet-list">
+            <div className="sub-sheet-list" onTouchStart={() => { const a = document.activeElement; if (a && a.tagName === 'INPUT') a.blur() }}>
               <div className="sub-sheet-option" style={{ cursor: 'pointer' }} onClick={() => chooseBulkCategory(null)}>
                 🚩 Sin categoría (decidir después)
               </div>
