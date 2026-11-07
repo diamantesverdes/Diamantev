@@ -7482,9 +7482,6 @@ function Admin() {
                                 <label>Descuento: <input key={p.id} type="number" min="0" max="100" placeholder="0" defaultValue={p.discount_percent || ''} onBlur={e => updatePlantDiscount(p.id, e.target.value)} style={{ width: 60 }} />%</label>
                               </div>
                               <div className="plant-quick-edit-actions">
-                                <button type="button" className={p.is_new ? 'active' : ''} onClick={() => toggleIsNew(p.id, p.is_new)}>{p.is_new ? '🌱 Nueva ✓' : 'Marcar como nueva'}</button>
-                                <button type="button" className={p.on_sale ? 'active' : ''} onClick={() => toggleOnSale(p.id, p.on_sale)}>{p.on_sale ? '🏷️ En descuento ✓' : 'Marcar en descuento'}</button>
-                                <button type="button" className={p.coming_soon ? 'active' : ''} onClick={() => toggleComingSoon(p.id, p.coming_soon)}>{p.coming_soon ? '🔜 Próximamente ✓' : 'Marcar como próximamente'}</button>
                                 <button
                                   type="button"
                                   className="danger"
