@@ -692,11 +692,12 @@ function Admin() {
   const [globalSearchTerm, setGlobalSearchTerm] = useState('')
   const [filterGroup, setFilterGroup] = useState(null) // 'compra' | 'venta' | 'etiquetas' | null (grupo de filtros desplegado)
   const [galleryColorFilter, setGalleryColorFilter] = useState('all') // 'all' | '__none__' | nombre de color
-  const [gallerySortBy, setGallerySortBy] = useState('nombre') // 'nombre' | 'color'
+  const [gallerySortBy, setGallerySortBy] = useState('color') // 'nombre' | 'color'
   const [customColorText, setCustomColorText] = useState('')
   const [optFotos, setOptFotos] = useState({ corriendo: false, texto: '' })
   const optFotosCancel = useRef(false)
   const [colorPickerFor, setColorPickerFor] = useState(null) // { ids: [...], title }
+  const [renumSaving, setRenumSaving] = useState(false)
   const [colorScan, setColorScan] = useState(null) // { done, total } mientras detecta
   const colorRunning = useRef(false)
   const colorTried = useRef(new Set())
@@ -4015,6 +4016,62 @@ function Admin() {
     await loadData()
   }
 
+  // Renumera los códigos (ej. AMA-001, AMA-002…) de UNA categoría siguiendo el mismo orden de la galería "Por color":
+  // color, luego los nombres normales y al final los que son solo un código, luego nombre. Pide confirmación antes.
+  async function renumerarCodigosPorColor(categoryId) {
+    const cat = categories.find(c => c.id === categoryId)
+    if (!cat) { alert('Primero elige una categoría en la galería.'); return }
+    const lista = plants.filter(pl => pl.category_id === categoryId && !pl.deleted_at).slice().sort((x, y) => {
+      const ix = colorIndex(x.color), iy = colorIndex(y.color)
+      if (ix !== iy) return ix - iy
+      const cx = esNombreCodigo(x.name), cy = esNombreCodigo(y.name)
+      if (cx !== cy) return cx ? 1 : -1
+      return String(x.name || '').localeCompare(String(y.name || ''), 'es', { numeric: true, sensitivity: 'base' })
+    })
+    if (lista.length === 0) { alert('Esa categoría no tiene plantas.'); return }
+    // letras del código: las más usadas entre los códigos que la categoría ya tiene
+    const cuenta = {}
+    lista.forEach(pl => { const m = String(pl.codigo || '').match(/^([A-Za-z]+)-\d+$/); if (m) cuenta[m[1]] = (cuenta[m[1]] || 0) + 1 })
+    let prefijo = Object.keys(cuenta).sort((x, y) => cuenta[y] - cuenta[x])[0]
+    if (!prefijo) {
+      const sug = String(cat.name || '').normalize('NFD').replace(/[^A-Za-z]/g, '').slice(0, 3).toUpperCase()
+      prefijo = (window.prompt(`Esta categoría aún no tiene códigos. ¿Con qué letras empiezan? (ej. ${sug})`, sug) || '').trim().toUpperCase()
+      if (!/^[A-Z]{2,5}$/.test(prefijo)) return
+    }
+    const ancho = Math.max(3, String(lista.length).length)
+    const cambios = lista
+      .map((pl, i) => ({ pl, nuevo: `${prefijo}-${String(i + 1).padStart(ancho, '0')}` }))
+      .filter(x => x.nuevo !== (x.pl.codigo || ''))
+    if (cambios.length === 0) { alert('Los códigos de esta categoría ya siguen el orden por color.'); return }
+    const conEtiqueta = cambios.filter(x => (Number(x.pl.label_printed_count) || 0) > 0).length
+    const ejemplos = cambios.slice(0, 4).map(x => `${x.pl.codigo || '(sin código)'} → ${x.nuevo}  ${x.pl.name}`).join('\n')
+    const aviso = conEtiqueta ? `\n\n⚠️ ${conEtiqueta} de ellas ya tienen etiqueta impresa con el código anterior; esas etiquetas quedarían con el código viejo.` : ''
+    if (!confirm(`Se cambiará el código de ${cambios.length} de ${lista.length} plantas de «${cat.name}», en el orden por color (${prefijo}-${'1'.padStart(ancho, '0')} a ${prefijo}-${String(lista.length).padStart(ancho, '0')}).\n\nEjemplos:\n${ejemplos}${aviso}\n\n¿Continuar?`)) return
+    setRenumSaving(true)
+    try {
+      // En dos pasos para que nunca haya dos plantas con el mismo código a la vez
+      const enLotes = async (items, hacer) => {
+        for (let i = 0; i < items.length; i += 10) {
+          const res = await Promise.all(items.slice(i, i + 10).map(hacer))
+          const fallo = res.find(r => r && r.error)
+          if (fallo) throw new Error(fallo.error.message)
+        }
+      }
+      await enLotes(cambios, x => supabase.from('plants').update({ codigo: `TMP-${x.pl.id}` }).eq('id', x.pl.id))
+      await enLotes(cambios, x => supabase.from('plants').update({ codigo: x.nuevo }).eq('id', x.pl.id))
+      const { data: ver } = await supabase.from('plants').select('id, codigo').in('id', cambios.map(x => x.pl.id))
+      const mapa = {}
+      ;(ver || []).forEach(r => { mapa[r.id] = r.codigo })
+      setPlants(prev => prev.map(pl => (pl.id in mapa ? { ...pl, codigo: mapa[pl.id] } : pl)))
+      const malos = cambios.filter(x => mapa[x.pl.id] !== x.nuevo).length
+      alert(malos ? `Listo, pero ${malos} plantas no quedaron con el código esperado. Revísalas en la galería.` : `Listo: ${cambios.length} códigos renumerados en «${cat.name}».`)
+    } catch (err) {
+      alert('No se pudo terminar: ' + (err instanceof Error ? err.message : String(err)) + '\n\nRecarga la app y revisa los códigos de esa categoría: pueden haber quedado algunos como TMP-…')
+    } finally {
+      setRenumSaving(false)
+    }
+  }
+
   async function toggleIsNew(id, current) {
     await supabase.from('plants').update({ is_new: !current }).eq('id', id)
     loadData()
@@ -6247,6 +6304,12 @@ function Admin() {
                               <span className="attr-icon">🪄</span>
                               {colorScan ? `Detectando ${colorScan.done}/${colorScan.total}...` : `Detectar colores (${plantsPorDetectar.length})`}
                             </button>
+                            {galleryFilter !== 'all' && (
+                              <button type="button" disabled={renumSaving} onClick={() => renumerarCodigosPorColor(galleryFilter)}
+                                className="attr-pill" style={{ padding: '5px 10px', minHeight: 0, fontSize: 13, flexShrink: 0, whiteSpace: 'nowrap' }}>
+                                <span className="attr-icon">🔢</span>{renumSaving ? 'Renumerando…' : 'Renumerar códigos'}
+                              </button>
+                            )}
                           </div>
                           </>
                         )}
