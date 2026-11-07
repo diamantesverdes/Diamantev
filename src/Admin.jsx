@@ -653,9 +653,6 @@ function Admin() {
   const [labelQtyModalOpen, setLabelQtyModalOpen] = useState(false)
   const [pendingLabelAction, setPendingLabelAction] = useState(null) // 'print' | 'pdf' | 'pptx'
   const [labelQuantities, setLabelQuantities] = useState(() => (readLabelsDraft() || {}).idQty || {}) // { plantId: cantidad }
-  // Número temporal de cada planta de la lista de Etiquetas (el de la estaca provisional en el jardín).
-  // nums = { plantId: n }; next = próximo número. No cambia al quitar otras plantas, y vuelve a 1 cuando la lista queda vacía.
-  const [labelTemp, setLabelTemp] = useState(() => { const d = readLabelsDraft() || {}; return { nums: d.tempNums || {}, next: d.tempNext || 1 } })
   const [intercambios, setIntercambios] = useState([]) // cabeceras: INT-001, fecha, contacto
   const [intercambioItems, setIntercambioItems] = useState([]) // líneas: lo que se entregó y lo que se recibió
   const [intercambiosOk, setIntercambiosOk] = useState(true) // false mientras las tablas no existan en Supabase
@@ -1265,22 +1262,9 @@ function Admin() {
   useEffect(() => {
     try {
       if (modeSets.etiquetas.size === 0) localStorage.removeItem(LABELS_DRAFT_KEY)
-      else localStorage.setItem(LABELS_DRAFT_KEY, JSON.stringify({ ids: Array.from(modeSets.etiquetas), idQty: labelQuantities, nameQty: labelNameQuantities, tempNums: labelTemp.nums, tempNext: labelTemp.next, savedAt: new Date().toISOString() }))
+      else localStorage.setItem(LABELS_DRAFT_KEY, JSON.stringify({ ids: Array.from(modeSets.etiquetas), idQty: labelQuantities, nameQty: labelNameQuantities, savedAt: new Date().toISOString() }))
     } catch (e) { /* nada */ }
-  }, [modeSets.etiquetas, labelQuantities, labelNameQuantities, labelTemp])
-  // Cada planta nueva en la lista de Etiquetas recibe el siguiente número; con la lista vacía se reinicia en 1
-  useEffect(() => {
-    const ids = Array.from(modeSets.etiquetas)
-    setLabelTemp(prev => {
-      if (ids.length === 0) return (Object.keys(prev.nums).length === 0 && prev.next === 1) ? prev : { nums: {}, next: 1 }
-      const faltan = ids.filter(id => !prev.nums[id])
-      if (faltan.length === 0) return prev
-      const nums = { ...prev.nums }
-      let next = prev.next
-      faltan.forEach(id => { nums[id] = next++ })
-      return { nums, next }
-    })
-  }, [modeSets.etiquetas])
+  }, [modeSets.etiquetas, labelQuantities, labelNameQuantities])
   // Tienda, Fotos y Carrusel también recuerdan su última selección (para ir sumando o quitando)
   useEffect(() => {
     try {
@@ -10808,14 +10792,14 @@ function Admin() {
                 </div>
 
                 <p style={{ margin: '0 2px 6px', fontSize: 12, color: '#7a7060' }}>
-                  🏷️ <b>Nº</b> = número de la etiqueta provisional en el jardín. No cambia al quitar otras plantas y vuelve a empezar en 1 cuando la lista queda vacía.
+                  🏷️ Cada planta lleva su <b>código fijo</b> (ej. AMA-017), el mismo que se imprime en la etiqueta.
                 </p>
                 <div style={{ overflowY: 'auto', padding: '2px 2px' }}>
                   {items.length === 0 && <p className="status-msg">No hay plantas en la lista.</p>}
-                  {[...items].sort((a, b) => (labelTemp.nums[a.id] || 1e9) - (labelTemp.nums[b.id] || 1e9)).map(p => (
+                  {[...items].sort((a, b) => String(a.codigo || '~').localeCompare(String(b.codigo || '~'), 'es', { numeric: true, sensitivity: 'base' })).map(p => (
                     <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 2px', borderBottom: '1px solid #eee' }}>
-                      <span title="Número de la etiqueta provisional" style={{ flex: '0 0 auto', minWidth: 38, textAlign: 'center', padding: '4px 6px', borderRadius: 10, background: '#FFF1CC', border: '1px solid #E6C76A', color: '#6b4f00', fontWeight: 800, fontSize: 17, lineHeight: 1.1 }}>
-                        {labelTemp.nums[p.id] ?? '·'}
+                      <span title="Código de la planta" style={{ flex: '0 0 auto', minWidth: 62, textAlign: 'center', padding: '4px 6px', borderRadius: 10, background: '#FFF1CC', border: '1px solid #E6C76A', color: '#6b4f00', fontWeight: 800, fontSize: 13, lineHeight: 1.1, whiteSpace: 'nowrap' }}>
+                        {p.codigo || '·'}
                       </span>
                       {p.image_url ? (
                         <img src={p.image_url} alt="" loading="lazy" style={{ width: 40, height: 40, objectFit: 'cover', borderRadius: 8, flexShrink: 0, border: '1px solid #ddd' }} />
