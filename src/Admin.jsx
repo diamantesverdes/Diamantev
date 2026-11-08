@@ -35,6 +35,219 @@ function NoteVideo({ src, className, style }) {
   return <NoteVideo src={src} className={className} style={style} />
 }
 
+// ---------- Editor de fotos: recortar, girar y ajustar brillo/contraste antes de guardar ----------
+function PhotoEditor({ file, onCancel, onSave }) {
+  const [img, setImg] = useState(null)
+  const [rot, setRot] = useState(0) // 0, 90, 180, 270
+  const [bright, setBright] = useState(100)
+  const [contrast, setContrast] = useState(100)
+  const [aspect, setAspect] = useState('free') // 'free' | '1:1' | '3:4' | '4:3'
+  const [view, setView] = useState({ w: 300, h: 300 })
+  const [crop, setCrop] = useState({ x: 0, y: 0, w: 300, h: 300 })
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+  const canvasRef = useRef(null)
+  const dragRef = useRef(null)
+
+  const ratioOf = a => (a === '1:1' ? 1 : a === '3:4' ? 0.75 : a === '4:3' ? 4 / 3 : null)
+  const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v))
+  const aspectCrop = (vw, vh, a) => {
+    const r = ratioOf(a)
+    if (!r) return { x: 0, y: 0, w: vw, h: vh }
+    let w, h
+    if (vw / vh > r) { h = vh; w = h * r } else { w = vw; h = w / r }
+    return { x: (vw - w) / 2, y: (vh - h) / 2, w, h }
+  }
+
+  useEffect(() => {
+    const url = URL.createObjectURL(file)
+    const im = new Image()
+    im.onload = () => setImg(im)
+    im.onerror = () => setError('No se pudo abrir la foto.')
+    im.src = url
+    return () => URL.revokeObjectURL(url)
+  }, [file])
+
+  // Tamaño de la vista previa y recorte inicial (se reinicia al girar)
+  useEffect(() => {
+    if (!img) return
+    const rw = rot % 180 === 0 ? img.naturalWidth : img.naturalHeight
+    const rh = rot % 180 === 0 ? img.naturalHeight : img.naturalWidth
+    const maxW = Math.min(window.innerWidth - 24, 560)
+    const maxH = Math.max(180, window.innerHeight * 0.46)
+    const k = Math.min(maxW / rw, maxH / rh)
+    const v = { w: Math.round(rw * k), h: Math.round(rh * k) }
+    setView(v)
+    setCrop(aspectCrop(v.w, v.h, aspect))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [img, rot])
+
+  useEffect(() => {
+    setCrop(aspectCrop(view.w, view.h, aspect))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [aspect])
+
+  useEffect(() => {
+    if (!img || !canvasRef.current) return
+    const c = canvasRef.current
+    c.width = view.w
+    c.height = view.h
+    const ctx = c.getContext('2d')
+    ctx.clearRect(0, 0, view.w, view.h)
+    ctx.save()
+    ctx.translate(view.w / 2, view.h / 2)
+    ctx.rotate((rot * Math.PI) / 180)
+    const dw = rot % 180 === 0 ? view.w : view.h
+    const dh = rot % 180 === 0 ? view.h : view.w
+    ctx.drawImage(img, -dw / 2, -dh / 2, dw, dh)
+    ctx.restore()
+  }, [img, rot, view])
+
+  function startDrag(e, mode) {
+    e.preventDefault()
+    e.stopPropagation()
+    try { e.currentTarget.setPointerCapture(e.pointerId) } catch (err) { /* nada */ }
+    dragRef.current = { mode, sx: e.clientX, sy: e.clientY, start: { ...crop } }
+  }
+  function onMove(e) {
+    const d = dragRef.current
+    if (!d) return
+    const dx = e.clientX - d.sx
+    const dy = e.clientY - d.sy
+    const st = d.start
+    if (d.mode === 'move') {
+      setCrop({ x: clamp(st.x + dx, 0, view.w - st.w), y: clamp(st.y + dy, 0, view.h - st.h), w: st.w, h: st.h })
+      return
+    }
+    const left = d.mode.includes('l')
+    const top = d.mode.includes('t')
+    const fx = left ? st.x + st.w : st.x
+    const fy = top ? st.y + st.h : st.y
+    const mx = clamp((left ? st.x : st.x + st.w) + dx, 0, view.w)
+    const my = clamp((top ? st.y : st.y + st.h) + dy, 0, view.h)
+    const maxW = left ? fx : view.w - fx
+    const maxH = top ? fy : view.h - fy
+    let nw = Math.min(Math.max(40, Math.abs(mx - fx)), maxW)
+    let nh = Math.min(Math.max(40, Math.abs(my - fy)), maxH)
+    const r = ratioOf(aspect)
+    if (r) {
+      if (nw / nh > r) nw = nh * r; else nh = nw / r
+    }
+    setCrop({ x: left ? fx - nw : fx, y: top ? fy - nh : fy, w: nw, h: nh })
+  }
+  function endDrag() { dragRef.current = null }
+
+  async function guardar() {
+    if (!img) return
+    setSaving(true)
+    try {
+      const sinCambios = rot === 0 && bright === 100 && contrast === 100 && crop.w >= view.w - 1 && crop.h >= view.h - 1
+      if (sinCambios) { onSave(file); return }
+      const rw = rot % 180 === 0 ? img.naturalWidth : img.naturalHeight
+      const rh = rot % 180 === 0 ? img.naturalHeight : img.naturalWidth
+      const sx = rw / view.w
+      const sy = rh / view.h
+      const cx = Math.round(crop.x * sx)
+      const cy = Math.round(crop.y * sy)
+      const cw = Math.max(1, Math.round(crop.w * sx))
+      const ch = Math.max(1, Math.round(crop.h * sy))
+      const k = Math.min(1, 2400 / Math.max(cw, ch))
+      const out = document.createElement('canvas')
+      out.width = Math.max(1, Math.round(cw * k))
+      out.height = Math.max(1, Math.round(ch * k))
+      const ctx = out.getContext('2d')
+      ctx.scale(k, k)
+      ctx.translate(-cx, -cy)
+      ctx.translate(rw / 2, rh / 2)
+      ctx.rotate((rot * Math.PI) / 180)
+      ctx.drawImage(img, -img.naturalWidth / 2, -img.naturalHeight / 2, img.naturalWidth, img.naturalHeight)
+      if (bright !== 100 || contrast !== 100) {
+        const id = ctx.getImageData(0, 0, out.width, out.height)
+        const dat = id.data
+        const b = bright / 100
+        const c = contrast / 100
+        for (let i = 0; i < dat.length; i += 4) {
+          for (let j = 0; j < 3; j++) {
+            const v = ((dat[i + j] / 255) * b - 0.5) * c + 0.5
+            dat[i + j] = Math.max(0, Math.min(255, v * 255))
+          }
+        }
+        ctx.putImageData(id, 0, 0)
+      }
+      const blob = await new Promise(res => out.toBlob(res, 'image/jpeg', 0.92))
+      if (!blob) throw new Error('No se pudo guardar la foto editada.')
+      const nombre = (file.name || 'foto').replace(/\.[^.]+$/, '') + '.jpg'
+      onSave(new File([blob], nombre, { type: 'image/jpeg' }))
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+      setSaving(false)
+    }
+  }
+
+  const btn = { background: '#2b2b2b', color: '#fff', border: '1px solid #555', borderRadius: 8, padding: '8px 12px', minHeight: 0, boxShadow: 'none', fontSize: 14, cursor: 'pointer' }
+  const handle = (mode, pos) => (
+    <div
+      onPointerDown={e => startDrag(e, mode)}
+      style={{ position: 'absolute', width: 30, height: 30, background: '#fff', border: '2px solid #1a2e4a', borderRadius: 15, touchAction: 'none', ...pos }}
+    />
+  )
+
+  return createPortal(
+    <div style={{ position: 'fixed', inset: 0, zIndex: 5000, background: '#141414', color: '#fff', display: 'flex', flexDirection: 'column', paddingTop: 'env(safe-area-inset-top, 0px)', paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, padding: '10px 12px' }}>
+        <button type="button" onClick={onCancel} style={btn}>✕ Cancelar</button>
+        <button type="button" onClick={() => onSave(file)} style={btn}>Usar sin editar</button>
+        <button type="button" disabled={saving || !img} onClick={guardar} style={{ ...btn, background: '#2f7a4a', borderColor: '#2f7a4a', fontWeight: 700 }}>{saving ? 'Guardando…' : '✓ Guardar'}</button>
+      </div>
+      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '0 12px 16px' }}>
+        {error && <p style={{ color: '#ff9a9a', textAlign: 'center' }}>{error}</p>}
+        {!img && !error && <p style={{ textAlign: 'center', color: '#aaa' }}>Abriendo foto…</p>}
+        {img && (
+          <>
+            <div
+              style={{ position: 'relative', width: view.w, height: view.h, margin: '0 auto', overflow: 'hidden', touchAction: 'none', userSelect: 'none' }}
+              onPointerMove={onMove}
+              onPointerUp={endDrag}
+              onPointerCancel={endDrag}
+            >
+              <canvas ref={canvasRef} style={{ display: 'block', width: view.w, height: view.h, filter: `brightness(${bright}%) contrast(${contrast}%)` }} />
+              <div
+                onPointerDown={e => startDrag(e, 'move')}
+                style={{ position: 'absolute', left: crop.x, top: crop.y, width: crop.w, height: crop.h, boxShadow: '0 0 0 9999px rgba(0,0,0,0.6)', border: '2px solid #fff', touchAction: 'none', cursor: 'move' }}
+              />
+              {handle('tl', { left: crop.x - 15, top: crop.y - 15 })}
+              {handle('tr', { left: crop.x + crop.w - 15, top: crop.y - 15 })}
+              {handle('bl', { left: crop.x - 15, top: crop.y + crop.h - 15 })}
+              {handle('br', { left: crop.x + crop.w - 15, top: crop.y + crop.h - 15 })}
+            </div>
+            <div style={{ maxWidth: 560, margin: '14px auto 0' }}>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'center' }}>
+                <button type="button" onClick={() => setRot(r => (r + 270) % 360)} style={btn}>↺ Girar</button>
+                <button type="button" onClick={() => setRot(r => (r + 90) % 360)} style={btn}>↻ Girar</button>
+              </div>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'center', marginTop: 10 }}>
+                {[['free', 'Libre'], ['1:1', '1:1'], ['3:4', '3:4'], ['4:3', '4:3']].map(([k, label]) => (
+                  <button key={k} type="button" onClick={() => setAspect(k)} style={{ ...btn, background: aspect === k ? '#1a2e4a' : '#2b2b2b', borderColor: aspect === k ? '#8fb3e8' : '#555' }}>{label}</button>
+                ))}
+              </div>
+              <label style={{ display: 'block', marginTop: 14, fontSize: 14 }}>☀️ Brillo: {bright}%
+                <input type="range" min="50" max="150" value={bright} onChange={e => setBright(Number(e.target.value))} style={{ width: '100%' }} />
+              </label>
+              <label style={{ display: 'block', marginTop: 8, fontSize: 14 }}>◐ Contraste: {contrast}%
+                <input type="range" min="50" max="150" value={contrast} onChange={e => setContrast(Number(e.target.value))} style={{ width: '100%' }} />
+              </label>
+              <div style={{ textAlign: 'center', marginTop: 8 }}>
+                <button type="button" onClick={() => { setBright(100); setContrast(100) }} style={btn}>Restablecer brillo y contraste</button>
+              </div>
+            </div>
+          </>
+        )}
+      </div>
+    </div>,
+    document.body
+  )
+}
+
 function PlantPicker({ list, selectedId, onSelect }) {
   return (
     <div style={{ maxHeight: 180, overflowY: 'auto', border: '1px solid #ccc', borderRadius: 8, marginBottom: 8, background: '#fff' }}>
@@ -719,6 +932,7 @@ function Admin() {
   const [photoModalPlantId, setPhotoModalPlantId] = useState(null)
   const [trashedPlants, setTrashedPlants] = useState([]) // plantas en la Papelera (deleted_at no nulo)
   const [trashOpen, setTrashOpen] = useState(false)
+  const [photoEditorJob, setPhotoEditorJob] = useState(null) // { file, cb }: foto recién elegida, abierta en el editor antes de subirla
   const [confirmTrash, setConfirmTrash] = useState(null) // { mode: 'trash' | 'purge', plant, onSuccess }
   const [seedSheetId, setSeedSheetId] = useState(null) // lote de semillas abierto desde Galería/Tabla
   const [seedSheetSection, setSeedSheetSection] = useState('resumen')
@@ -7409,7 +7623,7 @@ function Admin() {
                                     type="file"
                                     accept="image/*"
                                     style={{ display: 'none' }}
-                                    onChange={e => { current.onUpload(e.target.files[0]); e.target.value = '' }}
+                                    onChange={e => { const f = e.target.files[0]; e.target.value = ''; if (f) setPhotoEditorJob({ file: f, cb: current.onUpload }) }}
                                   />
                                 </label>
                                 )}
@@ -10994,6 +11208,13 @@ function Admin() {
     </div>
 
     {/* ---------- Confirmación de borrado (mover a papelera / borrar definitivamente) ---------- */}
+    {photoEditorJob && (
+      <PhotoEditor
+        file={photoEditorJob.file}
+        onCancel={() => setPhotoEditorJob(null)}
+        onSave={f => { const cb = photoEditorJob.cb; setPhotoEditorJob(null); cb(f) }}
+      />
+    )}
     {confirmTrash && createPortal(
       <div
         onClick={() => setConfirmTrash(null)}
