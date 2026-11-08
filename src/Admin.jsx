@@ -7413,6 +7413,18 @@ function Admin() {
                                   />
                                 </label>
                                 )}
+                                {current.type === 'image' && current.url && (
+                                  <div>
+                                    <a
+                                      href={`https://lens.google.com/uploadbyurl?url=${encodeURIComponent(current.url)}`}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      style={{ display: 'inline-block', marginTop: 6, border: '1px solid #ccc', borderRadius: 6, padding: '6px 10px', color: 'inherit', textDecoration: 'none', fontSize: 14 }}
+                                    >
+                                      🔍 Buscar en Google Lens
+                                    </a>
+                                  </div>
+                                )}
                                 {current.type === 'image' && current.field && current.url && (
                                   <div>
                                     <button
