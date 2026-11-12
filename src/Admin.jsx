@@ -5306,10 +5306,10 @@ function Admin() {
         }
 
         slide.addShape('rect', { x, y, w: labelW, h: bannerH, fill: { color: '1A2E4A' } })
-        slide.addText(p.name.toUpperCase(), {
+        slide.addText(String(p.codigo || p.name).toUpperCase(), {
           x, y, w: labelW, h: bannerH,
           align: 'center', valign: 'middle',
-          color: 'FFFFFF', bold: true, fontSize: 11, fontFace: 'Arial',
+          color: 'FFFFFF', bold: true, fontSize: p.codigo ? 14 : 11, fontFace: 'Arial',
         })
       }
 
@@ -5387,7 +5387,7 @@ function Admin() {
 
       // ---------- Identificaciones (foto grande) ----------
       if (idItems.length > 0) {
-        const labelW = 50, labelH = 60, marginX = 10, marginY = 10, gapX = 5, gapY = 5
+        const labelW = 50, labelH = 60, marginX = 3, marginY = 3, gapX = 5, gapY = 5 // margen mínimo de hoja (3 mm)
         const cols = Math.max(1, Math.floor((210 - marginX * 2 + gapX) / (labelW + gapX)))
         const rows = Math.max(1, Math.floor((297 - marginY * 2 + gapY) / (labelH + gapY)))
         const perPage = cols * rows
@@ -5419,17 +5419,9 @@ function Admin() {
           doc.rect(x, y, labelW, bannerH, 'F')
           doc.setTextColor(255, 255, 255)
           doc.setFont(undefined, 'bold')
-          doc.setFontSize(13)
-          doc.text(p.name.toUpperCase(), x + labelW / 2, y + bannerH / 2 + 3, { align: 'center', maxWidth: labelW - 4 })
-          if (p.codigo) {
-            doc.setFontSize(10)
-            const cw = doc.getTextWidth(p.codigo) + 4
-            doc.setFillColor(255, 255, 255)
-            doc.rect(x, y + labelH - 6, cw, 6, 'F')
-            doc.setTextColor(26, 46, 74)
-            doc.text(p.codigo, x + 2, y + labelH - 1.8)
-            doc.setTextColor(255, 255, 255)
-          }
+          // La identificación lleva solo el código (si la planta no tiene código, se usa el nombre)
+          doc.setFontSize(p.codigo ? 18 : 13)
+          doc.text(String(p.codigo || p.name).toUpperCase(), x + labelW / 2, y + bannerH / 2 + (p.codigo ? 3.2 : 3), { align: 'center', maxWidth: labelW - 4 })
           doc.setFont(undefined, 'normal')
         }
         hasContent = true
@@ -5438,11 +5430,11 @@ function Admin() {
       // ---------- Etiquetas (mini foto + nombre, 6,5 x 1 cm) ----------
       if (nameItems.length > 0) {
         if (hasContent) doc.addPage()
-        const labelW = 65, labelH = 10, gapX = 1.5, gapY = 2, marginY = 10
+        const labelW = 65, labelH = 10, gapX = 1.5, gapY = 2, marginY = 3 // margen mínimo de hoja (3 mm)
         const photoW = labelH // mini foto cuadrada, del alto de la etiqueta
         const PT = 0.3528 // 1 pt en mm
-        const cols = Math.max(1, Math.floor((210 - 12 + gapX) / (labelW + gapX)))
-        const marginX = (210 - (cols * labelW + (cols - 1) * gapX)) / 2 // centradas en la hoja
+        const marginX = 3
+        const cols = Math.max(1, Math.floor((210 - marginX * 2 + gapX) / (labelW + gapX)))
         const rows = Math.max(1, Math.floor((297 - marginY * 2 + gapY) / (labelH + gapY)))
         const perPage = cols * rows
 
@@ -5489,25 +5481,34 @@ function Admin() {
           const maxW = textW - 3
           const cx = textX0 + textW / 2
 
-          const name = (p.codigo ? p.codigo + '  ' : '') + String(p.name || '').toUpperCase()
+          const codigoTxt = p.codigo ? String(p.codigo) : ''
+          const name = String(p.name || '').toUpperCase()
+          const nameCy = codigoTxt ? y + labelH * 0.4 : y + labelH / 2 // con código, el nombre sube un poco
           doc.setFont(undefined, 'bold')
           // Una sola línea: baja el tamaño de letra hasta que el nombre entre.
-          let size = 14
+          let size = codigoTxt ? 12 : 14
           doc.setFontSize(size)
           while (size > 6 && doc.getTextWidth(name) > maxW) {
             size -= 0.5
             doc.setFontSize(size)
           }
           if (doc.getTextWidth(name) <= maxW) {
-            doc.text(name, cx, y + labelH / 2 + size * PT * 0.35, { align: 'center' })
+            doc.text(name, cx, nameCy + size * PT * 0.35, { align: 'center' })
           } else {
             // Nombre muy largo (o código): lo parte en dos líneas.
             size = 7
             doc.setFontSize(size)
             const lines = doc.splitTextToSize(name, maxW).slice(0, 2)
             const lineH = size * PT * 1.15
-            const firstBaseline = y + labelH / 2 - ((lines.length - 1) * lineH) / 2 + size * PT * 0.35
+            const firstBaseline = nameCy - ((lines.length - 1) * lineH) / 2 + size * PT * 0.35
             lines.forEach((ln, k) => doc.text(ln, cx, firstBaseline + k * lineH, { align: 'center' }))
+          }
+          if (codigoTxt) {
+            // Pie de la etiqueta: código pequeño centrado
+            doc.setFontSize(6.5)
+            doc.setTextColor(70, 70, 70)
+            doc.text(codigoTxt, cx, y + labelH - 1.3, { align: 'center' })
+            doc.setTextColor(0, 0, 0)
           }
           doc.setFont(undefined, 'normal')
         }
@@ -6958,18 +6959,25 @@ function Admin() {
                                   const nP = Number(p.label_name_printed_count) || 0, nC = Number(p.label_name_placed_count) || 0
                                   const hay = idP + nP > 0
                                   const falta = idP > idC || nP > nC
+                                  const stockN = Number(p.stock) || 0
                                   return (
+                                    <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', flexWrap: 'wrap', gap: 2, margin: '1px auto 0' }}>
+                                    <span
+                                      title={p.stock_disponible != null ? `Stock ${stockN} · listas para vender ${Number(p.stock_disponible) || 0}` : `Stock ${stockN}`}
+                                      style={{ fontSize: '0.68rem', padding: '0 6px', lineHeight: 1.3, color: stockN > 0 ? '#8a7d66' : '#c0392b', whiteSpace: 'nowrap' }}
+                                    >📦 {stockN}</span>
                                     <button
                                       type="button"
                                       title="Identificaciones y etiquetas: tengo / colocadas"
                                       onClick={e => { e.stopPropagation(); setLabelSheetFor({ id: p.id, title: p.name, idP: String(idP), idC: String(idC), nameP: String(nP), nameC: String(nC) }) }}
-                                      style={{ display: 'block', margin: '1px auto 0', padding: '0 6px', width: 'auto', minHeight: 0, lineHeight: 1.3, fontSize: '0.68rem', border: 'none', background: 'transparent', boxShadow: 'none', cursor: 'pointer', color: hay ? '#8a7d66' : '#c9bda3', opacity: hay ? 0.95 : 0.8 }}
+                                      style={{ display: 'block', margin: 0, padding: '0 6px', width: 'auto', minHeight: 0, lineHeight: 1.3, fontSize: '0.68rem', border: 'none', background: 'transparent', boxShadow: 'none', cursor: 'pointer', color: hay ? '#8a7d66' : '#c9bda3', opacity: hay ? 0.95 : 0.8 }}
                                     >
                                       {hay ? (<>
                                         {idP > 0 && <>🪪 {idC}/{idP}</>}{idP > 0 && nP > 0 && ' · '}{nP > 0 && <>🏷️ {nC}/{nP}</>}
                                         {' '}<span style={{ color: falta ? '#d9a13a' : '#6f9a5a' }}>●</span>
                                       </>) : '🏷️ ＋'}
                                     </button>
+                                    </div>
                                   )
                                 })()}
                                 {p.isSeed && <span style={{ fontSize: '0.78rem', fontWeight: 600, color: '#6b5a45' }}>🌰 Semilla · Stock {p.stock} · ${p.price.toFixed(2)}</span>}
@@ -11033,7 +11041,7 @@ function Admin() {
                   className="label-name"
                   style={{ background: '#1a2e4a', color: '#fff', fontWeight: 900, textAlign: 'center', padding: '2.5mm 1mm', fontSize: '14pt', lineHeight: 1.1, textTransform: 'uppercase', letterSpacing: '0.5px', textShadow: '1px 1px 0 rgba(0,0,0,0.4)' }}
                 >
-                  {p.name}
+                  {p.codigo || p.name}
                 </span>
                 {p.image_url
                   ? <img src={p.image_url} alt={p.name} className="label-photo" style={{ flex: 1, width: '100%', objectFit: 'cover' }} />
@@ -11053,6 +11061,15 @@ function Admin() {
           const nameOf = id => labelNameQuantities[id] ?? 1
           const totalId = items.reduce((sum, p) => sum + idOf(p.id), 0)
           const totalName = items.reduce((sum, p) => sum + nameOf(p.id), 0)
+          // Hojas A4 y metros cuadrados (mismas medidas, separaciones y margen de 3 mm que el PDF)
+          const idPerPage = Math.floor((210 - 6 + 5) / (50 + 5)) * Math.floor((297 - 6 + 5) / (60 + 5))
+          const namePerPage = Math.floor((210 - 6 + 1.5) / (65 + 1.5)) * Math.floor((297 - 6 + 2) / (10 + 2))
+          const hojasId = totalId > 0 ? Math.ceil(totalId / idPerPage) : 0
+          const hojasName = totalName > 0 ? Math.ceil(totalName / namePerPage) : 0
+          const hojas = hojasId + hojasName
+          const m2Etiquetas = totalId * 0.05 * 0.06 + totalName * 0.065 * 0.01
+          const m2Papel = hojas * 0.21 * 0.297
+          const fmtM2 = v => v.toLocaleString('es-EC', { minimumFractionDigits: 3, maximumFractionDigits: 3 })
           const stepBtn = { width: 28, height: 34, minHeight: 0, padding: 0, border: 'none', background: '#F3ECDD', boxShadow: 'none', borderRadius: 0, fontSize: 12, color: '#5B4636', cursor: 'pointer', flex: '0 0 auto' }
           // Contador con flechitas: ▼ baja, ▲ sube (también se puede escribir el número)
           const stepper = (value, min, onChange) => (
@@ -11151,6 +11168,11 @@ function Admin() {
                 {isPdf && (
                   <p style={{ margin: '8px 2px 0', fontSize: 13, color: '#5a5040', fontWeight: 600 }}>
                     {items.length} planta{items.length === 1 ? '' : 's'} · {totalId} identificaciones · {totalName} etiquetas
+                  </p>
+                )}
+                {isPdf && (
+                  <p style={{ margin: '2px 2px 0', fontSize: 12, color: '#7a7060' }}>
+                    📐 {hojas} hoja{hojas === 1 ? '' : 's'} A4 · papel {fmtM2(m2Papel)} m² · solo etiquetas {fmtM2(m2Etiquetas)} m²
                   </p>
                 )}
                 <div style={{ display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
