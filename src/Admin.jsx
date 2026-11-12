@@ -5126,6 +5126,23 @@ function Admin() {
     })
   }
 
+  // Descarga la foto y la convierte a JPEG (máx. 900 px) para que PowerPoint la acepte siempre (webp, heic, fotos enormes...)
+  async function urlToJpegDataURL(url, maxSide = 900) {
+    const res = await fetch(url)
+    const blob = await res.blob()
+    const bmp = await createImageBitmap(blob)
+    const scale = Math.min(1, maxSide / Math.max(bmp.width, bmp.height))
+    const canvas = document.createElement('canvas')
+    canvas.width = Math.max(1, Math.round(bmp.width * scale))
+    canvas.height = Math.max(1, Math.round(bmp.height * scale))
+    const ctx = canvas.getContext('2d')
+    ctx.fillStyle = '#ffffff'
+    ctx.fillRect(0, 0, canvas.width, canvas.height)
+    ctx.drawImage(bmp, 0, 0, canvas.width, canvas.height)
+    if (bmp.close) bmp.close()
+    return canvas.toDataURL('image/jpeg', 0.85)
+  }
+
   function safeFileName(str, fallback) {
     const clean = (str || fallback || 'archivo').toString().trim().replace(/[^a-zA-Z0-9-_ ]/g, '').replace(/\s+/g, '-')
     return clean || fallback || 'archivo'
@@ -5300,7 +5317,7 @@ function Admin() {
 
         if (p.image_url) {
           try {
-            const dataUrl = await urlToDataURL(p.image_url)
+            const dataUrl = await urlToJpegDataURL(p.image_url)
             slide.addImage({ data: dataUrl, x, y: y + bannerH, w: labelW, h: labelH - bannerH })
           } catch (e) { /* si falla la foto, se deja el recuadro vacío */ }
         }
@@ -5314,10 +5331,19 @@ function Admin() {
       }
 
       await pptx.writeFile({ fileName: 'etiquetas-diamantev.pptx' })
+    } catch (err) {
+      console.error('PPTX error', err)
+      alert('No se pudo generar el PowerPoint. Intenta de nuevo.\n\nDetalle: ' + (err && err.message ? err.message : String(err)))
+      setSharingNotes(false)
+      return
+    }
+    // El archivo ya se generó: si fallan los contadores, no se cuenta como error del PowerPoint
+    try {
       await markPlantsAction(uniqueSelected.map(p => p.id), 'pdf_generated_at')
       await addPrintedLabels(uniqueSelected.map(p => ({ id: p.id, qty: Math.max(1, Number(labelQuantities[p.id]) || 1) })))
     } catch (err) {
-      alert('No se pudo generar el PowerPoint. Intenta de nuevo.')
+      console.error('Contadores tras PPTX', err)
+      alert('El PowerPoint se generó, pero no se pudieron actualizar los contadores de etiquetas impresas.\n\nDetalle: ' + (err && err.message ? err.message : String(err)))
     }
     setSharingNotes(false)
   }
