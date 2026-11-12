@@ -907,6 +907,7 @@ function Admin() {
   const [optFotos, setOptFotos] = useState({ corriendo: false, texto: '' })
   const optFotosCancel = useRef(false)
   const [colorPickerFor, setColorPickerFor] = useState(null) // { ids: [...], title }
+  const [labelSheetFor, setLabelSheetFor] = useState(null) // { id, title, idP, idC, nameP, nameC } (hoja de etiquetas de la tarjeta)
   const [colorScan, setColorScan] = useState(null) // { done, total } mientras detecta
   const colorRunning = useRef(false)
   const colorTried = useRef(new Set())
@@ -1544,7 +1545,7 @@ function Admin() {
     ;(async () => {
       let plantRow = null, cs = null, ls = null
       try {
-        const r1 = await supabase.from('plants').select('id, category_id, stock, stock_disponible, label_printed_count, label_placed_count').eq('id', plantId).single()
+        const r1 = await supabase.from('plants').select('id, category_id, stock, stock_disponible, label_printed_count, label_placed_count, label_name_printed_count, label_name_placed_count').eq('id', plantId).single()
         const r2 = await supabase.from('compras').select('*').eq('plant_id', plantId).order('created_at', { ascending: false })
         if (!r1.error && !r2.error) {
           plantRow = r1.data
@@ -1570,6 +1571,8 @@ function Admin() {
         stockDisponible: String(plantRow?.stock_disponible ?? plantRow?.stock ?? 0),
         printed: String(plantRow?.label_printed_count || 0),
         placed: String(plantRow?.label_placed_count || 0),
+        namePrinted: String(plantRow?.label_name_printed_count || 0),
+        namePlaced: String(plantRow?.label_name_placed_count || 0),
         ...invCompraFields(cs, ls, cs[0]?.id),
       }
       setPlantInv({ plantId, compras: cs, lotes: ls })
@@ -3884,6 +3887,8 @@ function Admin() {
     const stockDisponible = Math.max(0, Math.min(stock, parseInt(d.stockDisponible, 10) || 0))
     const printed = Math.max(0, parseInt(d.printed, 10) || 0)
     const placed = Math.max(0, Math.min(printed, parseInt(d.placed, 10) || 0))
+    const namePrinted = Math.max(0, parseInt(d.namePrinted, 10) || 0)
+    const namePlaced = Math.max(0, Math.min(namePrinted, parseInt(d.namePlaced, 10) || 0))
     const compra = plantInv.compras.find(c => String(c.id) === String(d.compraId)) || null
     const lote = compra && compra.lote_id ? plantInv.lotes.find(l => l.id === compra.lote_id) : null
     const proveedor = d.proveedor.trim() || null
@@ -3904,7 +3909,7 @@ function Admin() {
     const errores = []
 
     // 1) Planta: categoría, stock y etiquetas
-    const plantUpdates = { category_id: d.categoryId || null, stock, stock_disponible: stockDisponible, label_printed_count: printed, label_placed_count: placed }
+    const plantUpdates = { category_id: d.categoryId || null, stock, stock_disponible: stockDisponible, label_printed_count: printed, label_placed_count: placed, label_name_printed_count: namePrinted, label_name_placed_count: namePlaced }
     const { error: pErr } = await supabase.from('plants').update(plantUpdates).eq('id', plantId)
     if (pErr) errores.push('inventario: ' + pErr.message)
     else setPlants(prev => prev.map(pl => (pl.id === plantId ? { ...pl, ...plantUpdates } : pl)))
@@ -4170,8 +4175,8 @@ function Admin() {
   // "Colocadas" = cuántas de esas ya están puestas en el jardín.
   // La resta (impresas - colocadas) es el "stock" de etiquetas sin pegar todavía.
   function labelStatusOf(p) {
-    const printed = Number(p.label_printed_count) || 0
-    const placed = Number(p.label_placed_count) || 0
+    const printed = (Number(p.label_printed_count) || 0) + (Number(p.label_name_printed_count) || 0)
+    const placed = (Number(p.label_placed_count) || 0) + (Number(p.label_name_placed_count) || 0)
     if (printed === 0) return 'disponible' // nunca se generó
     if (placed < printed) return 'sobrante' // tiene de sobra sin pegar
     return 'colocada' // todo lo impreso ya está colocado
@@ -4185,6 +4190,32 @@ function Admin() {
       await supabase.from('plants').update({ label_printed_count: current + qty }).eq('id', id)
     }
     await loadData()
+  }
+
+  async function addPrintedNameLabels(idsWithQty) {
+    for (const { id, qty } of idsWithQty) {
+      if (!qty || qty <= 0 || isSeedId(id)) continue
+      const plant = plants.find(p => p.id === id)
+      const current = Number(plant?.label_name_printed_count) || 0
+      await supabase.from('plants').update({ label_name_printed_count: current + qty }).eq('id', id)
+    }
+    await loadData()
+  }
+
+  // Guarda los 4 números (identificaciones y etiquetas con nombre: tengo / colocadas) desde la tarjeta de la galería
+  async function saveLabelSheet() {
+    const d = labelSheetFor
+    if (!d) return
+    const n = v => Math.max(0, parseInt(v, 10) || 0)
+    const idP = n(d.idP), nameP = n(d.nameP)
+    const patch = {
+      label_printed_count: idP, label_placed_count: Math.min(idP, n(d.idC)),
+      label_name_printed_count: nameP, label_name_placed_count: Math.min(nameP, n(d.nameC)),
+    }
+    const { error } = await supabase.from('plants').update(patch).eq('id', d.id)
+    if (error) { alert('No se pudo guardar: ' + error.message); return }
+    setPlants(prev => prev.map(pl => (pl.id === d.id ? { ...pl, ...patch } : pl)))
+    setLabelSheetFor(null)
   }
 
   async function incrementLabelPlaced(id) {
@@ -5491,10 +5522,13 @@ function Admin() {
         setLastLabelsPdf({ blob, ...meta })
       } catch (e) { /* si el navegador no deja guardar, el PDF igual se descarga */ }
       doc.save('etiquetas-diamantev.pdf')
-      // Solo las identificaciones cuentan para el contador de etiquetas impresas/colocadas.
+      // Identificaciones y etiquetas con nombre suman cada una a su propio contador ("tengo").
       if (idUnique.length > 0) {
         await markPlantsAction(idUnique.map(p => p.id), 'pdf_generated_at')
         await addPrintedLabels(idUnique.map(p => ({ id: p.id, qty: qtyOf(labelQuantities, p.id) })))
+      }
+      if (nameUnique.length > 0) {
+        await addPrintedNameLabels(nameUnique.map(p => ({ id: p.id, qty: qtyOf(labelNameQuantities, p.id) })))
       }
     } catch (err) {
       alert('No se pudo generar el PDF. Intenta de nuevo.')
@@ -6193,7 +6227,7 @@ function Admin() {
                       activeChips.push({ key: 'action', label: actionLabels[galleryActionFilter], onRemove: () => setGalleryActionFilter('all') })
                     }
                     if (galleryLabelStatus !== 'all') {
-                      const labelStatusLabels = { disponible: '🟢 Etiqueta: Nunca impresa', sobrante: '📦 Etiqueta: De sobra sin pegar', colocada: '✅ Etiqueta: Todo colocado' }
+                      const labelStatusLabels = { disponible: '🟢 Etiqueta: Nunca impresa', sobrante: '📦 Etiqueta: Faltan por colocar', colocada: '✅ Etiqueta: Todo colocado' }
                       activeChips.push({ key: 'labelstatus', label: labelStatusLabels[galleryLabelStatus], onRemove: () => setGalleryLabelStatus('all') })
                     }
                     if (galleryColorFilter !== 'all') {
@@ -6356,7 +6390,7 @@ function Admin() {
                                       () => openSelector('proveedor'))}
                                     {groupPill('etiquetas', '🏷️', 'Etiquetas',
                                       galleryLabelStatus !== 'all',
-                                      ({ disponible: 'Nunca impresa', sobrante: 'De sobra', colocada: 'Colocado' })[galleryLabelStatus] || '',
+                                      ({ disponible: 'Nunca impresa', sobrante: 'Faltan', colocada: 'Colocado' })[galleryLabelStatus] || '',
                                       () => setFilterGroup(g => (g === 'etiquetas' ? null : 'etiquetas')))}
                       </>
                     )
@@ -6407,7 +6441,7 @@ function Admin() {
                                   {filterGroup === 'etiquetas' && (
                                     <div className="attr-row" style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 10 }}>
                                       <button key="disponible" type="button" onClick={() => setGalleryLabelStatus(galleryLabelStatus === 'disponible' ? 'all' : 'disponible')} className={`attr-pill${galleryLabelStatus === 'disponible' ? ' is-active' : ''}`}>Nunca impresa{galleryLabelStatus === 'disponible' ? ' ✓' : ''}</button>
-                                      <button key="sobrante" type="button" onClick={() => setGalleryLabelStatus(galleryLabelStatus === 'sobrante' ? 'all' : 'sobrante')} className={`attr-pill${galleryLabelStatus === 'sobrante' ? ' is-active' : ''}`}>De sobra sin pegar{galleryLabelStatus === 'sobrante' ? ' ✓' : ''}</button>
+                                      <button key="sobrante" type="button" onClick={() => setGalleryLabelStatus(galleryLabelStatus === 'sobrante' ? 'all' : 'sobrante')} className={`attr-pill${galleryLabelStatus === 'sobrante' ? ' is-active' : ''}`}>Faltan por colocar{galleryLabelStatus === 'sobrante' ? ' ✓' : ''}</button>
                                       <button key="colocada" type="button" onClick={() => setGalleryLabelStatus(galleryLabelStatus === 'colocada' ? 'all' : 'colocada')} className={`attr-pill${galleryLabelStatus === 'colocada' ? ' is-active' : ''}`}>Todo colocado{galleryLabelStatus === 'colocada' ? ' ✓' : ''}</button>
                                     </div>
                                   )}
@@ -6919,6 +6953,25 @@ function Admin() {
                                 </div>
                                 <span>{p.name}</span>
                                 {p.codigo && <span style={{ fontSize: '0.7rem', fontWeight: 700, color: '#7a7060', letterSpacing: 0.5 }}>{p.codigo}</span>}
+                                {!p.isSeed && (() => {
+                                  const idP = Number(p.label_printed_count) || 0, idC = Number(p.label_placed_count) || 0
+                                  const nP = Number(p.label_name_printed_count) || 0, nC = Number(p.label_name_placed_count) || 0
+                                  const hay = idP + nP > 0
+                                  const falta = idP > idC || nP > nC
+                                  return (
+                                    <button
+                                      type="button"
+                                      title="Identificaciones y etiquetas: tengo / colocadas"
+                                      onClick={e => { e.stopPropagation(); setLabelSheetFor({ id: p.id, title: p.name, idP: String(idP), idC: String(idC), nameP: String(nP), nameC: String(nC) }) }}
+                                      style={{ display: 'block', margin: '1px auto 0', padding: '0 6px', width: 'auto', minHeight: 0, lineHeight: 1.3, fontSize: '0.68rem', border: 'none', background: 'transparent', boxShadow: 'none', cursor: 'pointer', color: hay ? '#8a7d66' : '#c9bda3', opacity: hay ? 0.95 : 0.8 }}
+                                    >
+                                      {hay ? (<>
+                                        {idP > 0 && <>🪪 {idC}/{idP}</>}{idP > 0 && nP > 0 && ' · '}{nP > 0 && <>🏷️ {nC}/{nP}</>}
+                                        {' '}<span style={{ color: falta ? '#d9a13a' : '#6f9a5a' }}>●</span>
+                                      </>) : '🏷️ ＋'}
+                                    </button>
+                                  )
+                                })()}
                                 {p.isSeed && <span style={{ fontSize: '0.78rem', fontWeight: 600, color: '#6b5a45' }}>🌰 Semilla · Stock {p.stock} · ${p.price.toFixed(2)}</span>}
                                 {!p.isSeed && (
                                   <button
@@ -6938,6 +6991,46 @@ function Admin() {
                             ))}
                           </div>
                           </>
+                        )}
+
+                        {labelSheetFor && createPortal(
+                          <div
+                            className="admin-sheet-overlay"
+                            onClick={() => setLabelSheetFor(null)}
+                            style={{ position: 'fixed', inset: 0, zIndex: 3100, display: 'flex', alignItems: 'flex-end', justifyContent: 'center', background: 'rgba(0,0,0,0.35)' }}
+                          >
+                            <div onClick={e => e.stopPropagation()} style={{ background: '#FBF6EA', width: '100%', maxWidth: 520, borderRadius: '18px 18px 0 0', padding: '14px 14px 22px', maxHeight: '80vh', overflowY: 'auto', boxSizing: 'border-box' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+                                <strong style={{ color: '#5B4636', fontSize: 15 }}>🏷️ Etiquetas — {labelSheetFor.title}</strong>
+                                <button type="button" onClick={() => setLabelSheetFor(null)} style={{ border: 'none', background: 'none', boxShadow: 'none', fontSize: 18, cursor: 'pointer', width: 'auto' }}>✕</button>
+                              </div>
+                              {[
+                                { title: '🪪 Identificación (foto grande)', p: 'idP', c: 'idC' },
+                                { title: '🏷️ Etiqueta con nombre (grapar)', p: 'nameP', c: 'nameC' },
+                              ].map(row => {
+                                const tengo = parseInt(labelSheetFor[row.p], 10) || 0
+                                const col = parseInt(labelSheetFor[row.c], 10) || 0
+                                return (
+                                  <div key={row.p} style={{ display: 'flex', alignItems: 'flex-end', gap: 10, flexWrap: 'wrap', margin: '8px 0' }}>
+                                    <span style={{ fontSize: 13, color: '#5B4636', flexBasis: '100%' }}>{row.title}</span>
+                                    <label style={{ fontSize: 12, color: '#5B4636' }}>Tengo<br /><input type="number" min="0" step="1" inputMode="numeric" value={labelSheetFor[row.p]} onChange={e => setLabelSheetFor(d => ({ ...d, [row.p]: e.target.value }))} style={{ width: 70 }} /></label>
+                                    <label style={{ fontSize: 12, color: '#5B4636' }}>Colocadas<br /><input type="number" min="0" step="1" inputMode="numeric" max={tengo} value={labelSheetFor[row.c]} onChange={e => setLabelSheetFor(d => ({ ...d, [row.c]: e.target.value }))} style={{ width: 70 }} /></label>
+                                    {tengo > col && (
+                                      <>
+                                        <button type="button" style={{ width: 'auto', minHeight: 0, padding: '6px 10px', fontSize: 13 }} onClick={() => setLabelSheetFor(d => ({ ...d, [row.c]: String(col + 1) }))}>+1 colocada</button>
+                                        <button type="button" style={{ width: 'auto', minHeight: 0, padding: '6px 10px', fontSize: 13 }} onClick={() => setLabelSheetFor(d => ({ ...d, [row.c]: String(tengo) }))}>Todas colocadas</button>
+                                      </>
+                                    )}
+                                  </div>
+                                )
+                              })}
+                              <div className="admin-item-actions" style={{ marginTop: 12 }}>
+                                <button type="button" className="full-form-btn" onClick={saveLabelSheet}>💾 Guardar</button>
+                                <button type="button" onClick={() => setLabelSheetFor(null)}>Cancelar</button>
+                              </div>
+                            </div>
+                          </div>,
+                          document.body
                         )}
 
                         {colorPickerFor && createPortal(
@@ -7894,12 +7987,22 @@ function Admin() {
                                     </div>
                                   )}
                                   <div style={{ display: 'flex', alignItems: 'flex-end', gap: 10, flexWrap: 'wrap', margin: '6px 0' }}>
-                                    <span style={{ fontSize: 13, color: '#5B4636', alignSelf: 'center' }}>🏷️ Etiquetas:</span>
-                                    <label style={{ fontSize: 12, color: '#5B4636' }}>Impresas<br /><input type="number" min="0" step="1" inputMode="numeric" value={invDraft.printed} onChange={e => setInvDraft({ printed: e.target.value })} style={{ width: 70 }} /></label>
+                                    <span style={{ fontSize: 13, color: '#5B4636', alignSelf: 'center' }}>🪪 Identificaciones:</span>
+                                    <label style={{ fontSize: 12, color: '#5B4636' }}>Tengo<br /><input type="number" min="0" step="1" inputMode="numeric" value={invDraft.printed} onChange={e => setInvDraft({ printed: e.target.value })} style={{ width: 70 }} /></label>
                                     <label style={{ fontSize: 12, color: '#5B4636' }}>Colocadas<br /><input type="number" min="0" step="1" inputMode="numeric" max={parseInt(invDraft.printed, 10) || 0} value={invDraft.placed} onChange={e => setInvDraft({ placed: e.target.value })} style={{ width: 70 }} /></label>
                                     {(parseInt(invDraft.printed, 10) || 0) > (parseInt(invDraft.placed, 10) || 0) && (
                                       <button type="button" onClick={() => setInvDraft({ placed: String((parseInt(invDraft.placed, 10) || 0) + 1) })}>
                                         +1 colocada ({(parseInt(invDraft.printed, 10) || 0) - (parseInt(invDraft.placed, 10) || 0)} de sobra)
+                                      </button>
+                                    )}
+                                  </div>
+                                  <div style={{ display: 'flex', alignItems: 'flex-end', gap: 10, flexWrap: 'wrap', margin: '6px 0' }}>
+                                    <span style={{ fontSize: 13, color: '#5B4636', alignSelf: 'center' }}>🏷️ Etiquetas con nombre:</span>
+                                    <label style={{ fontSize: 12, color: '#5B4636' }}>Tengo<br /><input type="number" min="0" step="1" inputMode="numeric" value={invDraft.namePrinted} onChange={e => setInvDraft({ namePrinted: e.target.value })} style={{ width: 70 }} /></label>
+                                    <label style={{ fontSize: 12, color: '#5B4636' }}>Colocadas<br /><input type="number" min="0" step="1" inputMode="numeric" max={parseInt(invDraft.namePrinted, 10) || 0} value={invDraft.namePlaced} onChange={e => setInvDraft({ namePlaced: e.target.value })} style={{ width: 70 }} /></label>
+                                    {(parseInt(invDraft.namePrinted, 10) || 0) > (parseInt(invDraft.namePlaced, 10) || 0) && (
+                                      <button type="button" onClick={() => setInvDraft({ namePlaced: String((parseInt(invDraft.namePlaced, 10) || 0) + 1) })}>
+                                        +1 colocada ({(parseInt(invDraft.namePrinted, 10) || 0) - (parseInt(invDraft.namePlaced, 10) || 0)} de sobra)
                                       </button>
                                     )}
                                   </div>
