@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, Component } from 'react'
 import { supabase } from './supabaseClient'
 import { addToQueue, isOnline, queueLength, processQueue } from './offlineQueue'
 
@@ -42,7 +42,7 @@ function stockLabel(n) {
   return n > 3 ? 'Disponible' : n > 0 ? 'Últimas unidades' : 'Agotado'
 }
 
-export default function App() {
+function AppInner() {
   // view: 'home' | 'all' | 'categories' | 'plants'
   const [view, setView] = useState('home')
   const [plants, setPlants] = useState([])
@@ -882,3 +882,32 @@ export default function App() {
   )
 }
 
+// Si algo falla al dibujar el catálogo, se muestra el error en pantalla en vez de dejarla en blanco.
+class AppErrorBoundary extends Component {
+  constructor(props) { super(props); this.state = { error: null } }
+  static getDerivedStateFromError(error) { return { error } }
+  componentDidCatch(error) { console.error('Error en el catálogo:', error) }
+  render() {
+    if (this.state.error) {
+      return (
+        <div style={{ padding: 20, fontFamily: 'sans-serif', maxWidth: 600, margin: '0 auto' }}>
+          <h2 style={{ color: '#b03434' }}>⚠️ No se pudo cargar el catálogo</h2>
+          <p style={{ fontSize: 14 }}>Envía una captura de este mensaje para solucionarlo:</p>
+          <pre style={{ background: '#f3ecdd', padding: 12, borderRadius: 8, fontSize: 12, whiteSpace: 'pre-wrap', wordBreak: 'break-word', border: '1px solid #d8cdb0' }}>
+            {String(this.state.error && (this.state.error.stack || this.state.error.message || this.state.error))}
+          </pre>
+          <button type="button" onClick={() => window.location.reload()} style={{ marginTop: 12, background: '#4a5d3a', color: '#fff', border: 'none', padding: '10px 16px', borderRadius: 6, fontWeight: 600 }}>Recargar</button>
+        </div>
+      )
+    }
+    return this.props.children
+  }
+}
+
+export default function App() {
+  return (
+    <AppErrorBoundary>
+      <AppInner />
+    </AppErrorBoundary>
+  )
+}
