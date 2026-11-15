@@ -4250,9 +4250,10 @@ function Admin() {
     await loadData()
   }
 
-  // Guarda los 4 números (identificaciones y etiquetas con nombre: tengo / colocadas) desde la tarjeta de la galería
-  async function saveLabelSheet() {
-    const d = labelSheetFor
+  // Guarda los 4 números (identificaciones y etiquetas con nombre: tengo / colocadas) desde la tarjeta de la galería.
+  // Se guarda solo al terminar de llenar cada casilla; con cerrar=true además cierra la hoja.
+  async function saveLabelSheet(draft = labelSheetFor, cerrar = true) {
+    const d = draft
     if (!d) return
     const n = v => Math.max(0, parseInt(v, 10) || 0)
     const idP = n(d.idP), nameP = n(d.nameP)
@@ -4260,10 +4261,22 @@ function Admin() {
       label_printed_count: idP, label_placed_count: Math.min(idP, n(d.idC)),
       label_name_printed_count: nameP, label_name_placed_count: Math.min(nameP, n(d.nameC)),
     }
-    const { error } = await supabase.from('plants').update(patch).eq('id', d.id)
-    if (error) { alert('No se pudo guardar: ' + error.message); return }
-    setPlants(prev => prev.map(pl => (pl.id === d.id ? { ...pl, ...patch } : pl)))
-    setLabelSheetFor(null)
+    const actual = plants.find(pl => pl.id === d.id)
+    const igual = actual && Object.keys(patch).every(k => (Number(actual[k]) || 0) === patch[k])
+    if (!igual) {
+      const { error } = await supabase.from('plants').update(patch).eq('id', d.id)
+      if (error) { alert('No se pudo guardar: ' + error.message); return }
+      setPlants(prev => prev.map(pl => (pl.id === d.id ? { ...pl, ...patch } : pl)))
+    }
+    if (cerrar) { setLabelSheetFor(null); return }
+    // Si "colocadas" quedó por encima de "tengo", se corrige en pantalla sin tocar lo que se esté escribiendo
+    setLabelSheetFor(cur => {
+      if (!cur || cur.id !== d.id) return cur
+      const topeId = n(cur.idP), topeNombre = n(cur.nameP)
+      return { ...cur,
+        idC: n(cur.idC) > topeId ? String(topeId) : cur.idC,
+        nameC: n(cur.nameC) > topeNombre ? String(topeNombre) : cur.nameC }
+    })
   }
 
   async function incrementLabelPlaced(id) {
@@ -7089,13 +7102,13 @@ function Admin() {
                         {labelSheetFor && createPortal(
                           <div
                             className="admin-sheet-overlay"
-                            onClick={() => setLabelSheetFor(null)}
+                            onClick={() => saveLabelSheet(labelSheetFor, true)}
                             style={{ position: 'fixed', inset: 0, zIndex: 3100, display: 'flex', alignItems: 'flex-end', justifyContent: 'center', background: 'rgba(0,0,0,0.35)' }}
                           >
                             <div onClick={e => e.stopPropagation()} style={{ background: '#FBF6EA', width: '100%', maxWidth: 520, borderRadius: '18px 18px 0 0', padding: '14px 14px 22px', maxHeight: '80vh', overflowY: 'auto', boxSizing: 'border-box' }}>
                               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
                                 <strong style={{ color: '#5B4636', fontSize: 15 }}>🏷️ Etiquetas — {labelSheetFor.title}</strong>
-                                <button type="button" onClick={() => setLabelSheetFor(null)} style={{ border: 'none', background: 'none', boxShadow: 'none', fontSize: 18, cursor: 'pointer', width: 'auto' }}>✕</button>
+                                <button type="button" onClick={() => saveLabelSheet(labelSheetFor, true)} style={{ border: 'none', background: 'none', boxShadow: 'none', fontSize: 18, cursor: 'pointer', width: 'auto' }}>✕</button>
                               </div>
                               {[
                                 { title: '🪪 Identificación (foto grande)', p: 'idP', c: 'idC' },
@@ -7106,20 +7119,18 @@ function Admin() {
                                 return (
                                   <div key={row.p} style={{ display: 'flex', alignItems: 'flex-end', gap: 10, flexWrap: 'wrap', margin: '8px 0' }}>
                                     <span style={{ fontSize: 13, color: '#5B4636', flexBasis: '100%' }}>{row.title}</span>
-                                    <label style={{ fontSize: 12, color: '#5B4636' }}>Tengo<br /><input type="number" min="0" step="1" inputMode="numeric" value={labelSheetFor[row.p]} onChange={e => setLabelSheetFor(d => ({ ...d, [row.p]: e.target.value }))} style={{ width: 70 }} /></label>
-                                    <label style={{ fontSize: 12, color: '#5B4636' }}>Colocadas<br /><input type="number" min="0" step="1" inputMode="numeric" max={tengo} value={labelSheetFor[row.c]} onChange={e => setLabelSheetFor(d => ({ ...d, [row.c]: e.target.value }))} style={{ width: 70 }} /></label>
+                                    <label style={{ fontSize: 12, color: '#5B4636' }}>Tengo<br /><input type="number" min="0" step="1" inputMode="numeric" value={labelSheetFor[row.p]} onChange={e => setLabelSheetFor(d => ({ ...d, [row.p]: e.target.value }))} onBlur={() => saveLabelSheet(labelSheetFor, false)} style={{ width: 70 }} /></label>
+                                    <label style={{ fontSize: 12, color: '#5B4636' }}>Colocadas<br /><input type="number" min="0" step="1" inputMode="numeric" max={tengo} value={labelSheetFor[row.c]} onChange={e => setLabelSheetFor(d => ({ ...d, [row.c]: e.target.value }))} onBlur={() => saveLabelSheet(labelSheetFor, false)} style={{ width: 70 }} /></label>
                                     {tengo > col && (
                                       <>
-                                        <button type="button" style={{ width: 'auto', minHeight: 0, padding: '6px 10px', fontSize: 13 }} onClick={() => setLabelSheetFor(d => ({ ...d, [row.c]: String(col + 1) }))}>+1 colocada</button>
-                                        <button type="button" style={{ width: 'auto', minHeight: 0, padding: '6px 10px', fontSize: 13 }} onClick={() => setLabelSheetFor(d => ({ ...d, [row.c]: String(tengo) }))}>Todas colocadas</button>
+                                        <button type="button" style={{ width: 'auto', minHeight: 0, padding: '6px 10px', fontSize: 13 }} onClick={() => { const nd = { ...labelSheetFor, [row.c]: String(tengo) }; setLabelSheetFor(nd); saveLabelSheet(nd, false) }}>Todas colocadas</button>
                                       </>
                                     )}
                                   </div>
                                 )
                               })}
                               <div className="admin-item-actions" style={{ marginTop: 12 }}>
-                                <button type="button" className="full-form-btn" onClick={saveLabelSheet}>💾 Guardar</button>
-                                <button type="button" onClick={() => setLabelSheetFor(null)}>Cancelar</button>
+                                <button type="button" className="full-form-btn" onClick={() => saveLabelSheet(labelSheetFor, true)}>✔ Listo</button>
                               </div>
                             </div>
                           </div>,
