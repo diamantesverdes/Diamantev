@@ -4026,6 +4026,20 @@ function Admin() {
         : 'No se pudo guardar la presentación: ' + error.message)
     }
   }
+  // Venta mínima (cantidad mínima por pedido en el catálogo): solo plantas.
+  async function updateMinimoRapido(x, texto) {
+    if (x.isSeed) return
+    const nuevo = Math.max(1, Math.floor(Number(texto) || 1))
+    if (nuevo === (Number(x.venta_minima) || 1)) return
+    const undo = patchLocal(setPlants, plants, [x.id], { venta_minima: nuevo })
+    const { error } = await supabase.from('plants').update({ venta_minima: nuevo }).eq('id', x.id)
+    if (error) {
+      undo()
+      alert(/venta_minima/i.test(error.message)
+        ? 'Falta crear la columna "venta_minima" en Supabase. Ejecuta en el SQL Editor:\n\nalter table plants add column if not exists venta_minima integer not null default 1;'
+        : 'No se pudo guardar la venta mínima: ' + error.message)
+    }
+  }
   // Precio desde el panel Tienda: plantas y lotes de semillas.
   async function updatePrecioTienda(x, texto) {
     if (String(texto).trim() === '') return
@@ -5720,7 +5734,7 @@ function Admin() {
       for (const p of selected) {
         if (!p.image_url) continue
         const tipoTxt = (PRESENTACIONES_ADMIN.find(([v]) => v === p.presentacion) || [])[1] || ''
-        const subtitulo = [tipoTxt.replace(/^\S+\s/, ''), Number(p.price) > 0 ? `$${Number(p.price).toFixed(2)}` : ''].filter(Boolean).join(' · ')
+        const subtitulo = [tipoTxt.replace(/^\S+\s/, ''), Number(p.price) > 0 ? `$${Number(p.price).toFixed(2)}` : '', Number(p.venta_minima) > 1 ? `mín. ${p.venta_minima}` : ''].filter(Boolean).join(' · ')
         const blob = await buildCaptionedPhoto(p.image_url, p.name, subtitulo)
         if (blob) files.push(new File([blob], `${p.name.replace(/[^a-z0-9-_ ]/gi, '')}.jpg`, { type: 'image/jpeg' }))
       }
@@ -7330,14 +7344,14 @@ function Admin() {
                                       </span>
                                       <button type="button" aria-label="Quitar de la lista" title="Quitar de la lista" onClick={() => toggleLabelSelect(x.id)}
                                         style={{ width: 24, border: 'none', background: 'none', boxShadow: 'none', padding: 0, minHeight: 0, fontSize: 16, color: '#b03434', cursor: 'pointer' }}>✕</button>
-                                      <div style={{ flexBasis: '100%', display: 'flex', gap: 8, alignItems: 'center', paddingLeft: 44 }}>
+                                      <div style={{ flexBasis: '100%', display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', paddingLeft: 44 }}>
                                         {x.isSeed ? (
                                           <span style={{ flex: 1, fontSize: 13, color: '#6b5a45', fontWeight: 600 }}>🌰 Semilla</span>
                                         ) : (
                                           <select
                                             value={x.presentacion || ''}
                                             onChange={e => updatePresentacionRapido(x.id, e.target.value)}
-                                            style={{ flex: 1, minWidth: 0, fontSize: 13, padding: '5px 6px', borderRadius: 8, border: '1px solid #ccc', ...(faltaTipo(x) ? campoMal : {}) }}
+                                            style={{ flex: '1 1 130px', minWidth: 0, fontSize: 13, padding: '5px 6px', borderRadius: 8, border: '1px solid #ccc', ...(faltaTipo(x) ? campoMal : {}) }}
                                           >
                                             <option value="">¿Qué es? (tipo)</option>
                                             {PRESENTACIONES_ADMIN.map(([v, t]) => <option key={v} value={v}>{t}</option>)}
@@ -7355,6 +7369,22 @@ function Admin() {
                                           onBlur={e => updatePrecioTienda(x, e.target.value)}
                                           style={{ width: 84, boxSizing: 'border-box', fontSize: 13, padding: '5px 6px', borderRadius: 8, border: '1px solid #ccc', ...(faltaPrecio(x) ? campoMal : {}) }}
                                         />
+                                        {!x.isSeed && (
+                                          <>
+                                            <span style={{ fontSize: 13, whiteSpace: 'nowrap' }}>Venta mín.</span>
+                                            <input
+                                              key={`min-${x.id}-${x.venta_minima}`}
+                                              type="number"
+                                              inputMode="numeric"
+                                              step="1"
+                                              min="1"
+                                              placeholder="1"
+                                              defaultValue={Number(x.venta_minima) > 1 ? x.venta_minima : ''}
+                                              onBlur={e => updateMinimoRapido(x, e.target.value)}
+                                              style={{ width: 56, boxSizing: 'border-box', fontSize: 13, padding: '5px 6px', borderRadius: 8, border: '1px solid #ccc' }}
+                                            />
+                                          </>
+                                        )}
                                       </div>
                                     </div>
                                   ))}

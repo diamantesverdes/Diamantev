@@ -4014,3 +4014,13 @@ body::before {
   font-weight: 600;
   line-height: 1.5;
 }
+
+/* Tarjeta del inicio: solo la palabra CATÁLOGO en letras grandes */
+.home-option-all h3.catalogo-grande {
+  font-size: 2.6rem;
+  letter-spacing: 0.14em;
+  margin: 6px 0 10px;
+  line-height: 1.1;
+}
+/* Venta mínima */
+.venta-minima { margin: 2px 0; font-size: 0.8rem; font-weight: 600; color: #8a5a44; }
