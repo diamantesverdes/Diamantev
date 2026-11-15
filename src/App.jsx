@@ -194,6 +194,14 @@ function AppInner() {
     setView('plants')
   }
 
+  // Vuelve al inicio desde cualquier pantalla (botón flotante 🏠)
+  function irAlInicio() {
+    setSearchOpen(false)
+    setSearchQuery('')
+    backToHome()
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+
   function backToHome() {
     setView('home')
     setSelectedCategory(null)
@@ -292,6 +300,7 @@ function AppInner() {
     return () => clearInterval(timer)
   }, [heroPlants.length])
 
+  // Si una planta tiene venta mínima N (por ejemplo 5 bulbos), se vende de N en N: cada toque agrega N unidades.
   function addToCart(plant) {
     const min = minimo(plant)
     if (plant.stock < min) {
@@ -299,21 +308,23 @@ function AppInner() {
       setTimeout(() => setToast(''), 2500)
       return
     }
+    const enCarrito = cart.find(i => i.id === plant.id)
+    if (enCarrito && enCarrito.quantity + min > plant.stock) {
+      setToast(`No hay más stock disponible de ${plant.name}`)
+      setTimeout(() => setToast(''), 2500)
+      return
+    }
     setCart(prev => {
       const existing = prev.find(i => i.id === plant.id)
-      if (existing) {
-        if (existing.quantity >= plant.stock) return prev
-        return prev.map(i => i.id === plant.id ? { ...i, quantity: i.quantity + 1 } : i)
-      }
+      if (existing) return prev.map(i => i.id === plant.id ? { ...i, quantity: i.quantity + min } : i)
       return [...prev, { ...plant, quantity: min }]
     })
-    setToast(min > 1 ? `✅ ${plant.name} añadida (venta mínima: ${min})` : `✅ ${plant.name} añadida al carrito`)
+    setToast(min > 1 ? `✅ ${plant.name}: +${min} unidades` : `✅ ${plant.name} añadida al carrito`)
     setTimeout(() => setToast(''), 1800)
   }
-
   function changeQty(id, delta) {
     setCart(prev => prev
-      .map(i => i.id === id ? { ...i, quantity: i.quantity + delta } : i)
+      .map(i => i.id === id ? { ...i, quantity: i.quantity + delta * minimo(i) } : i)
       .filter(i => i.quantity >= minimo(i)) // bajar de la venta mínima quita la planta del carrito
     )
   }
@@ -345,9 +356,9 @@ function AppInner() {
       return
     }
     if (cart.length === 0) return
-    const bajoMinimo = cart.find(i => i.quantity < minimo(i))
+    const bajoMinimo = cart.find(i => i.quantity < minimo(i) || i.quantity % minimo(i) !== 0)
     if (bajoMinimo) {
-      alert(`${bajoMinimo.name}: la venta mínima es ${minimo(bajoMinimo)} unidades.`)
+      alert(`${bajoMinimo.name}: se vende de ${minimo(bajoMinimo)} en ${minimo(bajoMinimo)} unidades.`)
       return
     }
     setSending(true)
@@ -436,7 +447,7 @@ function AppInner() {
           <h3>{plant.name}</h3>
           {presentacionLabel(plant) && <span className="presentacion-tag">{presentacionLabel(plant)}</span>}
           <p className="price">{precioLabel(plant)}</p>
-          {minimo(plant) > 1 && <p className="venta-minima">Venta mínima: {minimo(plant)} unidades</p>}
+          {minimo(plant) > 1 && <p className="venta-minima">Se vende de {minimo(plant)} en {minimo(plant)} unidades</p>}
           <p className={plant.stock > 0 ? 'stock' : 'stock out'}>
             {stockLabelItem(plant)}
           </p>
@@ -580,6 +591,20 @@ function AppInner() {
       )}
 
       {toast && <div className="toast">{toast}</div>}
+
+      {/* Botones flotantes: volver al inicio y carrito (se ocultan si hay un panel abierto) */}
+      {!showCart && !showFavorites && !detailPlant && !menuOpen && (
+        <>
+          {(view !== 'home' || isSearching) && (
+            <button type="button" className="float-home-btn" onClick={irAlInicio} aria-label="Volver al inicio">🏠</button>
+          )}
+          {cart.length > 0 && (
+            <button type="button" className="float-cart-btn" onClick={() => setShowCart(true)} aria-label="Abrir carrito">
+              🛒<span className="cart-badge">{cart.reduce((sum, i) => sum + i.quantity, 0)}</span>
+            </button>
+          )}
+        </>
+      )}
 <a
       className="whatsapp-fab"
   href={`https://wa.me/${WHATSAPP_NUMBER}`}
@@ -808,11 +833,11 @@ function AppInner() {
               <>
                 {cart.map(item => (
                   <div key={item.id} className="cart-item">
-                    <span>{item.name}{minimo(item) > 1 && <small className="venta-minima" style={{ display: 'block' }}>Mínimo {minimo(item)} (si bajas de {minimo(item)} se quita)</small>}</span>
+                    <span>{item.name}{minimo(item) > 1 && <small className="venta-minima" style={{ display: 'block' }}>Se vende de {minimo(item)} en {minimo(item)} (si bajas de {minimo(item)} se quita)</small>}</span>
                     <div className="qty-controls">
                       <button onClick={() => changeQty(item.id, -1)}>-</button>
                       <span>{item.quantity}</span>
-                      <button onClick={() => changeQty(item.id, 1)} disabled={item.quantity >= item.stock}>+</button>
+                      <button onClick={() => changeQty(item.id, 1)} disabled={item.quantity + minimo(item) > item.stock}>+</button>
                     </div>
                     <span>${(item.price * item.quantity).toFixed(2)}</span>
                   </div>
@@ -872,7 +897,7 @@ function AppInner() {
 
             {presentacionLabel(detailPlant) && <span className="presentacion-tag">{presentacionLabel(detailPlant)}</span>}
             <p className="price">{precioLabel(detailPlant)}</p>
-            {minimo(detailPlant) > 1 && <p className="venta-minima">Venta mínima: {minimo(detailPlant)} unidades</p>}
+            {minimo(detailPlant) > 1 && <p className="venta-minima">Se vende de {minimo(detailPlant)} en {minimo(detailPlant)} unidades</p>}
             <p className={detailPlant.stock > 0 ? 'stock' : 'stock out'}>
               {stockLabelItem(detailPlant)}
             </p>

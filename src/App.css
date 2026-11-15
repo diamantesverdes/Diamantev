@@ -4024,3 +4024,33 @@ body::before {
 }
 /* Venta mínima */
 .venta-minima { margin: 2px 0; font-size: 0.8rem; font-weight: 600; color: #8a5a44; }
+
+/* Botones flotantes del catálogo: inicio y carrito */
+.float-home-btn, .float-cart-btn {
+  position: fixed;
+  z-index: 40;
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.5rem;
+  padding: 0;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.25);
+}
+.float-home-btn {
+  left: 16px;
+  bottom: calc(20px + env(safe-area-inset-bottom, 0px));
+  background: #4a5d3a;
+  color: #fff;
+  border: none;
+}
+.float-cart-btn {
+  right: 20px;
+  bottom: calc(88px + env(safe-area-inset-bottom, 0px));
+  background: #fff;
+  border: 2px solid #4a5d3a;
+}
+.float-cart-btn .cart-badge { top: -4px; right: -4px; }

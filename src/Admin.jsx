@@ -5734,7 +5734,7 @@ function Admin() {
       for (const p of selected) {
         if (!p.image_url) continue
         const tipoTxt = (PRESENTACIONES_ADMIN.find(([v]) => v === p.presentacion) || [])[1] || ''
-        const subtitulo = [tipoTxt.replace(/^\S+\s/, ''), Number(p.price) > 0 ? `$${Number(p.price).toFixed(2)}` : '', Number(p.venta_minima) > 1 ? `mín. ${p.venta_minima}` : ''].filter(Boolean).join(' · ')
+        const subtitulo = [tipoTxt.replace(/^\S+\s/, ''), Number(p.price) > 0 ? `$${Number(p.price).toFixed(2)}` : '', Number(p.venta_minima) > 1 ? `de ${p.venta_minima} en ${p.venta_minima}` : ''].filter(Boolean).join(' · ')
         const blob = await buildCaptionedPhoto(p.image_url, p.name, subtitulo)
         if (blob) files.push(new File([blob], `${p.name.replace(/[^a-z0-9-_ ]/gi, '')}.jpg`, { type: 'image/jpeg' }))
       }
@@ -7373,7 +7373,7 @@ function Admin() {
                                         />
                                         {!x.isSeed && (
                                           <>
-                                            <span style={{ fontSize: 13, whiteSpace: 'nowrap' }}>Venta mín.</span>
+                                            <span style={{ fontSize: 13, whiteSpace: 'nowrap' }}>Se vende de a</span>
                                             <input
                                               key={`min-${x.id}-${x.venta_minima}`}
                                               type="number"
