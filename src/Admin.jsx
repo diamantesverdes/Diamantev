@@ -4010,6 +4010,30 @@ function Admin() {
     if (error) { undo(); alert('No se pudo guardar el precio: ' + error.message) }
   }
 
+  // Presentación (planta / bulbo / esqueje / semilla) directo desde el panel Tienda.
+  const PRESENTACIONES_ADMIN = [['planta', '🪴 Planta'], ['bulbo', '🧅 Bulbo'], ['esqueje', '✂️ Esqueje'], ['semilla', '🌰 Semilla']]
+  async function updatePresentacionRapido(plantId, valor) {
+    const nuevo = valor || null
+    const pl = plants.find(x => x.id === plantId)
+    if (!pl || (pl.presentacion || null) === nuevo) return
+    const undo = patchLocal(setPlants, plants, [plantId], { presentacion: nuevo })
+    const { error } = await supabase.from('plants').update({ presentacion: nuevo }).eq('id', plantId)
+    if (error) {
+      undo()
+      alert(/presentacion/i.test(error.message)
+        ? 'Falta crear la columna "presentacion" en Supabase. Ejecuta en el SQL Editor:\n\nalter table plants add column if not exists presentacion text;'
+        : 'No se pudo guardar la presentación: ' + error.message)
+    }
+  }
+  // Precio desde el panel Tienda: plantas y lotes de semillas.
+  async function updatePrecioTienda(x, texto) {
+    if (String(texto).trim() === '') return
+    const nuevo = Math.max(0, Math.round(Number(texto) * 100) / 100)
+    if (!Number.isFinite(nuevo) || nuevo === Number(x.price)) return
+    if (x.isSeed) { await updateSeedBatchField(x.seedBatchId, 'price', nuevo); return }
+    await updatePrecioRapido({ id: x.id, price: x.price }, texto)
+  }
+
   // Descuento (%) directo desde la Tabla. Vacío o 0 = sin descuento.
   async function updateDescuentoRapido(row, texto) {
     const nuevo = String(texto).trim() === '' ? 0 : Math.max(0, Math.min(100, Math.round(Number(texto) || 0)))
@@ -5648,11 +5672,11 @@ function Admin() {
     })
   }
 
-  async function buildCaptionedPhoto(url, name) {
+  async function buildCaptionedPhoto(url, name, subtitulo = '') {
     const img = await loadImageEl(url)
     if (!img) return null
     const width = 720
-    const captionH = 80
+    const captionH = subtitulo ? 116 : 80
     const imgH = img.height * (width / img.width)
     const canvas = document.createElement('canvas')
     canvas.width = width
@@ -5666,7 +5690,14 @@ function Admin() {
     ctx.font = '900 36px Georgia, serif'
     ctx.textAlign = 'center'
     ctx.textBaseline = 'middle'
-    ctx.fillText(name.toUpperCase(), width / 2, imgH + captionH / 2)
+    if (subtitulo) {
+      ctx.fillText(name.toUpperCase(), width / 2, imgH + 38)
+      ctx.font = '600 28px Georgia, serif'
+      ctx.fillStyle = '#e8dfc8'
+      ctx.fillText(subtitulo, width / 2, imgH + 82)
+    } else {
+      ctx.fillText(name.toUpperCase(), width / 2, imgH + captionH / 2)
+    }
     return await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.9))
   }
 
@@ -5678,7 +5709,9 @@ function Admin() {
       const files = []
       for (const p of selected) {
         if (!p.image_url) continue
-        const blob = await buildCaptionedPhoto(p.image_url, p.name)
+        const tipoTxt = (PRESENTACIONES_ADMIN.find(([v]) => v === p.presentacion) || [])[1] || ''
+        const subtitulo = [tipoTxt.replace(/^\S+\s/, ''), Number(p.price) > 0 ? `$${Number(p.price).toFixed(2)}` : ''].filter(Boolean).join(' · ')
+        const blob = await buildCaptionedPhoto(p.image_url, p.name, subtitulo)
         if (blob) files.push(new File([blob], `${p.name.replace(/[^a-z0-9-_ ]/gi, '')}.jpg`, { type: 'image/jpeg' }))
       }
       if (files.length === 0) {
@@ -7242,6 +7275,10 @@ function Admin() {
                           const items = labelItemsList().filter(x => selectedLabels.has(x.id))
                           const idsReales = items.filter(x => !x.isSeed).map(x => x.id)
                           const enTienda = items.filter(x => x.marcado_cliente).length
+                          const faltaPrecio = x => !(Number(x.price) > 0)
+                          const faltaTipo = x => !x.isSeed && !x.presentacion
+                          const faltanDatos = items.filter(x => x.marcado_cliente && (faltaPrecio(x) || faltaTipo(x))).length
+                          const campoMal = { border: '2px solid #b03434', background: '#fdeeee' }
                           const chico = { padding: '6px 10px', fontSize: 13, minHeight: 0, lineHeight: 1.2, borderRadius: 8, boxShadow: 'none', whiteSpace: 'nowrap' }
                           const titulo = txt => <p style={{ margin: '12px 2px 6px', fontSize: 12, fontWeight: 700, color: '#7a7060', letterSpacing: '0.04em', textTransform: 'uppercase' }}>{txt}</p>
                           return createPortal(
@@ -7261,11 +7298,16 @@ function Admin() {
                                   <button type="button" onClick={() => clearLabels()} style={chico}>🧹 Limpiar</button>
                                   <span style={{ flex: 1, textAlign: 'right', fontSize: 12, color: '#7a7060' }}>En la tienda: {enTienda} de {items.length}</span>
                                 </div>
+                                {faltanDatos > 0 && (
+                                  <p style={{ margin: '6px 2px 0', fontSize: 12.5, color: '#b03434', fontWeight: 600 }}>
+                                    ⚠️ {faltanDatos} en la tienda sin precio o sin tipo (en rojo).
+                                  </p>
+                                )}
 
-                                <div style={{ overflowY: 'auto', maxHeight: '32vh', padding: '2px' }}>
+                                <div style={{ overflowY: 'auto', maxHeight: '42vh', padding: '2px' }}>
                                   {items.length === 0 && <p className="status-msg">No hay plantas en la lista.</p>}
                                   {items.map(x => (
-                                    <div key={x.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 2px', borderBottom: '1px solid #eee' }}>
+                                    <div key={x.id} style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 8, padding: '6px 2px', borderBottom: '1px solid #eee' }}>
                                       {x.image_url ? (
                                         <img src={x.image_url} alt="" loading="lazy" style={{ width: 36, height: 36, objectFit: 'cover', borderRadius: 8, flexShrink: 0, border: '1px solid #ddd' }} />
                                       ) : (
@@ -7277,6 +7319,32 @@ function Admin() {
                                       </span>
                                       <button type="button" aria-label="Quitar de la lista" title="Quitar de la lista" onClick={() => toggleLabelSelect(x.id)}
                                         style={{ width: 24, border: 'none', background: 'none', boxShadow: 'none', padding: 0, minHeight: 0, fontSize: 16, color: '#b03434', cursor: 'pointer' }}>✕</button>
+                                      <div style={{ flexBasis: '100%', display: 'flex', gap: 8, alignItems: 'center', paddingLeft: 44 }}>
+                                        {x.isSeed ? (
+                                          <span style={{ flex: 1, fontSize: 13, color: '#6b5a45', fontWeight: 600 }}>🌰 Semilla</span>
+                                        ) : (
+                                          <select
+                                            value={x.presentacion || ''}
+                                            onChange={e => updatePresentacionRapido(x.id, e.target.value)}
+                                            style={{ flex: 1, minWidth: 0, fontSize: 13, padding: '5px 6px', borderRadius: 8, border: '1px solid #ccc', ...(faltaTipo(x) ? campoMal : {}) }}
+                                          >
+                                            <option value="">¿Qué es? (tipo)</option>
+                                            {PRESENTACIONES_ADMIN.map(([v, t]) => <option key={v} value={v}>{t}</option>)}
+                                          </select>
+                                        )}
+                                        <span style={{ fontSize: 13 }}>$</span>
+                                        <input
+                                          key={`${x.id}-${x.price}`}
+                                          type="number"
+                                          inputMode="decimal"
+                                          step="0.01"
+                                          min="0"
+                                          placeholder="Precio"
+                                          defaultValue={Number(x.price) > 0 ? x.price : ''}
+                                          onBlur={e => updatePrecioTienda(x, e.target.value)}
+                                          style={{ width: 84, boxSizing: 'border-box', fontSize: 13, padding: '5px 6px', borderRadius: 8, border: '1px solid #ccc', ...(faltaPrecio(x) ? campoMal : {}) }}
+                                        />
+                                      </div>
                                     </div>
                                   ))}
                                 </div>
@@ -7307,7 +7375,7 @@ function Admin() {
                                   <button type="button" className="save-note-btn-inline" onClick={sendStoreLink} style={{ flex: 1 }}>🔗 Enviar link</button>
                                   <button type="button" onClick={copySharedLink} style={{ flex: 1 }}>📋 Copiar link</button>
                                 </div>
-                                <p style={{ margin: '6px 2px 0', fontSize: 12, color: '#7a7060' }}>El cliente ve las plantas que están en la tienda (🟢): fotos y precio.</p>
+                                <p style={{ margin: '6px 2px 0', fontSize: 12, color: '#7a7060' }}>El cliente ve las plantas que están en la tienda (🟢): foto, tipo y precio.</p>
                               </div>
                             </div>,
                             document.body

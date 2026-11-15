@@ -4,6 +4,11 @@ import { addToQueue, isOnline, queueLength, processQueue } from './offlineQueue'
 
 const WHATSAPP_NUMBER = '593992734743'
 
+// Presentación de lo que se vende (se elige en Admin > Tienda). Las semillas siempre son 'semilla'.
+const PRESENTACIONES = { planta: '🪴 Planta', bulbo: '🧅 Bulbo', esqueje: '✂️ Esqueje', semilla: '🌰 Semilla' }
+function presentacionLabel(p) { return PRESENTACIONES[p && p.isSeed ? 'semilla' : p && p.presentacion] || '' }
+function precioLabel(p) { const n = Number(p && p.price); return n > 0 ? `$${n.toFixed(2)}` : 'Consultar precio' }
+
 function normalizarBusqueda(t) {
   return String(t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
 }
@@ -381,7 +386,7 @@ export default function App() {
         })
         .eq('id', item.id)
     }
-    const lines = cart.map(i => `- ${i.name} x${i.quantity} ($${(i.price * i.quantity).toFixed(2)})`).join('%0A')
+    const lines = cart.map(i => `- ${i.name}${presentacionLabel(i) ? ' [' + presentacionLabel(i).replace(/^\S+\s/, '') + ']' : ''} x${i.quantity} ($${(i.price * i.quantity).toFixed(2)})`).join('%0A')
     const message = `Hola, quiero confirmar mi compra en 
   Diamantev (Venta #${lote.numero}):%0A%0A${lines}%0A%0ATotal: $${total.toFixed(2)}%0ANombre: ${customerName}%0ATeléfono: ${customerPhone}`
     window.open(`https://wa.me/${WHATSAPP_NUMBER}?text=${message}`, '_blank')
@@ -411,7 +416,8 @@ export default function App() {
         </div>
         <div className="card-body">
           <h3>{plant.name}</h3>
-          <p className="price">${Number(plant.price).toFixed(2)}</p>
+          {presentacionLabel(plant) && <span className="presentacion-tag">{presentacionLabel(plant)}</span>}
+          <p className="price">{precioLabel(plant)}</p>
           <p className={plant.stock > 0 ? 'stock' : 'stock out'}>
             {stockLabel(plant.stock)}
           </p>
@@ -604,7 +610,8 @@ export default function App() {
                           {plant.image_url && <div className="watermark-overlay" aria-hidden="true" />}
                         </div>
                         <p className="carousel-name">{plant.name}</p>
-                        <p className="price">${Number(plant.price).toFixed(2)}</p>
+                        {presentacionLabel(plant) && <span className="presentacion-tag">{presentacionLabel(plant)}</span>}
+                        <p className="price">{precioLabel(plant)}</p>
                       </div>
                     ))}
                   </div>
@@ -845,7 +852,8 @@ export default function App() {
               <p className="detail-description">{detailPlant.description}</p>
             )}
 
-            <p className="price">${Number(detailPlant.price).toFixed(2)}</p>
+            {presentacionLabel(detailPlant) && <span className="presentacion-tag">{presentacionLabel(detailPlant)}</span>}
+            <p className="price">{precioLabel(detailPlant)}</p>
             <p className={detailPlant.stock > 0 ? 'stock' : 'stock out'}>
               {stockLabel(detailPlant.stock)}
             </p>
