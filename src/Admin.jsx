@@ -3820,7 +3820,7 @@ function Admin() {
 
   // Link de la tienda (es el mismo catálogo que ve el cliente): no marca nada, solo lo envía
   async function sendStoreLink() {
-    const link = `${window.location.origin}/?shared=1`
+    const link = `${CLIENT_URL}/?shared=1`
     const shareText = `🌿 Catálogo Diamantev:\n${link}`
     try {
       if (navigator.share) await navigator.share({ title: 'Plantas Diamantev', text: shareText })
@@ -4064,7 +4064,7 @@ function Admin() {
   }
 
   async function copySharedLink() {
-    const link = `${window.location.origin}/?shared=1`
+    const link = `${CLIENT_URL}/?shared=1`
     await navigator.clipboard.writeText(link)
     alert('Link copiado. Muestra las plantas que están en la tienda. Pégalo en WhatsApp para enviarlo.')
   }
@@ -5594,7 +5594,7 @@ function Admin() {
     setSharingNotes(true)
     try {
       await markSelectedShared(new Set(selected.map(p => p.id)), true)
-      const link = `${window.location.origin}/?shared=1`
+      const link = `${CLIENT_URL}/?shared=1`
       const shareText = `🌿 Catálogo Diamantev:\n${link}`
 
       if (navigator.share) {
