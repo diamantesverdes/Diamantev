@@ -4205,7 +4205,7 @@ function Admin() {
   function dejarSoloEstasEnTienda() {
     const sel = new Set(selectedLabels)
     if (sel.size === 0) return
-    const otros = labelItemsList().filter(x => x.marcado_cliente && !sel.has(x.id)).map(x => x.id)
+    const otros = labelItemsList().filter(x => x.marcado_cliente && !x.coming_soon && !sel.has(x.id)).map(x => x.id) // las del carrusel se respetan
     if (!window.confirm(`En la tienda quedarán solo estas ${sel.size}.${otros.length ? ` Se quitarán otras ${otros.length} que hoy están visibles para el cliente.` : ''} ¿Continuar?`)) return
     if (otros.length) markSelectedClienteAll(new Set(otros), false)
     markSelectedClienteAll(sel, true)
@@ -7299,7 +7299,7 @@ function Admin() {
                           const items = labelItemsList().filter(x => selectedLabels.has(x.id))
                           const idsReales = items.filter(x => !x.isSeed).map(x => x.id)
                           const enTienda = items.filter(x => x.marcado_cliente).length
-                          const fueraDeLista = labelItemsList().filter(x => x.marcado_cliente && !selectedLabels.has(x.id)).length
+                          const fueraDeLista = labelItemsList().filter(x => x.marcado_cliente && !x.coming_soon && !selectedLabels.has(x.id)).length
                           const faltaPrecio = x => !(Number(x.price) > 0)
                           const faltaTipo = x => !x.isSeed && !x.presentacion
                           const faltanDatos = items.filter(x => x.marcado_cliente && (faltaPrecio(x) || faltaTipo(x))).length

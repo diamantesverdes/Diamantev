@@ -49,6 +49,7 @@ function AppInner() {
   // view: 'home' | 'all' | 'categories' | 'plants'
   const [view, setView] = useState('home')
   const [plants, setPlants] = useState([])
+  const [proximas, setProximas] = useState([]) // plantas del carrusel "Próximamente": solo se ven en el carrusel, no en el catálogo
   const [categories, setCategories] = useState([])
   const [selectedCategory, setSelectedCategory] = useState(null)       // usado en la vista 'plants'
   const [selectedCategoryIds, setSelectedCategoryIds] = useState([])   // usado en la vista 'all' (multi-selección)
@@ -155,9 +156,12 @@ function AppInner() {
     // Orden natural (Epidendrum 2 antes que 10); las semillas se ordenan por su nombre sin el 🌰.
     const sortName = p => (p.isSeed ? p.name.replace(/^🌰\s*/, '') : (p.name || ''))
     const allItems = [...pls, ...seedItems].sort((x, y) => sortName(x).localeCompare(sortName(y), 'es', { numeric: true, sensitivity: 'base' }))
-    const visibleCatIds = new Set(allItems.map(p => p.category_id))
+    // Las del carrusel (coming_soon) no entran al catálogo, buscador ni categorías: solo al carrusel del inicio.
+    const enCatalogo = allItems.filter(p => !p.coming_soon)
+    setProximas(allItems.filter(p => p.coming_soon))
+    const visibleCatIds = new Set(enCatalogo.map(p => p.category_id))
     setCategories(sharedMode ? (cats || []).filter(c => visibleCatIds.has(c.id)) : (cats || []))
-    setPlants(allItems)
+    setPlants(enCatalogo)
     setLoading(false)
   }
 
@@ -278,7 +282,7 @@ function AppInner() {
   const newPlants = plants.filter(p => p.is_new)
   const salePlants = plants.filter(p => p.on_sale)
   // El carrusel muestra una foto por planta: la que se eligió en el panel (carousel_image_url) o, si no, la portada
-  const heroPlants = plants.filter(p => (p.carousel_image_url || p.image_url) && p.coming_soon).slice(0, 8)
+  const heroPlants = proximas.filter(p => p.carousel_image_url || p.image_url).slice(0, 8)
 
   useEffect(() => {
     if (heroPlants.length <= 1) return
