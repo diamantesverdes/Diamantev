@@ -5,6 +5,7 @@ import JSZip from 'jszip'
 import * as XLSX from 'xlsx'
 import pptxgen from 'pptxgenjs'
 import { supabase, supabaseStorage } from './supabaseClient'
+import App from './App'
 import { addToQueue, isOnline, queueLength, processQueue } from './offlineQueue'
 
 // Componentes estables fuera de Admin(): si se definieran adentro, React los
@@ -4186,6 +4187,15 @@ function Admin() {
     markSelectedCliente(new Set(ids.filter(id => !isSeedId(id))), value)
     markSeedBatchesCliente(ids.filter(isSeedId).map(id => id.slice(5)), value)
   }
+  // La tienda queda solo con la lista seleccionada: se quitan las demás que estuvieran visibles al cliente.
+  function dejarSoloEstasEnTienda() {
+    const sel = new Set(selectedLabels)
+    if (sel.size === 0) return
+    const otros = labelItemsList().filter(x => x.marcado_cliente && !sel.has(x.id)).map(x => x.id)
+    if (!window.confirm(`En la tienda quedarán solo estas ${sel.size}.${otros.length ? ` Se quitarán otras ${otros.length} que hoy están visibles para el cliente.` : ''} ¿Continuar?`)) return
+    if (otros.length) markSelectedClienteAll(new Set(otros), false)
+    markSelectedClienteAll(sel, true)
+  }
 
   async function markPlantsAction(ids, field) {
     ids = ids.filter(id => !isSeedId(id))
@@ -7275,6 +7285,7 @@ function Admin() {
                           const items = labelItemsList().filter(x => selectedLabels.has(x.id))
                           const idsReales = items.filter(x => !x.isSeed).map(x => x.id)
                           const enTienda = items.filter(x => x.marcado_cliente).length
+                          const fueraDeLista = labelItemsList().filter(x => x.marcado_cliente && !selectedLabels.has(x.id)).length
                           const faltaPrecio = x => !(Number(x.price) > 0)
                           const faltaTipo = x => !x.isSeed && !x.presentacion
                           const faltanDatos = items.filter(x => x.marcado_cliente && (faltaPrecio(x) || faltaTipo(x))).length
@@ -7354,6 +7365,12 @@ function Admin() {
                                   <button type="button" className="save-note-btn-inline" disabled={items.length === 0} onClick={() => markSelectedClienteAll(selectedLabels, true)} style={{ flex: 1 }}>🟢 Poner</button>
                                   <button type="button" disabled={items.length === 0} onClick={() => markSelectedClienteAll(selectedLabels, false)} style={{ flex: 1 }}>⚪ Quitar</button>
                                 </div>
+                                <button type="button" disabled={items.length === 0} onClick={dejarSoloEstasEnTienda} style={{ width: '100%', marginTop: 8 }}>🎯 Dejar en la tienda solo estas</button>
+                                {fueraDeLista > 0 && (
+                                  <p style={{ margin: '6px 2px 0', fontSize: 12.5, color: '#b03434', fontWeight: 600 }}>
+                                    ⚠️ Hay {fueraDeLista} más en la tienda que no están en esta lista: el cliente también las ve.
+                                  </p>
+                                )}
 
                                 {titulo('Descuento')}
                                 <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
@@ -11601,6 +11618,8 @@ class AdminErrorBoundary extends Component {
 }
 
 export default function AdminWithErrorBoundary(props) {
+  // Un enlace de tienda (?shared=1) siempre muestra el catálogo del cliente, aunque haya sesión de administrador en este celular.
+  if (new URLSearchParams(window.location.search).get('shared') === '1') return <App />
   return (
     <AdminErrorBoundary>
       <Admin {...props} />
