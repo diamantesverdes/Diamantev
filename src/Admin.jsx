@@ -7043,12 +7043,14 @@ function Admin() {
                                   const hay = idP + nP > 0
                                   const falta = idP > idC || nP > nC
                                   const stockN = Number(p.stock) || 0
+                                  // Lo que se muestra es lo DISPONIBLE para la venta (el total queda en el título al mantener presionado)
+                                  const dispN = p.stock_disponible != null ? Number(p.stock_disponible) || 0 : stockN
                                   return (
                                     <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', flexWrap: 'wrap', gap: 2, margin: '1px auto 0' }}>
                                     <span
-                                      title={p.stock_disponible != null ? `Stock ${stockN} · listas para vender ${Number(p.stock_disponible) || 0}` : `Stock ${stockN}`}
-                                      style={{ fontSize: '0.68rem', padding: '0 6px', lineHeight: 1.3, color: stockN > 0 ? '#8a7d66' : '#c0392b', whiteSpace: 'nowrap' }}
-                                    >📦 {stockN}</span>
+                                      title={`Disponible para la venta ${dispN} · Stock total ${stockN}`}
+                                      style={{ fontSize: '0.68rem', padding: '0 6px', lineHeight: 1.3, color: dispN > 0 ? '#8a7d66' : '#c0392b', whiteSpace: 'nowrap' }}
+                                    >📦 {dispN}</span>
                                     <button
                                       type="button"
                                       title="Identificaciones y etiquetas: tengo / colocadas"
