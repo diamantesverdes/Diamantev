@@ -6010,7 +6010,7 @@ function Admin() {
   const pedidosPendientes = orders.filter(o => o.status === 'pedido').length
   const ingresosEnCurso = compras.filter(c => c.status !== 'recibido').length
 
-  const CLIENT_URL = 'https://diamantev.vercel.app'
+  const CLIENT_URL = window.location.origin // la tienda y el admin comparten dirección: así no hay que cambiarla si cambias de hosting
 
   function shareClientLink() {
     const message = encodeURIComponent(`🌿 Visita nuestro catálogo de plantas Diamantev: ${CLIENT_URL}`)
