@@ -47,7 +47,7 @@ function stockLabel(n) {
 
 function AppInner() {
   // view: 'home' | 'all' | 'categories' | 'plants'
-  const [view, setView] = useState('home')
+  const [view, setView] = useState('all') // la página abre directo en el catálogo (el inicio queda en "Volver al inicio")
   const [plants, setPlants] = useState([])
   const [proximas, setProximas] = useState([]) // plantas del carrusel "Próximamente": solo se ven en el carrusel, no en el catálogo
   const [categories, setCategories] = useState([])
@@ -633,12 +633,7 @@ function AppInner() {
             <p className="status-msg">Cargando...</p>
           ) : (
             <>
-              <div className="home-options-row">
-                <div className="home-option-card home-option-all" onClick={() => openAllVarieties('all')}>
-                  <div className="home-option-icon">🌿</div>
-                  <h3 className="catalogo-grande">CATÁLOGO</h3>
-                </div>
-              </div>
+              <button type="button" className="ver-catalogo-link" onClick={() => openAllVarieties('all')}>🌿 Ver el catálogo</button>
 
               {newPlants.length > 0 && (
                 <>

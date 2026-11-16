@@ -4054,3 +4054,17 @@ body::before {
   border: 2px solid #4a5d3a;
 }
 .float-cart-btn .cart-badge { top: -4px; right: -4px; }
+
+/* Enlace pequeño del inicio para volver al catálogo */
+.ver-catalogo-link {
+  display: block;
+  margin: 14px auto;
+  background: none;
+  border: none;
+  box-shadow: none;
+  color: #4a5d3a;
+  font-weight: 700;
+  font-size: 1.05rem;
+  text-decoration: underline;
+  cursor: pointer;
+}
