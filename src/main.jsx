@@ -61,26 +61,43 @@ class RootErrorBoundary extends React.Component {
 function Root() {
   // Punto de partida: igual que antes, según la URL (sin cambios de comportamiento en desktop).
   const [showAdmin, setShowAdmin] = useState(() => window.location.pathname.startsWith('/admin'))
+  // Hay sesión de administrador en este dispositivo (los clientes nunca tienen sesión).
+  const [hasSession, setHasSession] = useState(false)
 
   useEffect(() => {
-    // Si el propio admin pidió explícitamente ver la tienda (botón "Ver tienda"),
-    // respetamos esa intención y NO lo regresamos al panel, aunque tenga sesión activa.
+    // Si el propio admin pidió explícitamente ver la tienda (botón "Ver tienda") o abrió un enlace
+    // de tienda (?shared=1), respetamos esa intención y NO lo regresamos al panel, aunque tenga sesión activa.
     const wantsStore = localStorage.getItem('diamantev_view_store') === '1'
-    if (wantsStore) {
-      localStorage.removeItem('diamantev_view_store')
-      return
-    }
+    const sharedLink = new URLSearchParams(window.location.search).get('shared') === '1'
+    if (wantsStore) localStorage.removeItem('diamantev_view_store')
     // Si ya hay una sesión de administrador guardada en este dispositivo (por ejemplo,
     // el ícono de acceso directo del celular, que siempre abre en "/" según el manifest),
-    // mostramos el Admin igual, sin importar por qué URL entró.
+    // mostramos el Admin igual, sin importar por qué URL entró (salvo que pidió ver la tienda).
     // Nota: en esta app solo el admin inicia sesión con Supabase — los clientes nunca
     // tienen sesión — así que esta detección es segura.
     supabase.auth.getSession().then(({ data }) => {
-      if (data.session) setShowAdmin(true)
+      if (data.session) {
+        setHasSession(true)
+        if (!wantsStore && !sharedLink) setShowAdmin(true)
+      }
     })
   }, [])
 
-  return showAdmin ? <Admin /> : <App />
+  if (showAdmin) return <Admin />
+  return (
+    <>
+      <App />
+      {hasSession && (
+        <button
+          type="button"
+          onClick={() => window.location.assign('/')}
+          style={{ position: 'fixed', top: 'calc(env(safe-area-inset-top, 0px) + 8px)', left: '50%', transform: 'translateX(-50%)', zIndex: 60, background: '#4a5d3a', color: '#fff', border: '2px solid #fff', borderRadius: 18, padding: '6px 14px', fontSize: '0.85rem', fontWeight: 700, boxShadow: '0 2px 8px rgba(0,0,0,0.3)', cursor: 'pointer', whiteSpace: 'nowrap' }}
+        >
+          ⬅ Volver al panel
+        </button>
+      )}
+    </>
+  )
 }
 
 ReactDOM.createRoot(document.getElementById('root')).render(
