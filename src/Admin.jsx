@@ -590,6 +590,25 @@ function estadoDeMovimiento(m) {
 }
 const money = n => `$${(Number(n) || 0).toFixed(2)}`
 
+// Días previstos para entregar y para cobrar una venta. Se ven en el calendario de Days
+// mientras la venta siga sin entregar / sin pagar (al marcar la casilla, desaparecen de allí).
+function FechasPrevistas({ entrega, cobro, entregado, pagado, onChange }) {
+  const caja = { display: 'flex', flexDirection: 'column', gap: 2, fontSize: '0.78rem', color: '#5a5040', flex: '1 1 130px' }
+  const input = { padding: '6px 8px', fontSize: '0.9rem', borderRadius: 6, border: '1px solid #ccc', background: '#fff', maxWidth: '100%', boxSizing: 'border-box' }
+  return (
+    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', margin: '8px 0' }}>
+      <label style={{ ...caja, opacity: entregado ? 0.55 : 1 }}>
+        🚚 Entregar el {entregado ? '(ya entregado)' : ''}
+        <input type="date" value={entrega || ''} onChange={e => onChange('entrega_para', e.target.value)} style={input} />
+      </label>
+      <label style={{ ...caja, opacity: pagado ? 0.55 : 1 }}>
+        💵 Cobrar el {pagado ? '(ya pagado)' : ''}
+        <input type="date" value={cobro || ''} onChange={e => onChange('cobro_para', e.target.value)} style={input} />
+      </label>
+    </div>
+  )
+}
+
 // Casillas independientes: cada una (menos la primera, "Pedido", que queda fija) se puede marcar
 // o desmarcar en cualquier orden -- así se puede corregir "entregado sin pagar" o al revés.
 // El abono (anticipo) aparece mientras no esté marcado el segundo paso (Pagado).
@@ -3211,6 +3230,19 @@ function Admin() {
     const { error } = await supabase.from('venta_lotes').update({ [field]: num }).eq('id', lote.id)
     if (error) { alert('Error al guardar el cambio: ' + error.message); return }
     loadData()
+  }
+
+  // Guarda el día previsto de entrega o de cobro de un pedido web (orders) o de una factura de venta (venta_lotes).
+  async function updateFechaPrevista(tabla, row, campo, valor) {
+    const setter = tabla === 'orders' ? setOrders : setVentaLotes
+    const lista = tabla === 'orders' ? orders : ventaLotes
+    const patch = { [campo]: valor || null }
+    const undo = patchLocal(setter, lista, [row.id], patch) // se ve al instante
+    const { error } = await supabase.from(tabla).update(patch).eq('id', row.id)
+    if (error) {
+      undo()
+      alert('No se pudo guardar la fecha. Falta correr el archivo supabase_enlace_days.sql en Supabase (SQL Editor).\n\n' + error.message)
+    }
   }
 
   function ventaLoteProration(lote, lineas) {
@@ -8790,6 +8822,14 @@ function Admin() {
                             )}
                             <span>Fecha: {new Date(lote.created_at).toLocaleDateString()}</span>
 
+                            {lote.status !== 'cancelada' && (
+                              <FechasPrevistas
+                                entrega={lote.entrega_para} cobro={lote.cobro_para}
+                                entregado={lineas.every(l => entregadoDe(l))} pagado={!lineas.some(l => sinCobrar(l))}
+                                onChange={(campo, valor) => updateFechaPrevista('venta_lotes', lote, campo, valor)}
+                              />
+                            )}
+
                             {editingV && (
                               <label style={{ display: 'flex', flexDirection: 'column', gap: 4, margin: '8px 0', fontSize: '0.85rem', color: '#5a5040' }}>
                                 Nombre del cliente / compradora
@@ -9038,6 +9078,11 @@ function Admin() {
                             <span>Pedido: {new Date(m.created_at).toLocaleDateString()}</span>
                             {m.fecha_pago && <span>Pagado: {new Date(m.fecha_pago).toLocaleDateString()}</span>}
                             {m.fecha_entrega && <span>Entregado: {new Date(m.fecha_entrega).toLocaleDateString()}</span>}
+                            <FechasPrevistas
+                              entrega={m.entrega_para} cobro={m.cobro_para}
+                              entregado={entregadoDe(m)} pagado={pagadoDe(m)}
+                              onChange={(campo, valor) => updateFechaPrevista('orders', m, campo, valor)}
+                            />
 
                             {(() => {
                               const { subtotal, items, total } = orderProration(m)
