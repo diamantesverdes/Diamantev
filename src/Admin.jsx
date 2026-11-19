@@ -5,6 +5,7 @@ import JSZip from 'jszip'
 import * as XLSX from 'xlsx'
 import pptxgen from 'pptxgenjs'
 import { supabase, supabaseStorage } from './supabaseClient'
+import { buscarEnDays, daysDisponible, fechaDays } from './buscarEnDays'
 import App from './App'
 import { addToQueue, isOnline, queueLength, processQueue } from './offlineQueue'
 
@@ -1411,6 +1412,25 @@ function Admin() {
   const [categoryNotes, setCategoryNotes] = useState([])
   const [noteFilterCategory, setNoteFilterCategory] = useState('all')
   const [globalNoteSearch, setGlobalNoteSearch] = useState('')
+  // Resultados del buscador de notas que vienen del diario de Days (solo lectura)
+  const [daysResults, setDaysResults] = useState([])
+  const [daysState, setDaysState] = useState('idle') // idle | buscando | ok | error
+  const [daysError, setDaysError] = useState('')
+  useEffect(() => {
+    const t = globalNoteSearch.trim()
+    if (!daysDisponible || t.length < 3) { setDaysResults([]); setDaysState('idle'); return }
+    let cancelado = false
+    setDaysState('buscando')
+    const id = setTimeout(async () => {
+      try {
+        const r = await buscarEnDays(t)
+        if (!cancelado) { setDaysResults(r); setDaysState('ok'); setDaysError('') }
+      } catch (e) {
+        if (!cancelado) { setDaysResults([]); setDaysState('error'); setDaysError((e && e.message) || String(e)) }
+      }
+    }, 450)
+    return () => { cancelado = true; clearTimeout(id) }
+  }, [globalNoteSearch])
   const [expandedCategoryGroups, setExpandedCategoryGroups] = useState(new Set())
 
   function toggleCategoryGroupExpanded(id) {
@@ -9534,7 +9554,7 @@ function Admin() {
                   <>
                     <input
                       className="order-search"
-                      placeholder="🔍 Buscar en todas las notas (plantas, compras, semillas, categorías)..."
+                      placeholder="🔍 Buscar en todas las notas (plantas, compras, semillas, categorías y Days)..."
                       value={globalNoteSearch}
                       onChange={e => setGlobalNoteSearch(e.target.value)}
                       style={{ marginBottom: 10 }}
@@ -9543,7 +9563,7 @@ function Admin() {
                     {term ? (
                       <>
                         <p style={{ margin: '0 0 8px', color: '#7a7060', fontSize: 13 }}>{globalResults.length} resultado(s)</p>
-                        {globalResults.length === 0 && <p className="status-msg">No se encontró nada con "{globalNoteSearch}".</p>}
+                        {globalResults.length === 0 && daysResults.length === 0 && daysState !== 'buscando' && <p className="status-msg">No se encontró nada con "{globalNoteSearch}".</p>}
                         <div className="admin-list">
                           {globalResults.map(r => (
                             <div key={r.key} className="admin-item" style={{ flexDirection: 'column', alignItems: 'stretch' }}>
@@ -9555,6 +9575,24 @@ function Admin() {
                             </div>
                           ))}
                         </div>
+
+                        {daysDisponible && (
+                          <div style={{ marginTop: 14 }}>
+                            <p style={{ margin: '0 0 8px', color: '#7a7060', fontSize: 13, fontWeight: 700 }}>
+                              📓 Days {daysState === 'buscando' ? '· buscando…' : daysState === 'ok' ? `· ${daysResults.length} resultado(s)` : ''}
+                            </p>
+                            {daysState === 'error' && <p className="status-msg" style={{ fontSize: 13 }}>No se pudo consultar Days: {daysError}</p>}
+                            <div className="admin-list">
+                              {daysResults.map((r, i) => (
+                                <div key={`dy-${i}`} className="admin-item" style={{ flexDirection: 'column', alignItems: 'stretch' }}>
+                                  <strong>{r.origen === 'nota rápida' ? '🗒️' : '📓'} {fechaDays(r.fecha)}{r.titulo ? ` — ${r.titulo}` : ''}</strong>
+                                  <p className="task-note" style={{ margin: '4px 0 0' }}>{r.fragmento}</p>
+                                </div>
+                              ))}
+                            </div>
+                            {daysState === 'ok' && daysResults.length > 0 && <p style={{ fontSize: 12, color: '#8a8a7a', margin: '6px 0 0' }}>Solo lectura. Para ver la nota completa, abre Days.</p>}
+                          </div>
+                        )}
                       </>
                     ) : (
                       <>
