@@ -591,6 +591,23 @@ function estadoDeMovimiento(m) {
 }
 const money = n => `$${(Number(n) || 0).toFixed(2)}`
 
+// Muestra solo el trozo de la nota donde aparece lo buscado (con la palabra resaltada), no la nota completa.
+function recorteResaltado(texto, term) {
+  const t = String(texto || '')
+  const q = String(term || '').toLowerCase()
+  const i = q ? t.toLowerCase().indexOf(q) : -1
+  if (i < 0) return t.length > 200 ? t.slice(0, 200) + '…' : t
+  const ini = Math.max(0, i - 70)
+  const fin = Math.min(t.length, i + q.length + 110)
+  return (
+    <>
+      {ini > 0 ? '…' : ''}{t.slice(ini, i)}
+      <mark style={{ background: '#f6e27a', color: 'inherit', borderRadius: 3, padding: '0 2px' }}>{t.slice(i, i + q.length)}</mark>
+      {t.slice(i + q.length, fin)}{fin < t.length ? '…' : ''}
+    </>
+  )
+}
+
 // Días previstos para entregar y para cobrar una venta. Se ven en el calendario de Days
 // mientras la venta siga sin entregar / sin pagar (al marcar la casilla, desaparecen de allí).
 function FechasPrevistas({ entrega, cobro, entregado, pagado, onChange }) {
@@ -9504,7 +9521,7 @@ function Admin() {
                         globalResults.push({
                           key: `pn-${note.id}`, icon: '🪴',
                           title: plant ? plant.name : 'Planta',
-                          snippet: b.content,
+                          snippet: recorteResaltado(b.content, term),
                           onOpen: () => { setView('galeria'); setPhotoModalPlantId(note.plant_id); setPhotoModalSection('notas') },
                         })
                       }
@@ -9516,7 +9533,7 @@ function Admin() {
                         globalResults.push({
                           key: `lt-${lote.id}`, icon: '📦',
                           title: `Compra #${lote.numero}${lote.proveedor ? ` — ${lote.proveedor}` : ''}`,
-                          snippet: b.content,
+                          snippet: recorteResaltado(b.content, term),
                           onOpen: () => { setView('ingresos'); setIngresosSubTab('compras'); openLoteNote(lote) },
                         })
                       }
@@ -9528,7 +9545,7 @@ function Admin() {
                         globalResults.push({
                           key: `sb-${batch.id}`, icon: '🌰',
                           title: batch.es_noid ? 'NOID' : (batch.nombre || 'Lote de semillas'),
-                          snippet: b.content,
+                          snippet: recorteResaltado(b.content, term),
                           onOpen: () => { setView('ingresos'); setIngresosSubTab('semillas'); openSbNote(batch) },
                         })
                       }
@@ -9541,7 +9558,7 @@ function Admin() {
                         globalResults.push({
                           key: `cn-${note.id}`, icon: '📝',
                           title: cat ? `${cat.emoji} ${cat.name}` : 'General (sin categoría)',
-                          snippet: b.content,
+                          snippet: recorteResaltado(b.content, term),
                           onOpen: () => openEditCategoryNote(note),
                         })
                       }
@@ -9586,7 +9603,7 @@ function Admin() {
                               {daysResults.map((r, i) => (
                                 <div key={`dy-${i}`} className="admin-item" style={{ flexDirection: 'column', alignItems: 'stretch' }}>
                                   <strong>{r.origen === 'nota rápida' ? '🗒️' : '📓'} {fechaDays(r.fecha)}{r.titulo ? ` — ${r.titulo}` : ''}</strong>
-                                  <p className="task-note" style={{ margin: '4px 0 0' }}>{r.fragmento}</p>
+                                  <p className="task-note" style={{ margin: '4px 0 0' }}>{recorteResaltado(r.fragmento, globalNoteSearch.trim())}</p>
                                 </div>
                               ))}
                             </div>
