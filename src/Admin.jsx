@@ -8169,9 +8169,9 @@ function Admin() {
                                     ))}
                                     {invField('Stock total (en el jardín)', (
                                       <input type="number" min="0" step="1" inputMode="numeric" value={invDraft.stock} onChange={e => {
-                                        const nuevo = e.target.value
-                                        const disp = Math.min(parseInt(invDraft.stockDisponible, 10) || 0, parseInt(nuevo, 10) || 0)
-                                        setInvDraft({ stock: nuevo, stockDisponible: String(disp) })
+                                        // Solo se cambia el total mientras se escribe; el disponible NO se toca aquí
+                                        // (antes se bajaba solo a 0 al borrar el número para escribir otro). Al guardar, nunca pasa del total.
+                                        setInvDraft({ stock: e.target.value })
                                       }} style={invInputStyle} />
                                     ))}
                                     {invField('Disponible para el cliente', (
