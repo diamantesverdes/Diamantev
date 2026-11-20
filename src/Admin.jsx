@@ -9511,7 +9511,8 @@ function Admin() {
               })()}
 
               {!loading && view === 'notas' && (() => {
-                const term = globalNoteSearch.trim().toLowerCase()
+                const termRaw = globalNoteSearch.trim().toLowerCase()
+                const term = termRaw.length >= 3 ? termRaw : '' // con 1 o 2 letras casi todo coincide: se espera a que haya al menos 3
                 const globalResults = []
                 if (term) {
                   plantNotes.forEach(note => {
@@ -9576,6 +9577,7 @@ function Admin() {
                       onChange={e => setGlobalNoteSearch(e.target.value)}
                       style={{ marginBottom: 10 }}
                     />
+                    {termRaw.length > 0 && termRaw.length < 3 && <p style={{ margin: '0 0 8px', color: '#7a7060', fontSize: 13 }}>Escribe al menos 3 letras para buscar.</p>}
 
                     {term ? (
                       <>
