@@ -484,7 +484,7 @@ function AppInner() {
           <button className="header-icon-btn" onClick={() => setShowFavorites(true)} aria-label="Mi lista">
             ❤️ {favorites.length > 0 && <span className="cart-badge">{favorites.length}</span>}
           </button>
-          <button className="header-icon-btn" onClick={() => setSearchOpen(v => !v)} aria-label="Buscar">🔍</button>
+          <button className="header-icon-btn" onClick={() => { if (view === 'home') setSearchOpen(v => !v); else { const el = document.getElementById('buscador-catalogo'); if (el) { el.scrollIntoView({ block: 'center' }); el.focus() } } }} aria-label="Buscar">🔍</button>
           <button className="header-icon-btn" onClick={() => setShowCart(true)} aria-label="Carrito">
             🛒 {cart.length > 0 && <span className="cart-badge">{cart.reduce((s, i) => s + i.quantity, 0)}</span>}
           </button>
@@ -523,7 +523,7 @@ function AppInner() {
 
       <div className="brand-banner" />
 
-      {searchOpen && (
+      {searchOpen && view === 'home' && (
         <div className="search-bar">
           <input
             autoFocus
@@ -616,6 +616,22 @@ function AppInner() {
     <path d="M16.004 3C9.377 3 4 8.377 4 15.004c0 2.65.87 5.1 2.35 7.09L4.5 28l6.09-1.8a11.94 11.94 0 0 0 5.414 1.3h.005c6.627 0 12.004-5.377 12.004-12.004C28.013 8.377 22.636 3 16.004 3zm0 21.6a9.55 9.55 0 0 1-4.87-1.34l-.35-.207-3.61 1.07 1.08-3.52-.227-.36a9.56 9.56 0 0 1-1.47-5.12c0-5.293 4.31-9.6 9.6-9.6 5.293 0 9.6 4.31 9.6 9.6s-4.307 9.6-9.6 9.6zm5.29-7.19c-.29-.145-1.71-.845-1.976-.94-.266-.097-.46-.145-.653.145s-.75.94-.92 1.135c-.17.195-.34.218-.63.073-.29-.145-1.224-.451-2.332-1.437-.862-.769-1.444-1.72-1.614-2.01-.17-.29-.018-.447.127-.592.13-.13.29-.34.435-.51.145-.17.193-.29.29-.485.096-.194.048-.364-.024-.51-.073-.145-.653-1.575-.895-2.158-.236-.567-.477-.49-.653-.5-.169-.008-.363-.01-.557-.01-.194 0-.51.073-.777.363-.266.29-1.017.994-1.017 2.424 0 1.43 1.041 2.812 1.186 3.006.145.194 2.05 3.13 4.966 4.39.694.3 1.235.48 1.657.615.696.222 1.33.19 1.83.115.558-.083 1.71-.7 1.95-1.376.24-.677.24-1.257.169-1.376-.07-.12-.264-.194-.554-.34z"/>
   </svg>
 </a>
+
+      {/* Buscador siempre a la vista en el catálogo y las categorías (en el inicio sigue el icono 🔍) */}
+      {view !== 'home' && (
+        <div className="search-bar" style={{ position: 'relative', background: 'transparent', borderBottom: 'none' }}>
+          <input
+            id="buscador-catalogo"
+            placeholder="🔍 Buscar planta por nombre..."
+            value={searchQuery}
+            onChange={e => setSearchQuery(e.target.value)}
+          />
+          {searchQuery && (
+            <button type="button" aria-label="Borrar búsqueda" onClick={() => setSearchQuery('')}
+              style={{ position: 'absolute', right: 26, top: '50%', transform: 'translateY(-50%)', border: 'none', background: 'transparent', fontSize: '1.1rem', cursor: 'pointer', color: '#7a7060' }}>✕</button>
+          )}
+        </div>
+      )}
 
       {isSearching ? (
         <>
