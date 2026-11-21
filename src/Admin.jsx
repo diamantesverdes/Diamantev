@@ -4260,6 +4260,10 @@ function Admin() {
       return naturalCollator.compare(a.name || '', b.name || '')
     })
   }
+  // Pantalla Tienda: muestra TODAS las que ya están en la tienda (las que ve el cliente) más las que marques con casillas para agregar.
+  function tiendaListaItems() {
+    return labelItemsList().filter(x => modeSets.tienda.has(x.id) || (x.marcado_cliente && !x.coming_soon))
+  }
   function selectedRealPlantIds() { return Array.from(selectedLabels).filter(id => !isSeedId(id)) }
   function requireRealPlantIds() {
     const ids = selectedRealPlantIds()
@@ -6809,7 +6813,7 @@ function Admin() {
                             ]
                             const activo = MODOS.find(m => m.key === actionMode)
                             const terminar = () => {
-                              const n = selectedLabels.size
+                              const n = actionMode === 'tienda' ? tiendaListaItems().length : selectedLabels.size
                               if (n === 0) { alert('Marca las casillas de las plantas que quieras y luego toca "Terminar".'); return }
                               if (actionMode === 'etiquetas') {
                                 setLabelQuantities(prev => { const next = { ...prev }; selectedLabels.forEach(id => { if (!next[id]) next[id] = 1 }); return next })
@@ -6829,17 +6833,17 @@ function Admin() {
                                         onClick={() => setActionMode(on ? null : m.key)}
                                         style={{ flex: '1 1 0', minWidth: 0, padding: '6px 2px', minHeight: 0, borderRadius: 10, boxShadow: 'none', lineHeight: 1.15, fontSize: 13, fontWeight: 700, whiteSpace: 'normal', background: on ? m.color : '#F3ECDD', color: on ? '#fff' : '#5B4636', border: `2px solid ${on ? m.color : '#d8cfb8'}`, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
                                         <span>{m.nombre}</span>
-                                        <span style={{ fontSize: 12, fontWeight: 600 }}>({modeSets[m.key].size})</span>
+                                        <span style={{ fontSize: 12, fontWeight: 600 }}>({m.key === 'tienda' ? tiendaListaItems().length : modeSets[m.key].size})</span>
                                       </button>
                                     )
                                   })}
                                 </div>
                                 {activo && (
                                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6 }}>
-                                    <span style={{ flex: 1, fontSize: 12, color: '#7a7060' }}>Marca las casillas de las plantas que quieras.</span>
+                                    <span style={{ flex: 1, fontSize: 12, color: '#7a7060' }}>{actionMode === 'tienda' ? 'Ves las que ya están en la tienda. Marca casillas para agregar más.' : 'Marca las casillas de las plantas que quieras.'}</span>
                                     <button type="button" onClick={terminar}
                                       style={{ padding: '6px 16px', fontSize: 14, fontWeight: 700, minHeight: 0, lineHeight: 1.2, borderRadius: 10, boxShadow: 'none', background: activo.color, color: '#fff', border: 'none', whiteSpace: 'nowrap' }}>
-                                      ✔ Terminar ({selectedLabels.size})
+                                      ✔ Terminar ({actionMode === 'tienda' ? tiendaListaItems().length : selectedLabels.size})
                                     </button>
                                   </div>
                                 )}
@@ -7366,7 +7370,7 @@ function Admin() {
                         })()}
 
                         {storeModalOpen && (() => {
-                          const items = labelItemsList().filter(x => selectedLabels.has(x.id))
+                          const items = tiendaListaItems()
                           const idsReales = items.filter(x => !x.isSeed).map(x => x.id)
                           const enTienda = items.filter(x => x.marcado_cliente).length
                           const fueraDeLista = labelItemsList().filter(x => x.marcado_cliente && !x.coming_soon && !selectedLabels.has(x.id)).length
@@ -7409,11 +7413,19 @@ function Admin() {
                                         <div style={{ width: 36, height: 36, borderRadius: 8, flexShrink: 0, border: '1px dashed #ccc', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#bbb' }}>🌱</div>
                                       )}
                                       <span style={{ flex: 1, minWidth: 0, fontSize: 14, lineHeight: 1.2, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{x.name}</span>
+                                      <button type="button" aria-label={x.marcado_cliente ? 'Quitar de la tienda' : 'Poner en la tienda'} title={x.marcado_cliente ? 'En la tienda: toca para quitarla' : 'Fuera de la tienda: toca para ponerla'}
+                                        onClick={() => {
+                                          if (x.marcado_cliente) setModeSets(prev => ({ ...prev, tienda: new Set([...prev.tienda, x.id]) })) // queda en la lista para poder volver a ponerla
+                                          markSelectedClienteAll(new Set([x.id]), !x.marcado_cliente)
+                                        }}
+                                        style={{ border: 'none', background: 'none', boxShadow: 'none', padding: '0 2px', minHeight: 0, fontSize: 20, lineHeight: 1, cursor: 'pointer' }}>{x.marcado_cliente ? '🟢' : '⚪'}</button>
                                       <span style={{ fontSize: 12, whiteSpace: 'nowrap' }}>
-                                        {x.marcado_cliente ? '🟢' : '⚪'}{!x.isSeed && x.coming_soon ? ' 🔜' : ''}{!x.isSeed && Number(x.discount_percent) > 0 ? ` −${x.discount_percent}%` : ''}
+                                        {!x.isSeed && x.coming_soon ? '🔜' : ''}{!x.isSeed && Number(x.discount_percent) > 0 ? ` −${x.discount_percent}%` : ''}
                                       </span>
-                                      <button type="button" aria-label="Quitar de la lista" title="Quitar de la lista" onClick={() => toggleLabelSelect(x.id)}
-                                        style={{ width: 24, border: 'none', background: 'none', boxShadow: 'none', padding: 0, minHeight: 0, fontSize: 16, color: '#b03434', cursor: 'pointer' }}>✕</button>
+                                      {!x.marcado_cliente && modeSets.tienda.has(x.id) ? (
+                                        <button type="button" aria-label="Quitar de la lista" title="Quitar de la lista" onClick={() => toggleLabelSelect(x.id)}
+                                          style={{ width: 24, border: 'none', background: 'none', boxShadow: 'none', padding: 0, minHeight: 0, fontSize: 16, color: '#b03434', cursor: 'pointer' }}>✕</button>
+                                      ) : <span style={{ width: 24 }} />}
                                       <div style={{ flexBasis: '100%', display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', paddingLeft: 44 }}>
                                         {x.isSeed ? (
                                           <span style={{ flex: 1, fontSize: 13, color: '#6b5a45', fontWeight: 600 }}>🌰 Semilla</span>
@@ -7461,11 +7473,12 @@ function Admin() {
                                 </div>
 
                                 {titulo('En la tienda')}
+                                <p style={{ margin: '0 2px 6px', fontSize: 12, color: '#7a7060' }}>Toca el círculo 🟢/⚪ de una planta para ponerla o quitarla al instante. Poner y Quitar actúan sobre las que marcaste con casillas ({modeSets.tienda.size}).</p>
                                 <div style={{ display: 'flex', gap: 8 }}>
-                                  <button type="button" className="save-note-btn-inline" disabled={items.length === 0} onClick={() => markSelectedClienteAll(selectedLabels, true)} style={{ flex: 1 }}>🟢 Poner</button>
-                                  <button type="button" disabled={items.length === 0} onClick={() => markSelectedClienteAll(selectedLabels, false)} style={{ flex: 1 }}>⚪ Quitar</button>
+                                  <button type="button" className="save-note-btn-inline" disabled={modeSets.tienda.size === 0} onClick={() => markSelectedClienteAll(modeSets.tienda, true)} style={{ flex: 1 }}>🟢 Poner ({modeSets.tienda.size})</button>
+                                  <button type="button" disabled={modeSets.tienda.size === 0} onClick={() => { if (window.confirm(`¿Quitar de la tienda las ${modeSets.tienda.size} marcadas con casilla? Ya no las verá el cliente.`)) markSelectedClienteAll(modeSets.tienda, false) }} style={{ flex: 1 }}>⚪ Quitar ({modeSets.tienda.size})</button>
                                 </div>
-                                <button type="button" disabled={items.length === 0} onClick={dejarSoloEstasEnTienda} style={{ width: '100%', marginTop: 8 }}>🎯 Dejar en la tienda solo estas</button>
+                                <button type="button" disabled={modeSets.tienda.size === 0} onClick={dejarSoloEstasEnTienda} style={{ width: '100%', marginTop: 8 }}>🎯 Dejar en la tienda solo estas</button>
                                 {fueraDeLista > 0 && (
                                   <p style={{ margin: '6px 2px 0', fontSize: 12.5, color: '#b03434', fontWeight: 600 }}>
                                     ⚠️ Hay {fueraDeLista} más en la tienda que no están en esta lista: el cliente también las ve.
@@ -7484,7 +7497,7 @@ function Admin() {
                                     onChange={e => setStoreDiscount(e.target.value)}
                                     style={{ flex: 1, minWidth: 0, boxSizing: 'border-box' }}
                                   />
-                                  <button type="button" disabled={idsReales.length === 0} onClick={() => applyDiscountPercent(idsReales, storeDiscount)}>Aplicar</button>
+                                  <button type="button" disabled={idsReales.length === 0} onClick={() => { if (window.confirm(`¿Aplicar este descuento a las ${idsReales.length} plantas de la lista?`)) applyDiscountPercent(idsReales, storeDiscount) }}>Aplicar</button>
                                 </div>
 
                                 {titulo('Link de la tienda')}
