@@ -916,6 +916,7 @@ function Admin() {
   const [intForm, setIntForm] = useState({ contacto: '', fecha: '', nota: '', entregados: [], recibidos: [] })
   const [carouselModalOpen, setCarouselModalOpen] = useState(false) // pantalla Carrusel
   const [carouselPickFor, setCarouselPickFor] = useState(null) // planta a la que se le elige la foto del carrusel
+  const [storeListSearch, setStoreListSearch] = useState('')
   const [storeModalOpen, setStoreModalOpen] = useState(false) // pantalla "Tienda" (poner/quitar, descuento, carrusel)
   const [storeDiscount, setStoreDiscount] = useState('') // % de descuento escrito en la pantalla Tienda
   const galleryVisibleRef = useRef([]) // plantas que se ven ahora en la galería (para "Todas" en las pantallas)
@@ -7373,6 +7374,8 @@ function Admin() {
                           const items = tiendaListaItems()
                           const idsReales = items.filter(x => !x.isSeed).map(x => x.id)
                           const enTienda = items.filter(x => x.marcado_cliente).length
+                          const qLista = normalizarBusqueda(storeListSearch.trim())
+                          const listaVisible = qLista ? items.filter(x => normalizarBusqueda(x.name || '').includes(qLista)) : items
                           const fueraDeLista = labelItemsList().filter(x => x.marcado_cliente && !x.coming_soon && !selectedLabels.has(x.id)).length
                           const faltaPrecio = x => !(Number(x.price) > 0)
                           const faltaTipo = x => !x.isSeed && !x.presentacion
@@ -7386,8 +7389,8 @@ function Admin() {
                               onClick={() => setStoreModalOpen(false)}
                               style={{ position: 'fixed', inset: 0, zIndex: 3000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
                             >
-                              <div className="free-note-modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 460, width: '100%', maxHeight: '88vh', display: 'flex', flexDirection: 'column' }}>
-                                <div className="free-note-modal-header">
+                              <div className="free-note-modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 460, width: '100%', maxHeight: '94vh', overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
+                                <div className="free-note-modal-header" style={{ position: 'sticky', top: 0, zIndex: 3, background: '#FBF6EA', paddingBottom: 4 }}>
                                   <h4>🛍️ Tienda ({items.length})</h4>
                                   <button type="button" className="modal-close-btn" onClick={() => setStoreModalOpen(false)}>✕</button>
                                 </div>
@@ -7397,15 +7400,27 @@ function Admin() {
                                   <button type="button" onClick={() => clearLabels()} style={chico}>🧹 Limpiar</button>
                                   <span style={{ flex: 1, textAlign: 'right', fontSize: 12, color: '#7a7060' }}>En la tienda: {enTienda} de {items.length}</span>
                                 </div>
+                                <input
+                                  type="search"
+                                  placeholder="🔍 Buscar en la lista de la tienda..."
+                                  value={storeListSearch}
+                                  onChange={e => setStoreListSearch(e.target.value)}
+                                  style={{ width: '100%', boxSizing: 'border-box', margin: '8px 0 0', padding: '8px 10px', fontSize: 14, borderRadius: 10, border: '1px solid #ccc' }}
+                                />
+                                <div style={{ display: 'flex', gap: 6, margin: '8px 0 0' }}>
+                                  <button type="button" className="save-note-btn-inline" onClick={sendStoreLink} style={{ ...chico, flex: 1 }}>🔗 Enviar link</button>
+                                  <button type="button" onClick={copySharedLink} style={{ ...chico, flex: 1 }}>📋 Copiar link</button>
+                                </div>
                                 {faltanDatos > 0 && (
                                   <p style={{ margin: '6px 2px 0', fontSize: 12.5, color: '#b03434', fontWeight: 600 }}>
                                     ⚠️ {faltanDatos} en la tienda sin precio o sin tipo (en rojo).
                                   </p>
                                 )}
 
-                                <div style={{ overflowY: 'auto', maxHeight: '42vh', padding: '2px' }}>
+                                <div style={{ padding: '2px', flexShrink: 0 }}>
                                   {items.length === 0 && <p className="status-msg">No hay plantas en la lista.</p>}
-                                  {items.map(x => (
+                                  {listaVisible.length === 0 && items.length > 0 && <p className="status-msg">Ninguna coincide con "{storeListSearch}".</p>}
+                                  {listaVisible.map(x => (
                                     <div key={x.id} style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 8, padding: '6px 2px', borderBottom: '1px solid #eee' }}>
                                       {x.image_url ? (
                                         <img src={x.image_url} alt="" loading="lazy" style={{ width: 36, height: 36, objectFit: 'cover', borderRadius: 8, flexShrink: 0, border: '1px solid #ddd' }} />
@@ -7479,12 +7494,7 @@ function Admin() {
                                   <button type="button" disabled={modeSets.tienda.size === 0} onClick={() => { if (window.confirm(`¿Quitar de la tienda las ${modeSets.tienda.size} marcadas con casilla? Ya no las verá el cliente.`)) markSelectedClienteAll(modeSets.tienda, false) }} style={{ flex: 1 }}>⚪ Quitar ({modeSets.tienda.size})</button>
                                 </div>
                                 <button type="button" disabled={modeSets.tienda.size === 0} onClick={dejarSoloEstasEnTienda} style={{ width: '100%', marginTop: 8 }}>🎯 Dejar en la tienda solo estas</button>
-                                {fueraDeLista > 0 && (
-                                  <p style={{ margin: '6px 2px 0', fontSize: 12.5, color: '#b03434', fontWeight: 600 }}>
-                                    ⚠️ Hay {fueraDeLista} más en la tienda que no están en esta lista: el cliente también las ve.
-                                  </p>
-                                )}
-
+                                
                                 {titulo('Descuento')}
                                 <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                                   <input
