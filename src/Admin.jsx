@@ -917,6 +917,7 @@ function Admin() {
   const [carouselModalOpen, setCarouselModalOpen] = useState(false) // pantalla Carrusel
   const [carouselPickFor, setCarouselPickFor] = useState(null) // planta a la que se le elige la foto del carrusel
   const [storeListSearch, setStoreListSearch] = useState('')
+  const [storeEditId, setStoreEditId] = useState(null) // fila de la pantalla Tienda abierta para editar tipo, precio y venta mínima
   const [storeModalOpen, setStoreModalOpen] = useState(false) // pantalla "Tienda" (poner/quitar, descuento, carrusel)
   const [storeDiscount, setStoreDiscount] = useState('') // % de descuento escrito en la pantalla Tienda
   const galleryVisibleRef = useRef([]) // plantas que se ven ahora en la galería (para "Todas" en las pantallas)
@@ -7376,6 +7377,8 @@ function Admin() {
                           const enTienda = items.filter(x => x.marcado_cliente).length
                           const qLista = normalizarBusqueda(storeListSearch.trim())
                           const listaVisible = qLista ? items.filter(x => normalizarBusqueda(x.name || '').includes(qLista)) : items
+                          const ponerIds = listaVisible.filter(x => !x.marcado_cliente).map(x => x.id)
+                          const quitarIds = listaVisible.filter(x => x.marcado_cliente).map(x => x.id)
                           const fueraDeLista = labelItemsList().filter(x => x.marcado_cliente && !x.coming_soon && !selectedLabels.has(x.id)).length
                           const faltaPrecio = x => !(Number(x.price) > 0)
                           const faltaTipo = x => !x.isSeed && !x.presentacion
@@ -7420,81 +7423,97 @@ function Admin() {
                                 <div style={{ padding: '2px', flexShrink: 0 }}>
                                   {items.length === 0 && <p className="status-msg">No hay plantas en la lista.</p>}
                                   {listaVisible.length === 0 && items.length > 0 && <p className="status-msg">Ninguna coincide con "{storeListSearch}".</p>}
-                                  {listaVisible.map(x => (
-                                    <div key={x.id} style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 8, padding: '6px 2px', borderBottom: '1px solid #eee' }}>
-                                      {x.image_url ? (
-                                        <img src={x.image_url} alt="" loading="lazy" style={{ width: 36, height: 36, objectFit: 'cover', borderRadius: 8, flexShrink: 0, border: '1px solid #ddd' }} />
-                                      ) : (
-                                        <div style={{ width: 36, height: 36, borderRadius: 8, flexShrink: 0, border: '1px dashed #ccc', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#bbb' }}>🌱</div>
-                                      )}
-                                      <span style={{ flex: 1, minWidth: 0, fontSize: 14, lineHeight: 1.2, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{x.name}</span>
-                                      <button type="button" aria-label={x.marcado_cliente ? 'Quitar de la tienda' : 'Poner en la tienda'} title={x.marcado_cliente ? 'En la tienda: toca para quitarla' : 'Fuera de la tienda: toca para ponerla'}
-                                        onClick={() => {
-                                          if (x.marcado_cliente) setModeSets(prev => ({ ...prev, tienda: new Set([...prev.tienda, x.id]) })) // queda en la lista para poder volver a ponerla
-                                          markSelectedClienteAll(new Set([x.id]), !x.marcado_cliente)
-                                        }}
-                                        style={{ border: 'none', background: 'none', boxShadow: 'none', padding: '0 2px', minHeight: 0, fontSize: 20, lineHeight: 1, cursor: 'pointer' }}>{x.marcado_cliente ? '🟢' : '⚪'}</button>
-                                      <span style={{ fontSize: 12, whiteSpace: 'nowrap' }}>
-                                        {!x.isSeed && x.coming_soon ? '🔜' : ''}{!x.isSeed && Number(x.discount_percent) > 0 ? ` −${x.discount_percent}%` : ''}
-                                      </span>
-                                      {!x.marcado_cliente && modeSets.tienda.has(x.id) ? (
-                                        <button type="button" aria-label="Quitar de la lista" title="Quitar de la lista" onClick={() => toggleLabelSelect(x.id)}
-                                          style={{ width: 24, border: 'none', background: 'none', boxShadow: 'none', padding: 0, minHeight: 0, fontSize: 16, color: '#b03434', cursor: 'pointer' }}>✕</button>
-                                      ) : <span style={{ width: 24 }} />}
-                                      <div style={{ flexBasis: '100%', display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', paddingLeft: 44 }}>
-                                        {x.isSeed ? (
-                                          <span style={{ flex: 1, fontSize: 13, color: '#6b5a45', fontWeight: 600 }}>🌰 Semilla</span>
-                                        ) : (
-                                          <select
-                                            value={x.presentacion || ''}
-                                            onChange={e => updatePresentacionRapido(x.id, e.target.value)}
-                                            style={{ flex: '1 1 130px', minWidth: 0, fontSize: 13, padding: '5px 6px', borderRadius: 8, border: '1px solid #ccc', ...(faltaTipo(x) ? campoMal : {}) }}
-                                          >
-                                            <option value="">¿Qué es? (tipo)</option>
-                                            {PRESENTACIONES_ADMIN.map(([v, t]) => <option key={v} value={v}>{t}</option>)}
-                                          </select>
-                                        )}
-                                        <span style={{ fontSize: 13 }}>$</span>
-                                        <input
-                                          key={`${x.id}-${x.price}`}
-                                          type="number"
-                                          inputMode="decimal"
-                                          step="0.01"
-                                          min="0"
-                                          placeholder="Precio"
-                                          defaultValue={Number(x.price) > 0 ? x.price : ''}
-                                          onBlur={e => updatePrecioTienda(x, e.target.value)}
-                                          style={{ width: 84, boxSizing: 'border-box', fontSize: 13, padding: '5px 6px', borderRadius: 8, border: '1px solid #ccc', ...(faltaPrecio(x) ? campoMal : {}) }}
-                                        />
-                                        {!x.isSeed && (
-                                          <>
-                                            <span style={{ fontSize: 13, whiteSpace: 'nowrap' }}>Se vende de a</span>
+                                  {listaVisible.map(x => {
+                                    const abierto = storeEditId === x.id
+                                    const emojiTipo = x.isSeed ? '🌰' : String((PRESENTACIONES_ADMIN.find(([v]) => v === x.presentacion) || [])[1] || '').split(' ')[0]
+                                    const rojo = { color: '#b03434', fontWeight: 700 }
+                                    return (
+                                      <div key={x.id} style={{ borderBottom: '1px solid #eee' }}>
+                                        <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'nowrap', gap: 6, padding: '5px 2px' }}>
+                                          {x.image_url ? (
+                                            <img src={x.image_url} alt="" loading="lazy" style={{ width: 30, height: 30, objectFit: 'cover', borderRadius: 6, flexShrink: 0, border: '1px solid #ddd' }} />
+                                          ) : (
+                                            <div style={{ width: 30, height: 30, borderRadius: 6, flexShrink: 0, border: '1px dashed #ccc' }} />
+                                          )}
+                                          <button type="button" onClick={() => setStoreEditId(abierto ? null : x.id)} title="Toca para editar tipo, precio y venta mínima"
+                                            style={{ flex: 1, minWidth: 0, textAlign: 'left', background: 'none', border: 'none', boxShadow: 'none', padding: 0, minHeight: 0, fontSize: 13, lineHeight: 1.2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: 'inherit', cursor: 'pointer' }}>
+                                            {x.name}
+                                          </button>
+                                          <span style={{ fontSize: 14, flexShrink: 0, ...(faltaTipo(x) ? rojo : {}) }}>{faltaTipo(x) ? '❓' : emojiTipo}</span>
+                                          <span style={{ fontSize: 13, flexShrink: 0, minWidth: 38, textAlign: 'right', ...(faltaPrecio(x) ? rojo : {}) }}>
+                                            {faltaPrecio(x) ? '$?' : `$${Number(x.price)}`}
+                                          </span>
+                                          <span style={{ fontSize: 11, color: '#7a7060', flexShrink: 0, minWidth: 20 }}>{!x.isSeed && Number(x.venta_minima) > 1 ? `×${x.venta_minima}` : ''}</span>
+                                          {!x.marcado_cliente && modeSets.tienda.has(x.id) && (
+                                            <button type="button" aria-label="Quitar de la lista" title="Quitar de la lista" onClick={() => toggleLabelSelect(x.id)}
+                                              style={{ width: 20, border: 'none', background: 'none', boxShadow: 'none', padding: 0, minHeight: 0, fontSize: 15, color: '#b03434', cursor: 'pointer', flexShrink: 0 }}>✕</button>
+                                          )}
+                                          <button type="button" aria-label={x.marcado_cliente ? 'Quitar de la tienda' : 'Poner en la tienda'} title={x.marcado_cliente ? 'En la tienda: toca para quitarla' : 'Fuera de la tienda: toca para ponerla'}
+                                            onClick={() => {
+                                              if (x.marcado_cliente) setModeSets(prev => ({ ...prev, tienda: new Set([...prev.tienda, x.id]) })) // queda en la lista para poder volver a ponerla
+                                              markSelectedClienteAll(new Set([x.id]), !x.marcado_cliente)
+                                            }}
+                                            style={{ border: 'none', background: 'none', boxShadow: 'none', padding: '0 2px', minHeight: 0, fontSize: 20, lineHeight: 1, cursor: 'pointer', flexShrink: 0 }}>{x.marcado_cliente ? '🟢' : '⚪'}</button>
+                                        </div>
+                                        {abierto && (
+                                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', padding: '0 2px 8px 36px' }}>
+                                            {x.isSeed ? (
+                                              <span style={{ flex: 1, fontSize: 13, color: '#6b5a45', fontWeight: 600 }}>🌰 Semilla</span>
+                                            ) : (
+                                              <select
+                                                value={x.presentacion || ''}
+                                                onChange={e => updatePresentacionRapido(x.id, e.target.value)}
+                                                style={{ flex: '1 1 130px', minWidth: 0, fontSize: 13, padding: '5px 6px', borderRadius: 8, border: '1px solid #ccc', ...(faltaTipo(x) ? campoMal : {}) }}
+                                              >
+                                                <option value="">¿Qué es? (tipo)</option>
+                                                {PRESENTACIONES_ADMIN.map(([v, t]) => <option key={v} value={v}>{t}</option>)}
+                                              </select>
+                                            )}
+                                            <span style={{ fontSize: 13 }}>$</span>
                                             <input
-                                              key={`min-${x.id}-${x.venta_minima}`}
+                                              key={`${x.id}-${x.price}`}
                                               type="number"
-                                              inputMode="numeric"
-                                              step="1"
-                                              min="1"
-                                              placeholder="1"
-                                              defaultValue={Number(x.venta_minima) > 1 ? x.venta_minima : ''}
-                                              onBlur={e => updateMinimoRapido(x, e.target.value)}
-                                              style={{ width: 56, boxSizing: 'border-box', fontSize: 13, padding: '5px 6px', borderRadius: 8, border: '1px solid #ccc' }}
+                                              inputMode="decimal"
+                                              step="0.01"
+                                              min="0"
+                                              placeholder="Precio"
+                                              defaultValue={Number(x.price) > 0 ? x.price : ''}
+                                              onBlur={e => updatePrecioTienda(x, e.target.value)}
+                                              style={{ width: 84, boxSizing: 'border-box', fontSize: 13, padding: '5px 6px', borderRadius: 8, border: '1px solid #ccc', ...(faltaPrecio(x) ? campoMal : {}) }}
                                             />
-                                          </>
+                                            {!x.isSeed && (
+                                              <>
+                                                <span style={{ fontSize: 13, whiteSpace: 'nowrap' }}>Se vende de a</span>
+                                                <input
+                                                  key={`min-${x.id}-${x.venta_minima}`}
+                                                  type="number"
+                                                  inputMode="numeric"
+                                                  step="1"
+                                                  min="1"
+                                                  placeholder="1"
+                                                  defaultValue={Number(x.venta_minima) > 1 ? x.venta_minima : ''}
+                                                  onBlur={e => updateMinimoRapido(x, e.target.value)}
+                                                  style={{ width: 56, boxSizing: 'border-box', fontSize: 13, padding: '5px 6px', borderRadius: 8, border: '1px solid #ccc' }}
+                                                />
+                                              </>
+                                            )}
+                                          </div>
                                         )}
                                       </div>
-                                    </div>
-                                  ))}
+                                    )
+                                  })}
                                 </div>
 
-                                {titulo('En la tienda')}
-                                <p style={{ margin: '0 2px 6px', fontSize: 12, color: '#7a7060' }}>Toca el círculo 🟢/⚪ de una planta para ponerla o quitarla al instante. Poner y Quitar actúan sobre las que marcaste con casillas ({modeSets.tienda.size}).</p>
-                                <div style={{ display: 'flex', gap: 8 }}>
-                                  <button type="button" className="save-note-btn-inline" disabled={modeSets.tienda.size === 0} onClick={() => markSelectedClienteAll(modeSets.tienda, true)} style={{ flex: 1 }}>🟢 Poner ({modeSets.tienda.size})</button>
-                                  <button type="button" disabled={modeSets.tienda.size === 0} onClick={() => { if (window.confirm(`¿Quitar de la tienda las ${modeSets.tienda.size} marcadas con casilla? Ya no las verá el cliente.`)) markSelectedClienteAll(modeSets.tienda, false) }} style={{ flex: 1 }}>⚪ Quitar ({modeSets.tienda.size})</button>
+                                {titulo('Toda la lista')}
+                                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                                  <button type="button" className="save-note-btn-inline" disabled={ponerIds.length === 0}
+                                    onClick={() => markSelectedClienteAll(new Set(ponerIds), true)} style={{ flex: '1 1 150px' }}>🟢 Poner las {ponerIds.length} que están fuera</button>
+                                  <button type="button" disabled={quitarIds.length === 0}
+                                    onClick={() => { if (window.confirm(`¿Quitar de la tienda ${quitarIds.length === 1 ? 'esta planta' : `estas ${quitarIds.length} plantas`}? El cliente dejará de verlas. Después puedes volver a ponerlas.`)) markSelectedClienteAll(new Set(quitarIds), false) }}
+                                    style={{ flex: '1 1 150px' }}>⚪ Quitar las {quitarIds.length} de la tienda</button>
                                 </div>
-                                <button type="button" disabled={modeSets.tienda.size === 0} onClick={dejarSoloEstasEnTienda} style={{ width: '100%', marginTop: 8 }}>🎯 Dejar en la tienda solo estas</button>
-                                
+                                <p style={{ margin: '6px 2px 0', fontSize: 12, color: '#7a7060' }}>Actúan sobre las plantas que ves en la lista (con el buscador, solo las que coinciden). Para una sola, toca su círculo 🟢/⚪.</p>
+
                                 {titulo('Descuento')}
                                 <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                                   <input
