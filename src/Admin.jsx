@@ -917,7 +917,6 @@ function Admin() {
   const [carouselModalOpen, setCarouselModalOpen] = useState(false) // pantalla Carrusel
   const [carouselPickFor, setCarouselPickFor] = useState(null) // planta a la que se le elige la foto del carrusel
   const [storeListSearch, setStoreListSearch] = useState('')
-  const [storeDraft, setStoreDraft] = useState({}) // cambios pendientes de la pantalla Tienda (id -> true/false) hasta tocar Aceptar
   const [storeEditId, setStoreEditId] = useState(null) // fila de la pantalla Tienda abierta para editar tipo, precio y venta mínima
   const [storeModalOpen, setStoreModalOpen] = useState(false) // pantalla "Tienda" (poner/quitar, descuento, carrusel)
   const [storeDiscount, setStoreDiscount] = useState('') // % de descuento escrito en la pantalla Tienda
@@ -6816,8 +6815,8 @@ function Admin() {
                             ]
                             const activo = MODOS.find(m => m.key === actionMode)
                             const terminar = () => {
-                              const n = actionMode === 'tienda' ? tiendaListaItems().length : selectedLabels.size
-                              if (n === 0) { alert('Marca las casillas de las plantas que quieras y luego toca "Terminar".'); return }
+                              const n = selectedLabels.size
+                              if (n === 0 && actionMode !== 'tienda') { alert('Marca las casillas de las plantas que quieras y luego toca "Terminar".'); return }
                               if (actionMode === 'etiquetas') {
                                 setLabelQuantities(prev => { const next = { ...prev }; selectedLabels.forEach(id => { if (!next[id]) next[id] = 1 }); return next })
                                 setPendingLabelAction('pdf')
@@ -6833,20 +6832,23 @@ function Admin() {
                                     const on = actionMode === m.key
                                     return (
                                       <button key={m.key} type="button" aria-pressed={on}
-                                        onClick={() => setActionMode(on ? null : m.key)}
+                                        onClick={() => {
+                                          if (!on && m.key === 'tienda') setModeSets(prev => ({ ...prev, tienda: new Set(labelItemsList().filter(x => x.marcado_cliente && !x.coming_soon).map(x => x.id)) }))
+                                          setActionMode(on ? null : m.key)
+                                        }}
                                         style={{ flex: '1 1 0', minWidth: 0, padding: '6px 2px', minHeight: 0, borderRadius: 10, boxShadow: 'none', lineHeight: 1.15, fontSize: 13, fontWeight: 700, whiteSpace: 'normal', background: on ? m.color : '#F3ECDD', color: on ? '#fff' : '#5B4636', border: `2px solid ${on ? m.color : '#d8cfb8'}`, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
                                         <span>{m.nombre}</span>
-                                        <span style={{ fontSize: 12, fontWeight: 600 }}>({m.key === 'tienda' ? tiendaListaItems().length : modeSets[m.key].size})</span>
+                                        <span style={{ fontSize: 12, fontWeight: 600 }}>({m.key === 'tienda' ? (actionMode === 'tienda' ? modeSets.tienda.size : labelItemsList().filter(x => x.marcado_cliente && !x.coming_soon).length) : modeSets[m.key].size})</span>
                                       </button>
                                     )
                                   })}
                                 </div>
                                 {activo && (
                                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6 }}>
-                                    <span style={{ flex: 1, fontSize: 12, color: '#7a7060' }}>{actionMode === 'tienda' ? 'Ves las que ya están en la tienda. Marca casillas para agregar más.' : 'Marca las casillas de las plantas que quieras.'}</span>
+                                    <span style={{ flex: 1, fontSize: 12, color: '#7a7060' }}>{actionMode === 'tienda' ? 'Marcadas = las que estarán en la tienda. Marca para agregar, desmarca para sacar.' : 'Marca las casillas de las plantas que quieras.'}</span>
                                     <button type="button" onClick={terminar}
                                       style={{ padding: '6px 16px', fontSize: 14, fontWeight: 700, minHeight: 0, lineHeight: 1.2, borderRadius: 10, boxShadow: 'none', background: activo.color, color: '#fff', border: 'none', whiteSpace: 'nowrap' }}>
-                                      ✔ Terminar ({actionMode === 'tienda' ? tiendaListaItems().length : selectedLabels.size})
+                                      ✔ Terminar ({selectedLabels.size})
                                     </button>
                                   </div>
                                 )}
@@ -7374,8 +7376,8 @@ function Admin() {
 
                         {storeModalOpen && (() => {
                           const items = tiendaListaItems()
-                          // Borrador: nada se guarda hasta tocar "Aceptar". Verde = quedará en la tienda; blanco = no.
-                          const deseada = x => (storeDraft[x.id] !== undefined ? storeDraft[x.id] : !!(x.marcado_cliente || modeSets.tienda.has(x.id)))
+                          // Nada se guarda hasta tocar "Aceptar". Casilla marcada / círculo verde = quedará en la tienda; blanco = no.
+                          const deseada = x => modeSets.tienda.has(x.id)
                           const idsReales = items.filter(x => !x.isSeed).map(x => x.id)
                           const enTienda = items.filter(x => x.marcado_cliente).length
                           const qLista = normalizarBusqueda(storeListSearch.trim())
@@ -7383,14 +7385,15 @@ function Admin() {
                           const entran = items.filter(x => deseada(x) && !x.marcado_cliente)
                           const salen = items.filter(x => !deseada(x) && x.marcado_cliente)
                           const quedan = items.filter(deseada).length
-                          const cerrar = () => { setStoreDraft({}); setStoreModalOpen(false) }
-                          const marcarVisibles = valor => setStoreDraft(prev => { const n = { ...prev }; listaVisible.forEach(x => { n[x.id] = valor }); return n })
+                          const cerrar = () => setStoreModalOpen(false)
+                          const enTiendaAhora = () => new Set(labelItemsList().filter(x => x.marcado_cliente && !x.coming_soon).map(x => x.id))
+                          const cancelarCambios = () => { setModeSets(prev => ({ ...prev, tienda: enTiendaAhora() })); setStoreModalOpen(false) }
+                          const marcarVisibles = valor => setModeSets(prev => { const n = new Set(prev.tienda); listaVisible.forEach(x => { if (valor) n.add(x.id); else n.delete(x.id) }); return { ...prev, tienda: n } })
                           const aceptar = () => {
                             if (quedan === 0 && !window.confirm('La tienda quedará vacía: el cliente no verá ninguna planta. ¿Continuar?')) return
                             if (faltanDatos > 0 && !window.confirm(`${faltanDatos} planta(s) quedarán en la tienda sin precio o sin tipo (el cliente las vería incompletas). ¿Continuar de todos modos?`)) return
                             if (entran.length) markSelectedClienteAll(new Set(entran.map(x => x.id)), true)
                             if (salen.length) markSelectedClienteAll(new Set(salen.map(x => x.id)), false)
-                            setStoreDraft({})
                             setModeSets(prev => ({ ...prev, tienda: new Set() }))
                             setStoreModalOpen(false)
                             setActionMode(null)
@@ -7460,7 +7463,7 @@ function Admin() {
                                           {!x.marcado_cliente && deseada(x) && <span style={{ fontSize: 11, color: '#2f7a3a', fontWeight: 700, flexShrink: 0 }}>nueva</span>}
                                           {x.marcado_cliente && !deseada(x) && <span style={{ fontSize: 11, color: '#b03434', fontWeight: 700, flexShrink: 0 }}>sale</span>}
                                           <button type="button" aria-label={deseada(x) ? 'Quitar de la tienda' : 'Poner en la tienda'} title={deseada(x) ? 'Quedará en la tienda: toca para quitarla' : 'No quedará en la tienda: toca para ponerla'}
-                                            onClick={() => setStoreDraft(prev => ({ ...prev, [x.id]: !deseada(x) }))}
+                                            onClick={() => setModeSets(prev => { const n = new Set(prev.tienda); if (n.has(x.id)) n.delete(x.id); else n.add(x.id); return { ...prev, tienda: n } })}
                                             style={{ border: 'none', background: 'none', boxShadow: 'none', padding: '0 2px', minHeight: 0, fontSize: 20, lineHeight: 1, cursor: 'pointer', flexShrink: 0 }}>{deseada(x) ? '🟢' : '⚪'}</button>
                                         </div>
                                         {abierto && (
@@ -7532,7 +7535,7 @@ function Admin() {
                                     {entran.length === 0 && salen.length === 0 ? 'Sin cambios en la tienda.' : `Al aceptar: ${entran.length} entran, ${salen.length} salen. Quedan ${quedan}.`}
                                   </p>
                                   <div style={{ display: 'flex', gap: 8 }}>
-                                    <button type="button" onClick={cerrar} style={{ flex: '0 0 auto' }}>Cancelar</button>
+                                    <button type="button" onClick={cancelarCambios} style={{ flex: '0 0 auto' }}>Cancelar cambios</button>
                                     <button type="button" className="save-note-btn-inline" onClick={aceptar} style={{ flex: 1 }}>✅ Aceptar y generar link</button>
                                   </div>
                                   <button type="button" onClick={copySharedLink} style={{ ...chico, width: '100%', marginTop: 6 }}>📋 Solo copiar el link</button>
