@@ -917,6 +917,7 @@ function Admin() {
   const [carouselModalOpen, setCarouselModalOpen] = useState(false) // pantalla Carrusel
   const [carouselPickFor, setCarouselPickFor] = useState(null) // planta a la que se le elige la foto del carrusel
   const [storeListSearch, setStoreListSearch] = useState('')
+  const [storeDraft, setStoreDraft] = useState({}) // cambios pendientes de la pantalla Tienda (id -> true/false) hasta tocar Aceptar
   const [storeEditId, setStoreEditId] = useState(null) // fila de la pantalla Tienda abierta para editar tipo, precio y venta mínima
   const [storeModalOpen, setStoreModalOpen] = useState(false) // pantalla "Tienda" (poner/quitar, descuento, carrusel)
   const [storeDiscount, setStoreDiscount] = useState('') // % de descuento escrito en la pantalla Tienda
@@ -7373,35 +7374,51 @@ function Admin() {
 
                         {storeModalOpen && (() => {
                           const items = tiendaListaItems()
+                          // Borrador: nada se guarda hasta tocar "Aceptar". Verde = quedará en la tienda; blanco = no.
+                          const deseada = x => (storeDraft[x.id] !== undefined ? storeDraft[x.id] : !!(x.marcado_cliente || modeSets.tienda.has(x.id)))
                           const idsReales = items.filter(x => !x.isSeed).map(x => x.id)
                           const enTienda = items.filter(x => x.marcado_cliente).length
                           const qLista = normalizarBusqueda(storeListSearch.trim())
                           const listaVisible = qLista ? items.filter(x => normalizarBusqueda(x.name || '').includes(qLista)) : items
-                          const ponerIds = listaVisible.filter(x => !x.marcado_cliente).map(x => x.id)
-                          const quitarIds = listaVisible.filter(x => x.marcado_cliente).map(x => x.id)
+                          const entran = items.filter(x => deseada(x) && !x.marcado_cliente)
+                          const salen = items.filter(x => !deseada(x) && x.marcado_cliente)
+                          const quedan = items.filter(deseada).length
+                          const cerrar = () => { setStoreDraft({}); setStoreModalOpen(false) }
+                          const marcarVisibles = valor => setStoreDraft(prev => { const n = { ...prev }; listaVisible.forEach(x => { n[x.id] = valor }); return n })
+                          const aceptar = () => {
+                            if (quedan === 0 && !window.confirm('La tienda quedará vacía: el cliente no verá ninguna planta. ¿Continuar?')) return
+                            if (faltanDatos > 0 && !window.confirm(`${faltanDatos} planta(s) quedarán en la tienda sin precio o sin tipo (el cliente las vería incompletas). ¿Continuar de todos modos?`)) return
+                            if (entran.length) markSelectedClienteAll(new Set(entran.map(x => x.id)), true)
+                            if (salen.length) markSelectedClienteAll(new Set(salen.map(x => x.id)), false)
+                            setStoreDraft({})
+                            setModeSets(prev => ({ ...prev, tienda: new Set() }))
+                            setStoreModalOpen(false)
+                            setActionMode(null)
+                            sendStoreLink()
+                          }
                           const fueraDeLista = labelItemsList().filter(x => x.marcado_cliente && !x.coming_soon && !selectedLabels.has(x.id)).length
                           const faltaPrecio = x => !(Number(x.price) > 0)
                           const faltaTipo = x => !x.isSeed && !x.presentacion
-                          const faltanDatos = items.filter(x => x.marcado_cliente && (faltaPrecio(x) || faltaTipo(x))).length
+                          const faltanDatos = items.filter(x => deseada(x) && (faltaPrecio(x) || faltaTipo(x))).length
                           const campoMal = { border: '2px solid #b03434', background: '#fdeeee' }
                           const chico = { padding: '6px 10px', fontSize: 13, minHeight: 0, lineHeight: 1.2, borderRadius: 8, boxShadow: 'none', whiteSpace: 'nowrap' }
                           const titulo = txt => <p style={{ margin: '12px 2px 6px', fontSize: 12, fontWeight: 700, color: '#7a7060', letterSpacing: '0.04em', textTransform: 'uppercase' }}>{txt}</p>
                           return createPortal(
                             <div
                               className="admin-sheet-overlay"
-                              onClick={() => setStoreModalOpen(false)}
+                              onClick={cerrar}
                               style={{ position: 'fixed', inset: 0, zIndex: 3000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
                             >
                               <div className="free-note-modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 460, width: '100%', maxHeight: '94vh', overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
                                 <div className="free-note-modal-header" style={{ position: 'sticky', top: 0, zIndex: 3, background: '#FBF6EA', paddingBottom: 4 }}>
                                   <h4>🛍️ Tienda ({items.length})</h4>
-                                  <button type="button" className="modal-close-btn" onClick={() => setStoreModalOpen(false)}>✕</button>
+                                  <button type="button" className="modal-close-btn" onClick={cerrar}>✕</button>
                                 </div>
 
                                 <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', padding: '2px 2px 8px', borderBottom: '2px solid #E8DFC8' }}>
-                                  <button type="button" onClick={() => selectAllLabels(galleryPlants)} style={chico}>☑ Todas</button>
-                                  <button type="button" onClick={() => clearLabels()} style={chico}>🧹 Limpiar</button>
-                                  <span style={{ flex: 1, textAlign: 'right', fontSize: 12, color: '#7a7060' }}>En la tienda: {enTienda} de {items.length}</span>
+                                  <button type="button" onClick={() => marcarVisibles(true)} style={chico}>🟢 Marcar todas</button>
+                                  <button type="button" onClick={() => marcarVisibles(false)} style={chico}>⚪ Quitar todas</button>
+                                  <span style={{ flex: 1, textAlign: 'right', fontSize: 12, color: '#7a7060' }}>Quedarán en la tienda: <strong>{quedan}</strong></span>
                                 </div>
                                 <input
                                   type="search"
@@ -7410,13 +7427,9 @@ function Admin() {
                                   onChange={e => setStoreListSearch(e.target.value)}
                                   style={{ width: '100%', boxSizing: 'border-box', margin: '8px 0 0', padding: '8px 10px', fontSize: 14, borderRadius: 10, border: '1px solid #ccc' }}
                                 />
-                                <div style={{ display: 'flex', gap: 6, margin: '8px 0 0' }}>
-                                  <button type="button" className="save-note-btn-inline" onClick={sendStoreLink} style={{ ...chico, flex: 1 }}>🔗 Enviar link</button>
-                                  <button type="button" onClick={copySharedLink} style={{ ...chico, flex: 1 }}>📋 Copiar link</button>
-                                </div>
-                                {faltanDatos > 0 && (
+                                                                {faltanDatos > 0 && (
                                   <p style={{ margin: '6px 2px 0', fontSize: 12.5, color: '#b03434', fontWeight: 600 }}>
-                                    ⚠️ {faltanDatos} en la tienda sin precio o sin tipo (en rojo).
+                                    ⚠️ {faltanDatos} sin precio o sin tipo (en rojo): tócales el nombre para completarlos.
                                   </p>
                                 )}
 
@@ -7444,16 +7457,11 @@ function Admin() {
                                             {faltaPrecio(x) ? '$?' : `$${Number(x.price)}`}
                                           </span>
                                           <span style={{ fontSize: 11, color: '#7a7060', flexShrink: 0, minWidth: 20 }}>{!x.isSeed && Number(x.venta_minima) > 1 ? `×${x.venta_minima}` : ''}</span>
-                                          {!x.marcado_cliente && modeSets.tienda.has(x.id) && (
-                                            <button type="button" aria-label="Quitar de la lista" title="Quitar de la lista" onClick={() => toggleLabelSelect(x.id)}
-                                              style={{ width: 20, border: 'none', background: 'none', boxShadow: 'none', padding: 0, minHeight: 0, fontSize: 15, color: '#b03434', cursor: 'pointer', flexShrink: 0 }}>✕</button>
-                                          )}
-                                          <button type="button" aria-label={x.marcado_cliente ? 'Quitar de la tienda' : 'Poner en la tienda'} title={x.marcado_cliente ? 'En la tienda: toca para quitarla' : 'Fuera de la tienda: toca para ponerla'}
-                                            onClick={() => {
-                                              if (x.marcado_cliente) setModeSets(prev => ({ ...prev, tienda: new Set([...prev.tienda, x.id]) })) // queda en la lista para poder volver a ponerla
-                                              markSelectedClienteAll(new Set([x.id]), !x.marcado_cliente)
-                                            }}
-                                            style={{ border: 'none', background: 'none', boxShadow: 'none', padding: '0 2px', minHeight: 0, fontSize: 20, lineHeight: 1, cursor: 'pointer', flexShrink: 0 }}>{x.marcado_cliente ? '🟢' : '⚪'}</button>
+                                          {!x.marcado_cliente && deseada(x) && <span style={{ fontSize: 11, color: '#2f7a3a', fontWeight: 700, flexShrink: 0 }}>nueva</span>}
+                                          {x.marcado_cliente && !deseada(x) && <span style={{ fontSize: 11, color: '#b03434', fontWeight: 700, flexShrink: 0 }}>sale</span>}
+                                          <button type="button" aria-label={deseada(x) ? 'Quitar de la tienda' : 'Poner en la tienda'} title={deseada(x) ? 'Quedará en la tienda: toca para quitarla' : 'No quedará en la tienda: toca para ponerla'}
+                                            onClick={() => setStoreDraft(prev => ({ ...prev, [x.id]: !deseada(x) }))}
+                                            style={{ border: 'none', background: 'none', boxShadow: 'none', padding: '0 2px', minHeight: 0, fontSize: 20, lineHeight: 1, cursor: 'pointer', flexShrink: 0 }}>{deseada(x) ? '🟢' : '⚪'}</button>
                                         </div>
                                         {abierto && (
                                           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', padding: '0 2px 8px 36px' }}>
@@ -7504,16 +7512,6 @@ function Admin() {
                                   })}
                                 </div>
 
-                                {titulo('Toda la lista')}
-                                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                                  <button type="button" className="save-note-btn-inline" disabled={ponerIds.length === 0}
-                                    onClick={() => markSelectedClienteAll(new Set(ponerIds), true)} style={{ flex: '1 1 150px' }}>🟢 Poner las {ponerIds.length} que están fuera</button>
-                                  <button type="button" disabled={quitarIds.length === 0}
-                                    onClick={() => { if (window.confirm(`¿Quitar de la tienda ${quitarIds.length === 1 ? 'esta planta' : `estas ${quitarIds.length} plantas`}? El cliente dejará de verlas. Después puedes volver a ponerlas.`)) markSelectedClienteAll(new Set(quitarIds), false) }}
-                                    style={{ flex: '1 1 150px' }}>⚪ Quitar las {quitarIds.length} de la tienda</button>
-                                </div>
-                                <p style={{ margin: '6px 2px 0', fontSize: 12, color: '#7a7060' }}>Actúan sobre las plantas que ves en la lista (con el buscador, solo las que coinciden). Para una sola, toca su círculo 🟢/⚪.</p>
-
                                 {titulo('Descuento')}
                                 <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                                   <input
@@ -7529,12 +7527,16 @@ function Admin() {
                                   <button type="button" disabled={idsReales.length === 0} onClick={() => { if (window.confirm(`¿Aplicar este descuento a las ${idsReales.length} plantas de la lista?`)) applyDiscountPercent(idsReales, storeDiscount) }}>Aplicar</button>
                                 </div>
 
-                                {titulo('Link de la tienda')}
-                                <div style={{ display: 'flex', gap: 8 }}>
-                                  <button type="button" className="save-note-btn-inline" onClick={sendStoreLink} style={{ flex: 1 }}>🔗 Enviar link</button>
-                                  <button type="button" onClick={copySharedLink} style={{ flex: 1 }}>📋 Copiar link</button>
+                                <div style={{ position: 'sticky', bottom: 0, zIndex: 3, background: '#F3E9D2', margin: '12px -4px 0', padding: '8px 4px 4px', borderTop: '2px solid #E8DFC8' }}>
+                                  <p style={{ margin: '0 2px 6px', fontSize: 12.5, color: '#5a5040', fontWeight: 600 }}>
+                                    {entran.length === 0 && salen.length === 0 ? 'Sin cambios en la tienda.' : `Al aceptar: ${entran.length} entran, ${salen.length} salen. Quedan ${quedan}.`}
+                                  </p>
+                                  <div style={{ display: 'flex', gap: 8 }}>
+                                    <button type="button" onClick={cerrar} style={{ flex: '0 0 auto' }}>Cancelar</button>
+                                    <button type="button" className="save-note-btn-inline" onClick={aceptar} style={{ flex: 1 }}>✅ Aceptar y generar link</button>
+                                  </div>
+                                  <button type="button" onClick={copySharedLink} style={{ ...chico, width: '100%', marginTop: 6 }}>📋 Solo copiar el link</button>
                                 </div>
-                                <p style={{ margin: '6px 2px 0', fontSize: 12, color: '#7a7060' }}>El cliente ve las plantas que están en la tienda (🟢): foto, tipo y precio.</p>
                               </div>
                             </div>,
                             document.body
