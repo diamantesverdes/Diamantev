@@ -2904,6 +2904,13 @@ function Admin() {
     return { isSeed: false, plant: plants.find(p => p.id === selectionId), seedBatch: null }
   }
 
+  // Precio que ya tiene la planta (o el lote de semillas) en la tienda: se sugiere solo en las ventas manuales; se puede cambiar.
+  function precioSugerido(selectionId) {
+    const t = resolveVentaTarget(selectionId)
+    const n = Number(t.isSeed ? (t.seedBatch && t.seedBatch.price) : (t.plant && t.plant.price))
+    return n > 0 ? String(n) : ''
+  }
+
   function seedBatchDisplayName(sb) {
     if (!sb) return ''
     return `🌰 ${sb.es_noid ? 'NOID' : (sb.nombre || 'Lote de semillas')}`
@@ -8789,7 +8796,7 @@ function Admin() {
                               .map(sb => ({ id: `seed:${sb.id}`, name: `${seedBatchDisplayName(sb)} — ${sb.stock || 0} disponibles` })),
                           ]}
                           selectedId={ventaLineForm.plant_id}
-                          onSelect={id => setVentaLineForm({ ...ventaLineForm, plant_id: id })}
+                          onSelect={id => setVentaLineForm({ ...ventaLineForm, plant_id: id, unit_price: ventaLineForm.motivo === 'Venta manual (con precio)' ? precioSugerido(id) : ventaLineForm.unit_price })}
                         />
                       ) : ventaLineForm.plant_id ? (
                         <p className="status-msg" style={{ margin: '4px 0' }}>
@@ -8802,7 +8809,7 @@ function Admin() {
                         onChange={e => {
                           const motivo = e.target.value
                           const autoZero = motivo === 'Planta muerta / Pérdida' || motivo === 'Regalo / Obsequio'
-                          setVentaLineForm({ ...ventaLineForm, motivo, unit_price: autoZero ? '0' : ventaLineForm.unit_price })
+                          setVentaLineForm({ ...ventaLineForm, motivo, unit_price: autoZero ? '0' : (ventaLineForm.unit_price === '0' || ventaLineForm.unit_price === '' ? precioSugerido(ventaLineForm.plant_id) : ventaLineForm.unit_price) })
                         }}
                       >
                         <option value="Venta manual (con precio)">Venta manual (con precio)</option>
@@ -9021,7 +9028,7 @@ function Admin() {
                                         .map(sb => ({ id: `seed:${sb.id}`, name: `${seedBatchDisplayName(sb)} — ${sb.stock || 0} disponibles` })),
                                     ]}
                                     selectedId={ventaLineForm.plant_id}
-                                    onSelect={id => setVentaLineForm({ ...ventaLineForm, plant_id: id })}
+                                    onSelect={id => setVentaLineForm({ ...ventaLineForm, plant_id: id, unit_price: ventaLineForm.motivo === 'Venta manual (con precio)' ? precioSugerido(id) : ventaLineForm.unit_price })}
                                   />
                                 ) : ventaLineForm.plant_id ? (
                                   <p className="status-msg" style={{ margin: '4px 0' }}>
@@ -9034,7 +9041,7 @@ function Admin() {
                                   onChange={e => {
                                     const motivo = e.target.value
                                     const autoZero = motivo === 'Planta muerta / Pérdida' || motivo === 'Regalo / Obsequio'
-                                    setVentaLineForm({ ...ventaLineForm, motivo, unit_price: autoZero ? '0' : ventaLineForm.unit_price })
+                                    setVentaLineForm({ ...ventaLineForm, motivo, unit_price: autoZero ? '0' : (ventaLineForm.unit_price === '0' || ventaLineForm.unit_price === '' ? precioSugerido(ventaLineForm.plant_id) : ventaLineForm.unit_price) })
                                   }}
                                   style={{ width: '100%', boxSizing: 'border-box' }}
                                 >
