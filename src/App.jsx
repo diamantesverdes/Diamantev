@@ -113,13 +113,8 @@ function AppInner() {
             await supabase.rpc('descontar_stock_semillas', { p_id: item.seedBatchId, p_qty: item.quantity })
             continue
           }
-          const { data: current } = await supabase.from('plants').select('stock, stock_disponible').eq('id', item.id).single()
-          if (current) {
-            await supabase.from('plants').update({
-              stock: Math.max(0, current.stock - item.quantity),
-              stock_disponible: Math.max(0, (current.stock_disponible ?? current.stock) - item.quantity),
-            }).eq('id', item.id)
-          }
+          // El stock se descuenta con una función segura en Supabase (la tienda no tiene permiso para editar plantas)
+          await supabase.rpc('descontar_stock_planta', { p_id: String(item.id), p_qty: item.quantity })
         }
       },
     })
@@ -407,13 +402,7 @@ function AppInner() {
         await supabase.rpc('descontar_stock_semillas', { p_id: item.seedBatchId, p_qty: item.quantity })
         continue
       }
-      await supabase
-        .from('plants')
-        .update({
-          stock: Math.max(0, (item.stock_total ?? item.stock) - item.quantity),
-          stock_disponible: Math.max(0, item.stock - item.quantity),
-        })
-        .eq('id', item.id)
+      await supabase.rpc('descontar_stock_planta', { p_id: String(item.id), p_qty: item.quantity })
     }
     const lines = cart.map(i => `- ${i.name}${presentacionLabel(i) ? ' [' + presentacionLabel(i).replace(/^\S+\s/, '') + ']' : ''} x${i.quantity} ($${(i.price * i.quantity).toFixed(2)})`).join('%0A')
     const message = `Hola, quiero confirmar mi compra en 
