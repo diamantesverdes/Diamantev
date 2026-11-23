@@ -9193,7 +9193,7 @@ function Admin() {
                                           <th style={{ padding: '3px 2px', border: '1px solid #ddd', whiteSpace: 'nowrap' }}>Cant</th>
                                           <th style={{ padding: '3px 2px', border: '1px solid #ddd', whiteSpace: 'nowrap' }}>P.Unit</th>
                                           <th style={{ padding: '3px 2px', border: '1px solid #ddd', whiteSpace: 'nowrap' }}>P.Tot</th>
-                                          <th style={{ padding: '3px 2px', border: '1px solid #ddd', whiteSpace: 'nowrap' }}>Pror.</th>
+                                          <th title="Precio por unidad con el envío y los varios ya repartidos" style={{ padding: '3px 2px', border: '1px solid #ddd', whiteSpace: 'nowrap' }}>P.Pror.</th>
                                           <th style={{ padding: '3px 2px', border: '1px solid #ddd', whiteSpace: 'nowrap' }}>Total</th>
                                         </tr>
                                       </thead>
@@ -9205,7 +9205,7 @@ function Admin() {
                                             <td style={{ padding: 2, border: '1px solid #ddd', textAlign: 'center', whiteSpace: 'nowrap' }}>{it.quantity}</td>
                                             <td style={{ padding: 2, border: '1px solid #ddd', textAlign: 'right', whiteSpace: 'nowrap' }}>${it._unitPrice.toFixed(2)}</td>
                                             <td style={{ padding: 2, border: '1px solid #ddd', textAlign: 'right', whiteSpace: 'nowrap' }}>${it._value.toFixed(2)}</td>
-                                            <td style={{ padding: 2, border: '1px solid #ddd', textAlign: 'right', whiteSpace: 'nowrap' }}>${it._prorated.toFixed(2)}</td>
+                                            <td style={{ padding: 2, border: '1px solid #ddd', textAlign: 'right', whiteSpace: 'nowrap' }}>${(Number(it.quantity) > 0 ? it._lineTotal / Number(it.quantity) : 0).toFixed(2)}</td>
                                             <td style={{ padding: 2, border: '1px solid #ddd', textAlign: 'right', whiteSpace: 'nowrap' }}>${it._lineTotal.toFixed(2)}</td>
                                           </tr>
                                         ))}
@@ -10779,7 +10779,7 @@ function Admin() {
                                       <th style={{ padding: '3px 2px', border: '1px solid #ddd', whiteSpace: 'nowrap' }}>Cant</th>
                                       <th style={{ padding: '3px 2px', border: '1px solid #ddd', whiteSpace: 'nowrap' }}>P.Unit</th>
                                       <th style={{ padding: '3px 2px', border: '1px solid #ddd', whiteSpace: 'nowrap' }}>P.Tot</th>
-                                      <th style={{ padding: '3px 2px', border: '1px solid #ddd', whiteSpace: 'nowrap' }}>Pror.</th>
+                                      <th title="Precio por unidad con el envío y los varios ya repartidos" style={{ padding: '3px 2px', border: '1px solid #ddd', whiteSpace: 'nowrap' }}>P.Pror.</th>
                                       <th style={{ padding: '3px 2px', border: '1px solid #ddd', whiteSpace: 'nowrap' }}>Total</th>
                                       <th style={{ padding: '3px 2px', border: '1px solid #ddd', whiteSpace: 'nowrap' }}>Estado</th>
                                     </tr>
@@ -10819,7 +10819,7 @@ function Admin() {
                                           {editing ? <input type="number" step="0.01" value={lineDraft.unit_cost ?? c.unit_cost} onChange={e => setLineDraft(c.id, 'unit_cost', e.target.value)} style={{ width: 48, fontSize: 11 }} /> : `$${Number(c.unit_cost).toFixed(2)}`}
                                         </td>
                                         <td style={{ padding: 2, border: '1px solid #ddd', textAlign: 'right', whiteSpace: 'nowrap' }}>${c._value.toFixed(2)}</td>
-                                        <td style={{ padding: 2, border: '1px solid #ddd', textAlign: 'right', whiteSpace: 'nowrap' }}>${c._prorated.toFixed(2)}</td>
+                                        <td style={{ padding: 2, border: '1px solid #ddd', textAlign: 'right', whiteSpace: 'nowrap' }}>${(Number(c.quantity) > 0 ? c._lineTotal / Number(c.quantity) : 0).toFixed(2)}</td>
                                         <td style={{ padding: 2, border: '1px solid #ddd', textAlign: 'right', whiteSpace: 'nowrap' }}>${c._lineTotal.toFixed(2)}</td>
                                         <td style={{ padding: 2, border: '1px solid #ddd', textAlign: 'center', whiteSpace: 'nowrap' }}>
                                           <StatusChecklist
