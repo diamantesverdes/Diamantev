@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, Component } from 'react'
+import { useState, useEffect, useRef, Component, Fragment } from 'react'
 import { createPortal } from 'react-dom'
 import { jsPDF } from 'jspdf'
 import JSZip from 'jszip'
@@ -917,6 +917,8 @@ function Admin() {
   const [carouselModalOpen, setCarouselModalOpen] = useState(false) // pantalla Carrusel
   const [carouselPickFor, setCarouselPickFor] = useState(null) // planta a la que se le elige la foto del carrusel
   const [storeListSearch, setStoreListSearch] = useState('')
+  const [reporteAnio, setReporteAnio] = useState(String(new Date().getFullYear()))
+  const [reporteMesAbierto, setReporteMesAbierto] = useState(null)
   const [storeEditId, setStoreEditId] = useState(null) // fila de la pantalla Tienda abierta para editar tipo, precio y venta mínima
   const [storeModalOpen, setStoreModalOpen] = useState(false) // pantalla "Tienda" (poner/quitar, descuento, carrusel)
   const [storeDiscount, setStoreDiscount] = useState('') // % de descuento escrito en la pantalla Tienda
@@ -6106,6 +6108,7 @@ function Admin() {
     { key: 'pedidos', label: 'Ventas y Decrementos', icon: '🧾', count: pedidosPendientes },
     { key: 'ingresos', label: 'Ingresos', icon: '📦', count: ingresosEnCurso },
     { key: 'tabla', label: 'Tabla completa', icon: '📊', count: 0 },
+    { key: 'reporte', label: 'Reporte mensual', icon: '📈', count: 0 },
     { key: 'intercambios', label: 'Intercambios', icon: '🔄', count: intercambioItems.filter(x => x.direccion === 'recibido' && x.estado === 'cuarentena').length },
     { key: 'notas', label: 'Notas', icon: '📝', count: categoryNotes.length },
   ]
@@ -6123,6 +6126,7 @@ function Admin() {
     pedidos: '🧾 Ventas y Decrementos',
     ingresos: '📦 Ingresos',
     tabla: '📊 Tabla completa',
+    reporte: '📈 Reporte mensual',
     intercambios: '🔄 Intercambios',
     notas: '📝 Notas',
   }
@@ -6161,7 +6165,7 @@ function Admin() {
             <h3 style={{ margin: '0 0 4px 6px', color: '#4a3a2a', fontSize: '1.15rem', fontFamily: "'Playfair Display', Georgia, serif", textTransform: 'uppercase', letterSpacing: '0.02em', fontWeight: 800 }}>Menú</h3>
             <hr style={{ border: 'none', borderTop: `1px solid ${PILL_BORDER}`, margin: '0 0 6px' }} />
             {/* Orden del menú: Galería, Notas, Ingresos, Ventas, Intercambios, Tabla, Ver tienda y lo demás */}
-            {['galeria', 'notas', 'ingresos', 'pedidos', 'intercambios', 'tabla'].map(k => cards.find(c => c.key === k)).filter(Boolean).map(c => (
+            {['galeria', 'notas', 'ingresos', 'pedidos', 'intercambios', 'tabla', 'reporte'].map(k => cards.find(c => c.key === k)).filter(Boolean).map(c => (
               <button key={c.key} type="button" onClick={() => { setHomeMenuOpen(false); setView(c.key) }} style={sideMenuItemStyle}>
                 <span style={{ fontSize: 18 }}>{c.icon}</span> {c.label}{c.count ? ` (${c.count})` : ''}
               </button>
@@ -6177,7 +6181,7 @@ function Admin() {
             >
               <span style={{ fontSize: 18 }}>🌿</span> Ver tienda
             </button>
-            {cards.filter(c => !['galeria', 'notas', 'ingresos', 'pedidos', 'intercambios', 'tabla'].includes(c.key)).map(c => (
+            {cards.filter(c => !['galeria', 'notas', 'ingresos', 'pedidos', 'intercambios', 'tabla', 'reporte'].includes(c.key)).map(c => (
               <button key={c.key} type="button" onClick={() => { setHomeMenuOpen(false); setView(c.key) }} style={sideMenuItemStyle}>
                 <span style={{ fontSize: 18 }}>{c.icon}</span> {c.label}{c.count ? ` (${c.count})` : ''}
               </button>
@@ -9713,6 +9717,188 @@ function Admin() {
                       </>
                     )}
                   </>
+                )
+              })()}
+
+              {!loading && view === 'reporte' && (() => {
+                const fmtUsd = n => `$${(Number(n) || 0).toFixed(2)}`
+                const claveMes = iso => {
+                  const d = new Date(iso)
+                  return isNaN(d) ? null : `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+                }
+                const meses = {}
+                const mes = k => (meses[k] = meses[k] || { ventas: 0, porCobrar: 0, compras: 0, detVentas: [], detCompras: [] })
+
+                // VENTAS: facturas de venta (con sus envíos y varios), ventas sueltas con precio y pedidos web. Las canceladas no cuentan.
+                ventaLotes.filter(l => l.status !== 'cancelada').forEach(lote => {
+                  const lineas = decrementos.filter(d => d.lote_id === lote.id)
+                  if (lineas.length === 0) return
+                  const { total, lineas: conProrrateo } = ventaLoteProration(lote, lineas)
+                  const k = claveMes(lote.created_at)
+                  if (!k || !(total > 0)) return
+                  const f = mes(k)
+                  f.ventas += total
+                  const debe = conProrrateo.filter(l => sinCobrar(l)).reduce((acc, l) => acc + Math.max(0, l._lineTotal - Number(l.anticipo || 0)), 0)
+                  f.porCobrar += debe
+                  f.detVentas.push({ fecha: lote.created_at, quien: lote.cliente || '(sin nombre)', total, debe })
+                })
+                decrementos.filter(d => !d.lote_id && Number(d.unit_price) > 0).forEach(d => {
+                  const k = claveMes(d.created_at)
+                  if (!k) return
+                  const total = Number(d.unit_price) * Number(d.quantity)
+                  const debe = sinCobrar(d) ? Math.max(0, total - Number(d.anticipo || 0)) : 0
+                  const f = mes(k)
+                  f.ventas += total
+                  f.porCobrar += debe
+                  f.detVentas.push({ fecha: d.created_at, quien: d.plant_name || '(venta suelta)', total, debe })
+                })
+                orders.forEach(o => {
+                  const { total } = orderProration(o)
+                  const k = claveMes(o.created_at)
+                  if (!k || !(total > 0)) return
+                  const debe = pagadoDe(o) ? 0 : Math.max(0, total - Number(o.anticipo || 0))
+                  const f = mes(k)
+                  f.ventas += total
+                  f.porCobrar += debe
+                  f.detVentas.push({ fecha: o.created_at, quien: o.customer_name || '(pedido web)', total, debe })
+                })
+
+                // COMPRAS: lotes de Ingresos (con envíos y varios; "Jardín propio" no es compra), compras sueltas y semillas.
+                lotes.filter(l => !/^Jardín propio/.test(l.nota || '')).forEach(lote => {
+                  const lineas = compras.filter(c => c.lote_id === lote.id)
+                  if (lineas.length === 0) return
+                  const { total } = loteProration(lote, lineas)
+                  const k = claveMes(lote.created_at)
+                  if (!k || !(total > 0)) return
+                  const f = mes(k)
+                  f.compras += total
+                  f.detCompras.push({ fecha: lote.created_at, quien: lote.proveedor || '(sin proveedor)', total })
+                })
+                compras.filter(c => !c.lote_id && Number(c.unit_cost) > 0).forEach(c => {
+                  const k = claveMes(c.created_at)
+                  if (!k) return
+                  const total = Number(c.unit_cost) * Number(c.quantity)
+                  const f = mes(k)
+                  f.compras += total
+                  f.detCompras.push({ fecha: c.created_at, quien: c.proveedor || c.plant_name || '(compra suelta)', total })
+                })
+                seedBatches.filter(isSeedBatchVisibleInAdmin).forEach(sb => {
+                  const total = (Number(sb.costo) || 0) + (Number(sb.envio1) || 0) + (Number(sb.envio2) || 0) + (Number(sb.varios) || 0)
+                  const k = claveMes(sb.created_at)
+                  if (!k || !(total > 0)) return
+                  const f = mes(k)
+                  f.compras += total
+                  f.detCompras.push({ fecha: sb.created_at, quien: `🌰 ${sb.proveedor || seedBatchRawName(sb) || 'Semillas'}`, total })
+                })
+
+                const anios = [...new Set(Object.keys(meses).map(k => k.slice(0, 4)))].sort().reverse()
+                if (!anios.includes(reporteAnio) && reporteAnio !== 'todos' && anios.length > 0) { /* el año elegido no tiene datos: se muestra vacío */ }
+                const claves = Object.keys(meses).filter(k => reporteAnio === 'todos' || k.startsWith(reporteAnio)).sort().reverse()
+                const nombreMes = k => {
+                  const [y, m] = k.split('-').map(Number)
+                  const t = new Date(y, m - 1, 1).toLocaleDateString('es-EC', { month: 'long', year: 'numeric' })
+                  return t.charAt(0).toUpperCase() + t.slice(1)
+                }
+                const tot = claves.reduce((a, k) => ({ ventas: a.ventas + meses[k].ventas, porCobrar: a.porCobrar + meses[k].porCobrar, compras: a.compras + meses[k].compras }), { ventas: 0, porCobrar: 0, compras: 0 })
+                const celda = { padding: '6px 4px', borderBottom: '1px solid #e8dfc8', textAlign: 'right', fontSize: 13, whiteSpace: 'nowrap' }
+                const celdaMes = { ...celda, textAlign: 'left', whiteSpace: 'normal', fontWeight: 700, cursor: 'pointer' }
+                const verde = '#2f6b3a'
+                const rojo = '#b03434'
+                const exportarExcel = () => {
+                  const filas = claves.slice().reverse().map(k => ({
+                    Mes: nombreMes(k),
+                    'N.º ventas': meses[k].detVentas.length,
+                    Ventas: Number(meses[k].ventas.toFixed(2)),
+                    'Por cobrar': Number(meses[k].porCobrar.toFixed(2)),
+                    'N.º compras': meses[k].detCompras.length,
+                    Compras: Number(meses[k].compras.toFixed(2)),
+                    'Ventas - compras': Number((meses[k].ventas - meses[k].compras).toFixed(2)),
+                  }))
+                  filas.push({ Mes: 'TOTAL', Ventas: Number(tot.ventas.toFixed(2)), 'Por cobrar': Number(tot.porCobrar.toFixed(2)), Compras: Number(tot.compras.toFixed(2)), 'Ventas - compras': Number((tot.ventas - tot.compras).toFixed(2)) })
+                  const ws = XLSX.utils.json_to_sheet(filas)
+                  const wb = XLSX.utils.book_new()
+                  XLSX.utils.book_append_sheet(wb, ws, 'Reporte')
+                  XLSX.writeFile(wb, `reporte-diamantev-${reporteAnio}.xlsx`)
+                }
+                return (
+                  <div>
+                    <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 10 }}>
+                      <label style={{ fontSize: 14, fontWeight: 700 }}>Año:{' '}
+                        <select value={reporteAnio} onChange={e => { setReporteAnio(e.target.value); setReporteMesAbierto(null) }} style={{ fontSize: 14, padding: '6px 8px', borderRadius: 8, border: '1px solid #ccc' }}>
+                          {[...new Set([String(new Date().getFullYear()), ...anios])].sort().reverse().map(a => <option key={a} value={a}>{a}</option>)}
+                          <option value="todos">Todos</option>
+                        </select>
+                      </label>
+                      <button type="button" onClick={exportarExcel} disabled={claves.length === 0} style={{ fontSize: 13 }}>⬇️ Excel</button>
+                    </div>
+                    {claves.length === 0 ? (
+                      <p className="status-msg">No hay ventas ni compras en este período.</p>
+                    ) : (
+                      <div style={{ overflowX: 'auto' }}>
+                        <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 330 }}>
+                          <thead>
+                            <tr style={{ background: '#f3ecdd' }}>
+                              <th style={{ ...celdaMes, cursor: 'default' }}>Mes</th>
+                              <th style={celda}>Ventas</th>
+                              <th style={celda}>Por cobrar</th>
+                              <th style={celda}>Compras</th>
+                              <th style={celda}>Ventas − compras</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {claves.map(k => {
+                              const f = meses[k]
+                              const dif = f.ventas - f.compras
+                              const abierto = reporteMesAbierto === k
+                              return (
+                                <Fragment key={k}>
+                                  <tr onClick={() => setReporteMesAbierto(abierto ? null : k)} style={{ background: abierto ? '#faf5e8' : 'transparent' }}>
+                                    <td style={celdaMes}>{abierto ? '▾' : '▸'} {nombreMes(k)}</td>
+                                    <td style={celda}>{fmtUsd(f.ventas)}</td>
+                                    <td style={{ ...celda, color: f.porCobrar > 0 ? '#a8651c' : 'inherit' }}>{f.porCobrar > 0 ? fmtUsd(f.porCobrar) : '—'}</td>
+                                    <td style={celda}>{fmtUsd(f.compras)}</td>
+                                    <td style={{ ...celda, fontWeight: 700, color: dif >= 0 ? verde : rojo }}>{dif >= 0 ? '' : '−'}{fmtUsd(Math.abs(dif))}</td>
+                                  </tr>
+                                  {abierto && (
+                                    <tr>
+                                      <td colSpan={5} style={{ padding: '6px 6px 12px', background: '#faf5e8', borderBottom: '1px solid #e8dfc8' }}>
+                                        <p style={{ margin: '0 0 4px', fontSize: 12, fontWeight: 700, color: verde }}>Ventas ({f.detVentas.length})</p>
+                                        {f.detVentas.length === 0 && <p style={{ margin: 0, fontSize: 12, color: '#8a8a7a' }}>Sin ventas.</p>}
+                                        {f.detVentas.sort((a, b) => new Date(b.fecha) - new Date(a.fecha)).map((v, i) => (
+                                          <div key={`v${i}`} style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 12.5, padding: '2px 0' }}>
+                                            <span>{new Date(v.fecha).toLocaleDateString()} · {v.quien}</span>
+                                            <span style={{ whiteSpace: 'nowrap' }}>{fmtUsd(v.total)}{v.debe > 0 ? ` (debe ${fmtUsd(v.debe)})` : ''}</span>
+                                          </div>
+                                        ))}
+                                        <p style={{ margin: '10px 0 4px', fontSize: 12, fontWeight: 700, color: rojo }}>Compras ({f.detCompras.length})</p>
+                                        {f.detCompras.length === 0 && <p style={{ margin: 0, fontSize: 12, color: '#8a8a7a' }}>Sin compras.</p>}
+                                        {f.detCompras.sort((a, b) => new Date(b.fecha) - new Date(a.fecha)).map((c, i) => (
+                                          <div key={`c${i}`} style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 12.5, padding: '2px 0' }}>
+                                            <span>{new Date(c.fecha).toLocaleDateString()} · {c.quien}</span>
+                                            <span style={{ whiteSpace: 'nowrap' }}>{fmtUsd(c.total)}</span>
+                                          </div>
+                                        ))}
+                                      </td>
+                                    </tr>
+                                  )}
+                                </Fragment>
+                              )
+                            })}
+                            <tr style={{ background: '#f3ecdd' }}>
+                              <td style={{ ...celdaMes, cursor: 'default' }}>Total</td>
+                              <td style={{ ...celda, fontWeight: 700 }}>{fmtUsd(tot.ventas)}</td>
+                              <td style={{ ...celda, fontWeight: 700 }}>{tot.porCobrar > 0 ? fmtUsd(tot.porCobrar) : '—'}</td>
+                              <td style={{ ...celda, fontWeight: 700 }}>{fmtUsd(tot.compras)}</td>
+                              <td style={{ ...celda, fontWeight: 800, color: tot.ventas - tot.compras >= 0 ? verde : rojo }}>{tot.ventas - tot.compras >= 0 ? '' : '−'}{fmtUsd(Math.abs(tot.ventas - tot.compras))}</td>
+                            </tr>
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                    <p style={{ fontSize: 11.5, color: '#8a8a7a', margin: '10px 2px 0', lineHeight: 1.4 }}>
+                      Ventas incluye envíos y varios cobrados al cliente; no cuenta las ventas canceladas. Compras incluye envíos y semillas; no cuenta "Jardín propio". "Ventas − compras" es solo la diferencia del mes (las compras son plantas que quizá aún no vendes), no la utilidad exacta. Toca un mes para ver el detalle.
+                    </p>
+                  </div>
                 )
               })()}
 
