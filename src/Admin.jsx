@@ -1956,7 +1956,12 @@ function Admin() {
 
   async function uploadImage(originalFile, bucket = 'plant-photos') {
     const file = await comprimirImagen(originalFile)
-    const ext = (file.name || 'archivo').split('.').pop()
+    // La extensión se limpia: algunas fotos del celular vienen sin extensión o con espacios, tildes, dos puntos, etc. en el nombre,
+    // y eso hacía fallar la subida con "Invalid path specified in request URL".
+    const extPorTipo = { 'image/jpeg': 'jpg', 'image/jpg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'image/gif': 'gif', 'image/heic': 'heic', 'image/heif': 'heif', 'video/mp4': 'mp4', 'video/quicktime': 'mov', 'video/webm': 'webm' }
+    const partesNombre = String(file.name || '').split('.')
+    let ext = partesNombre.length > 1 ? partesNombre.pop().toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 5) : ''
+    if (!ext) ext = extPorTipo[file.type] || 'jpg'
     const fileName = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}.${ext}`
     const { error } = await supabaseStorage.storage.from(bucket).upload(fileName, file)
     if (error) { alert('Error al subir el archivo: ' + error.message); return null }
